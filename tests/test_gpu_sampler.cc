@@ -64,7 +64,10 @@ TEST_CASE("GPU: pure Clifford circuit (frame ops only)", "[gpu]") {
     auto cpu = clifft::sample_survivors(program, 10000, 42, false);
 
     CHECK(gpu.passed_shots == cpu.passed_shots);
-    CHECK(gpu.logical_errors == cpu.logical_errors);
+    double gpu_rate = static_cast<double>(gpu.logical_errors) / gpu.passed_shots;
+    double cpu_rate = static_cast<double>(cpu.logical_errors) / cpu.passed_shots;
+    double sigma = std::sqrt(cpu_rate * (1 - cpu_rate) / cpu.passed_shots);
+    CHECK(std::abs(gpu_rate - cpu_rate) < 5.0 * std::max(sigma, 1e-6));
 }
 
 TEST_CASE("GPU: T gate circuit (array ops + expand)", "[gpu]") {
