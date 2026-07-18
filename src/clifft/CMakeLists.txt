@@ -83,6 +83,24 @@ endif()
 
 target_compile_features(clifft_core PUBLIC cxx_std_20)
 
+# GPU backend (AMD HIP)
+if(CLIFFT_ENABLE_HIP)
+    enable_language(HIP)
+    if(NOT CMAKE_HIP_ARCHITECTURES)
+        set(CMAKE_HIP_ARCHITECTURES gfx942)
+    endif()
+    target_sources(clifft_core PRIVATE gpu/hip_sampler.hip gpu/device_program.cc)
+    set_source_files_properties(gpu/hip_sampler.hip PROPERTIES LANGUAGE HIP)
+    set_source_files_properties(gpu/hip_sampler.hip
+        PROPERTIES COMPILE_OPTIONS "-ffp-contract=off"
+    )
+    find_package(hip REQUIRED)
+    target_link_libraries(clifft_core PRIVATE hip::host)
+    target_compile_definitions(clifft_core PUBLIC CLIFFT_ENABLE_GPU)
+else()
+    target_sources(clifft_core PRIVATE gpu/hip_sampler_stub.cc gpu/device_program.cc)
+endif()
+
 # Code coverage instrumentation (only for Clifft code, not dependencies)
 if(CLIFFT_COVERAGE)
     target_compile_options(clifft_core PRIVATE --coverage -fprofile-arcs -ftest-coverage)

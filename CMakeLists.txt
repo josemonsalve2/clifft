@@ -7,6 +7,8 @@ if(POLICY CMP0141)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 endif()
 
+option(CLIFFT_ENABLE_HIP "Build GPU sampler with AMD HIP (ROCm)" OFF)
+
 project(clifft LANGUAGES CXX)
 
 # Version: derived from git tags (or VERSION file in sdists)
@@ -177,6 +179,15 @@ else()
         add_executable(profile_probability tools/profile/profile_probability.cpp)
         target_link_libraries(profile_probability PRIVATE clifft_core)
         target_include_directories(profile_probability PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_BINARY_DIR}/generated
+        )
+    endif()
+
+    if(CLIFFT_ENABLE_HIP)
+        add_executable(run_gpu tools/run_gpu.cpp)
+        target_link_libraries(run_gpu PRIVATE clifft_core)
+        target_include_directories(run_gpu PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
             ${CMAKE_CURRENT_BINARY_DIR}/generated
         )
