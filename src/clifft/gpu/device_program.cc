@@ -183,6 +183,17 @@ FlattenedProgram flatten_program(const CompiledModule& program) {
     flat.instrs.reserve(program.bytecode.size());
     for (const auto& instr : program.bytecode) {
         flat.instrs.push_back(flatten_instr(instr));
+        switch (instr.opcode) {
+            case Opcode::OP_ARRAY_ROT:
+            case Opcode::OP_ARRAY_U2:
+            case Opcode::OP_ARRAY_U4:
+            case Opcode::OP_EXPAND_ROT:
+            case Opcode::OP_EXP_VAL:
+                flat.has_extended_opcodes = true;
+                break;
+            default:
+                break;
+        }
     }
 
     const auto& pool = program.constant_pool;

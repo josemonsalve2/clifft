@@ -28,6 +28,7 @@ struct FlattenedProgram {
     uint32_t total_meas_slots = 0;
     uint32_t num_observables = 0;
     uint32_t num_exp_vals = 0;
+    bool has_extended_opcodes = false;
 };
 
 void validate_program(const CompiledModule& program);

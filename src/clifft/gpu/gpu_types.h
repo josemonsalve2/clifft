@@ -104,6 +104,7 @@ struct GpuProgram {
     const GpuFusedU2Entry* fused_u2;
     const GpuFusedU4Entry* fused_u4;
     const GpuExpValMask* exp_val_masks;
+    bool has_extended_opcodes;
 };
 
 struct BlockCounts {

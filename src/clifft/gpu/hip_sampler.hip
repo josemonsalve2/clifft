@@ -734,18 +734,6 @@ __device__ void execute_shot(const GpuProgram& program, Rng& rng, ShotState& st)
             case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_T_DAG):
                 expand_t(st, instr.axis_1, true);
                 break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_ROT):
-                expand_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_ROT):
-                array_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U2):
-                array_u2(st, program, instr.axis_1, instr.a);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U4):
-                array_u4(st, program, instr.axis_1, instr.axis_2, instr.a);
-                break;
             case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_DORMANT_STATIC):
                 if (instr.flags & kFlagIdentity) {
                     st.meas[instr.a] = (instr.flags & kFlagSign) ? 1 : 0;
@@ -797,12 +785,28 @@ __device__ void execute_shot(const GpuProgram& program, Rng& rng, ShotState& st)
             case static_cast<uint8_t>(clifft::Opcode::OP_OBSERVABLE):
                 exec_observable(st, program, instr);
                 break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXP_VAL):
-                exec_exp_val(st, program, instr.a, instr.b);
-                break;
             default:
-                st.discarded = true;
-                return;
+                switch (instr.opcode) {
+                    case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_ROT):
+                        expand_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
+                        break;
+                    case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_ROT):
+                        array_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
+                        break;
+                    case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U2):
+                        array_u2(st, program, instr.axis_1, instr.a);
+                        break;
+                    case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U4):
+                        array_u4(st, program, instr.axis_1, instr.axis_2, instr.a);
+                        break;
+                    case static_cast<uint8_t>(clifft::Opcode::OP_EXP_VAL):
+                        exec_exp_val(st, program, instr.a, instr.b);
+                        break;
+                    default:
+                        st.discarded = true;
+                        return;
+                }
+                break;
         }
     }
 }
@@ -1890,6 +1894,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         gpu_program.fused_u2 = buffers.fused_u2;
         gpu_program.fused_u4 = buffers.fused_u4;
         gpu_program.exp_val_masks = buffers.exp_val_masks;
+        gpu_program.has_extended_opcodes = flat.has_extended_opcodes;
 
         hipEvent_t start{};
         hipEvent_t stop{};
