@@ -556,14 +556,14 @@ __device__ void exec_observable(ShotState& st, const GpuProgram& program, const 
     st.obs[instr.b] ^= parity;
 }
 
-__device__ void array_rot(ShotState& st, uint32_t axis, double z_re, double z_im) {
+__device__ __noinline__ void array_rot(ShotState& st, uint32_t axis, double z_re, double z_im) {
     bool px = bit_get(st.px, axis);
     if (axis >= st.active_k) return;
     double im = px ? -z_im : z_im;
     apply_phase(st, axis, {static_cast<float>(z_re), static_cast<float>(im)});
 }
 
-__device__ void expand_rot(ShotState& st, uint32_t axis, double z_re, double z_im) {
+__device__ __noinline__ void expand_rot(ShotState& st, uint32_t axis, double z_re, double z_im) {
     uint64_t half = 1ULL << st.active_k;
     bool px = bit_get(st.px, axis);
     double im = px ? -z_im : z_im;
@@ -574,7 +574,7 @@ __device__ void expand_rot(ShotState& st, uint32_t axis, double z_re, double z_i
     st.active_k++;
 }
 
-__device__ void array_u2(ShotState& st, const GpuProgram& program, uint32_t axis, uint32_t cp_idx) {
+__device__ __noinline__ void array_u2(ShotState& st, const GpuProgram& program, uint32_t axis, uint32_t cp_idx) {
     const auto& entry = program.fused_u2[cp_idx];
     uint8_t in_state = (bit_get(st.pz, axis) ? 2 : 0) | (bit_get(st.px, axis) ? 1 : 0);
     uint8_t out = entry.out_states[in_state];
@@ -593,7 +593,7 @@ __device__ void array_u2(ShotState& st, const GpuProgram& program, uint32_t axis
     }
 }
 
-__device__ void array_u4(ShotState& st, const GpuProgram& program,
+__device__ __noinline__ void array_u4(ShotState& st, const GpuProgram& program,
                          uint32_t axis_lo, uint32_t axis_hi, uint32_t cp_idx) {
     const auto& node = program.fused_u4[cp_idx];
     uint8_t px_lo = bit_get(st.px, axis_lo) ? 1 : 0;
@@ -630,7 +630,7 @@ __device__ void array_u4(ShotState& st, const GpuProgram& program,
     }
 }
 
-__device__ void exec_exp_val(ShotState& st, const GpuProgram& program,
+__device__ __noinline__ void exec_exp_val(ShotState& st, const GpuProgram& program,
                              uint32_t cp_idx, uint32_t ev_idx) {
     const GpuExpValMask& mask = program.exp_val_masks[cp_idx];
     bool frame_sign = mask.sign != 0;
@@ -1180,17 +1180,15 @@ __device__ void coop_swap_meas_interfere(CoopShotState& st, Rng& rng, uint32_t f
 }
 
 __device__ void coop_array_rot(CoopShotState& st, uint32_t axis, double z_re, double z_im) {
-    if (threadIdx.x == 0) {
+    if (axis < *st.active_k) {
         bool px = bit_get(st.px, axis);
-        if (axis < *st.active_k) {
-            double im = px ? -z_im : z_im;
-            uint64_t axis_bit = 1ULL << axis;
-            uint64_t iters = 1ULL << (*st.active_k - 1);
-            GpuComplex phase{static_cast<float>(z_re), static_cast<float>(im)};
-            for (uint64_t i = 0; i < iters; ++i) {
-                uint64_t idx = scatter_bits_1(i, axis) | axis_bit;
-                st.v[idx] = cmul(st.v[idx], phase);
-            }
+        double im = px ? -z_im : z_im;
+        uint64_t axis_bit = 1ULL << axis;
+        uint64_t iters = 1ULL << (*st.active_k - 1);
+        GpuComplex phase{static_cast<float>(z_re), static_cast<float>(im)};
+        for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
+            uint64_t idx = scatter_bits_1(i, axis) | axis_bit;
+            st.v[idx] = cmul(st.v[idx], phase);
         }
     }
     __syncthreads();
