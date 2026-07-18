@@ -1213,21 +1213,25 @@ __device__ void coop_expand_rot(CoopShotState& st, uint32_t axis, double z_re, d
     __syncthreads();
 }
 
+__device__ __noinline__ void coop_u2_sweep(GpuComplex* v, uint32_t active_k,
+                                           uint32_t axis, const GpuComplex* mat) {
+    uint64_t axis_bit = 1ULL << axis;
+    uint64_t iters = 1ULL << (active_k - 1);
+    for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
+        uint64_t idx0 = scatter_bits_1(i, axis);
+        uint64_t idx1 = idx0 | axis_bit;
+        GpuComplex a = v[idx0], b = v[idx1];
+        v[idx0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
+        v[idx1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
+    }
+}
+
 __device__ void coop_array_u2(CoopShotState& st, const GpuProgram& program,
                               uint32_t axis, uint32_t cp_idx) {
     const auto& entry = program.fused_u2[cp_idx];
     uint8_t in_state = (bit_get(st.pz, axis) ? 2 : 0) | (bit_get(st.px, axis) ? 1 : 0);
-    const GpuComplex* mat = entry.matrices[in_state];
     if (axis < *st.active_k) {
-        uint64_t axis_bit = 1ULL << axis;
-        uint64_t iters = 1ULL << (*st.active_k - 1);
-        for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-            uint64_t idx0 = scatter_bits_1(i, axis);
-            uint64_t idx1 = idx0 | axis_bit;
-            GpuComplex a = st.v[idx0], b = st.v[idx1];
-            st.v[idx0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
-            st.v[idx1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
-        }
+        coop_u2_sweep(st.v, *st.active_k, axis, entry.matrices[in_state]);
     }
     __syncthreads();
     if (threadIdx.x == 0) {
@@ -1236,6 +1240,30 @@ __device__ void coop_array_u2(CoopShotState& st, const GpuProgram& program,
         bit_set(st.pz, axis, (out & 2) != 0);
     }
     __syncthreads();
+}
+
+__device__ __noinline__ void coop_u4_sweep(GpuComplex* v, uint32_t active_k,
+                                           uint32_t axis_lo, uint32_t axis_hi,
+                                           const GpuComplex mat[4][4]) {
+    uint64_t lo_bit = 1ULL << axis_lo;
+    uint64_t hi_bit = 1ULL << axis_hi;
+    uint64_t iters = 1ULL << (active_k - 2);
+    for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
+        uint64_t base = scatter_bits_2(i, axis_lo, axis_hi);
+        uint64_t i0 = base;
+        uint64_t i1 = base | lo_bit;
+        uint64_t i2 = base | hi_bit;
+        uint64_t i3 = base | lo_bit | hi_bit;
+        GpuComplex v0 = v[i0], v1 = v[i1], v2 = v[i2], v3 = v[i3];
+        v[i0] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
+                     cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3])));
+        v[i1] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
+                     cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3])));
+        v[i2] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
+                     cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3])));
+        v[i3] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
+                     cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
+    }
 }
 
 __device__ void coop_array_u4(CoopShotState& st, const GpuProgram& program,
@@ -1248,26 +1276,7 @@ __device__ void coop_array_u4(CoopShotState& st, const GpuProgram& program,
     uint8_t in_state = (pz_hi << 3) | (px_hi << 2) | (pz_lo << 1) | px_lo;
     const auto& entry = node.entries[in_state];
     if (axis_hi < *st.active_k) {
-        uint64_t lo_bit = 1ULL << axis_lo;
-        uint64_t hi_bit = 1ULL << axis_hi;
-        uint64_t iters = 1ULL << (*st.active_k - 2);
-        for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-            uint64_t base = scatter_bits_2(i, axis_lo, axis_hi);
-            uint64_t i0 = base;
-            uint64_t i1 = base | lo_bit;
-            uint64_t i2 = base | hi_bit;
-            uint64_t i3 = base | lo_bit | hi_bit;
-            GpuComplex v0 = st.v[i0], v1 = st.v[i1], v2 = st.v[i2], v3 = st.v[i3];
-            const auto& mat = entry.matrix;
-            st.v[i0] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
-                            cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3])));
-            st.v[i1] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
-                            cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3])));
-            st.v[i2] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
-                            cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3])));
-            st.v[i3] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
-                            cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
-        }
+        coop_u4_sweep(st.v, *st.active_k, axis_lo, axis_hi, entry.matrix);
     }
     __syncthreads();
     if (threadIdx.x == 0) {
@@ -1293,37 +1302,33 @@ __device__ void coop_exec_exp_val(CoopShotState& st, const GpuProgram& program,
         uint64_t active_mask_w0 = (k >= 64) ? ~uint64_t{0} : ((k == 0) ? 0 : ((uint64_t{1} << k) - 1));
         uint64_t dormant_x = mask.x[0] & ~active_mask_w0;
         if (k < 64) dormant_x |= mask.x[1];
-        if (dormant_x != 0) { st.exp_vals[ev_idx] = 0.0; return; }
-
-        uint64_t x_active = mask.x[0] & active_mask_w0;
-        uint64_t z_active = mask.z[0] & active_mask_w0;
-
-        uint32_t yz_count = __popcll(x_active & z_active);
-        double phase_re = 0.0, phase_im = 0.0;
-        switch (yz_count & 3) {
-            case 0: phase_re = 1.0; break;
-            case 1: phase_im = 1.0; break;
-            case 2: phase_re = -1.0; break;
-            case 3: phase_im = -1.0; break;
+        if (dormant_x != 0) { st.exp_vals[ev_idx] = 0.0; }
+        else {
+            uint64_t x_active = mask.x[0] & active_mask_w0;
+            uint64_t z_active = mask.z[0] & active_mask_w0;
+            uint32_t yz_count = __popcll(x_active & z_active);
+            double phase_re = 0.0, phase_im = 0.0;
+            switch (yz_count & 3) {
+                case 0: phase_re = 1.0; break;
+                case 1: phase_im = 1.0; break;
+                case 2: phase_re = -1.0; break;
+                case 3: phase_im = -1.0; break;
+            }
+            if (frame_sign) { phase_re = -phase_re; phase_im = -phase_im; }
+            uint64_t dim = uint64_t{1} << k;
+            double num_re = 0.0, num_im = 0.0, denom = 0.0;
+            for (uint64_t j = 0; j < dim; ++j) {
+                denom += cnorm(st.v[j]);
+                uint64_t j_xor = j ^ x_active;
+                double z_sign = (__popcll(j & z_active) & 1) ? -1.0 : 1.0;
+                double a_re = static_cast<double>(st.v[j_xor].re);
+                double a_im = -static_cast<double>(st.v[j_xor].im);
+                num_re += (a_re * z_sign * st.v[j].re - a_im * z_sign * st.v[j].im);
+                num_im += (a_re * z_sign * st.v[j].im + a_im * z_sign * st.v[j].re);
+            }
+            double result_re = num_re * phase_re - num_im * phase_im;
+            st.exp_vals[ev_idx] = (denom > 0.0) ? result_re / denom : 0.0;
         }
-        if (frame_sign) { phase_re = -phase_re; phase_im = -phase_im; }
-
-        uint64_t dim = uint64_t{1} << k;
-        double num_re = 0.0, num_im = 0.0, denom = 0.0;
-        for (uint64_t j = 0; j < dim; ++j) {
-            double norm_j = cnorm(st.v[j]);
-            denom += norm_j;
-            uint64_t j_xor = j ^ x_active;
-            double z_sign = (__popcll(j & z_active) & 1) ? -1.0 : 1.0;
-            double a_re = static_cast<double>(st.v[j_xor].re);
-            double a_im = static_cast<double>(-st.v[j_xor].im);
-            double b_re = z_sign * static_cast<double>(st.v[j].re);
-            double b_im = z_sign * static_cast<double>(st.v[j].im);
-            num_re += a_re * b_re - a_im * b_im;
-            num_im += a_re * b_im + a_im * b_re;
-        }
-        double result_re = num_re * phase_re - num_im * phase_im;
-        st.exp_vals[ev_idx] = (denom > 0.0) ? result_re / denom : 0.0;
     }
     __syncthreads();
 }
