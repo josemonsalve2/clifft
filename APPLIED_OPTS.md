@@ -31,6 +31,46 @@ frame ops in the coop interpreter) and LDS right-sizing (`red0[1024]` → `red0[
 
 **Found by:** GEAK kernel_workflow (14 agents, budget=3, 1M tokens)
 
+**Before:**
+```cpp
+__device__ void coop_reduce2(CoopShotState& st, double& out0, double& out1) {
+    st.red0[threadIdx.x] = out0;
+    st.red1[threadIdx.x] = out1;
+    __syncthreads();
+    for (uint32_t s = blockDim.x >> 1; s > 0; s >>= 1) {
+        if (threadIdx.x < s) {
+            st.red0[threadIdx.x] += st.red0[threadIdx.x + s];
+            st.red1[threadIdx.x] += st.red1[threadIdx.x + s];
+        }
+        __syncthreads();  // 8 barriers for blockDim=256
+    }
+    out0 = st.red0[0]; out1 = st.red1[0];
+}
+```
+
+**After:**
+```cpp
+__device__ void coop_reduce2(CoopShotState& st, double& out0, double& out1) {
+    // Phase 1: intra-wavefront (no barriers, no shared memory)
+    for (int offset = 32; offset > 0; offset >>= 1) {
+        out0 += __shfl_xor(out0, offset);
+        out1 += __shfl_xor(out1, offset);
+    }
+    // Phase 2: inter-wavefront (1 barrier, 4 LDS slots)
+    uint32_t warp_id = threadIdx.x / 64;
+    uint32_t lane_id = threadIdx.x % 64;
+    if (lane_id == 0) { st.red0[warp_id] = out0; st.red1[warp_id] = out1; }
+    __syncthreads();  // 1 barrier total
+    if (threadIdx.x < 4) {
+        out0 = st.red0[threadIdx.x]; out1 = st.red1[threadIdx.x];
+        for (int offset = 2; offset > 0; offset >>= 1) {
+            out0 += __shfl_xor(out0, offset);
+            out1 += __shfl_xor(out1, offset);
+        }
+    }
+}
+```
+
 ---
 
 ## OPT-2: `__noinline__` on Cooperative Sweep Functions (+1.4% all tiers)
@@ -54,6 +94,51 @@ triggers "unsupported expression in static initializer: addrspacecast" because
 HIP can't pass shared-memory pointers through struct initialization in
 `__noinline__` function prologues.
 
+**Before:**
+```cpp
+__device__ void coop_array_u2(CoopShotState& st, const GpuProgram& program,
+                               uint32_t axis, uint32_t cp_idx) {
+    // ... frame update ...
+    if (axis >= *st.active_k) return;
+    const GpuComplex* mat = program.fused_u2[cp_idx].matrices[in_state];
+    uint32_t axis_bit = 1u << axis;
+    uint32_t iters = 1u << (*st.active_k - 1);
+    for (uint32_t i = threadIdx.x; i < iters; i += blockDim.x) {
+        uint32_t idx0 = scatter_bits_1(i, axis);
+        uint32_t idx1 = idx0 | axis_bit;
+        GpuComplex a = st.v[idx0], b = st.v[idx1];
+        // 4x4 complex matrix-vector multiply inlined here
+        st.v[idx0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
+        st.v[idx1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
+    }
+    __syncthreads();
+}
+```
+
+**After:**
+```cpp
+// Computation extracted into __noinline__ helper with raw pointers
+__device__ __noinline__ void coop_u2_sweep(
+    GpuComplex* v, uint32_t active_k, uint32_t axis, const GpuComplex* mat) {
+    uint32_t axis_bit = 1u << axis;
+    uint32_t iters = 1u << (active_k - 1);
+    for (uint32_t i = threadIdx.x; i < iters; i += blockDim.x) {
+        uint32_t idx0 = scatter_bits_1(i, axis);
+        uint32_t idx1 = idx0 | axis_bit;
+        GpuComplex a = v[idx0], b = v[idx1];
+        v[idx0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
+        v[idx1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
+    }
+    // No __syncthreads here — caller handles it
+}
+
+__device__ void coop_array_u2(CoopShotState& st, ...) {
+    // ... frame update ...
+    coop_u2_sweep(st.v, *st.active_k, axis, mat);
+    __syncthreads();  // Barrier stays in wrapper
+}
+```
+
 ---
 
 ## OPT-3: Precomputed Scatter-Bits LUT (pending measurement)
@@ -74,6 +159,39 @@ use `scatter_lut[i]` (1 LDS load) instead of the scalar computation.
 
 **Cache:** The LUT is only recomputed when `(active_k, axis)` changes. Consecutive
 same-axis ops reuse the cached table. Cache invalidation on expand/contract ops.
+
+**Before:**
+```cpp
+__device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
+    uint32_t iters = 1u << (*st.active_k - 1);
+    for (uint32_t i = threadIdx.x; i < iters; i += blockDim.x) {
+        uint64_t idx0 = scatter_bits_1(i, axis);  // ~15 SALU per call
+        uint64_t idx1 = idx0 | (1ULL << axis);
+        GpuComplex a = st.v[idx0], b = st.v[idx1];
+        st.v[idx0] = cscale(cadd(a, b), kInvSqrt2);
+        st.v[idx1] = cscale(csub(a, b), kInvSqrt2);
+    }
+    __syncthreads();
+}
+```
+
+**After:**
+```cpp
+__device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
+    // Precompute once (all threads cooperate), cached across calls
+    ensure_scatter_1(st, axis);
+    uint32_t iters = 1u << (*st.active_k - 1);
+    uint32_t axis_bit = 1u << axis;
+    for (uint32_t i = threadIdx.x; i < iters; i += blockDim.x) {
+        uint32_t idx0 = st.scatter_lut[i];  // 1 LDS load instead of ~15 SALU
+        uint32_t idx1 = idx0 | axis_bit;
+        GpuComplex a = st.v[idx0], b = st.v[idx1];
+        st.v[idx0] = cscale(cadd(a, b), kInvSqrt2);
+        st.v[idx1] = cscale(csub(a, b), kInvSqrt2);
+    }
+    __syncthreads();
+}
+```
 
 ---
 
