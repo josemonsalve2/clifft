@@ -1,5 +1,7 @@
 #include "clifft/gpu/device_program.h"
 
+#include <algorithm>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -138,6 +140,127 @@ void append_target_lists(const std::vector<std::vector<uint32_t>>& lists,
         targets.insert(targets.end(), list.begin(), list.end());
         offsets.push_back(static_cast<uint32_t>(targets.size()));
     }
+}
+
+// ---------------------------------------------------------------------------
+// K-profile segment analysis for the hybrid kernel.
+// ---------------------------------------------------------------------------
+//
+// Walks the compile-time active_k history and groups bytecode instructions
+// into segments at k-transition boundaries. Each segment gets a tier
+// assignment (per-thread / shared-coop / global-coop) based on its local
+// peak k value.
+
+/// Extract raw segments from the active_k history.
+/// Splits occur at transitions where k drops to 0 from k > 0.
+std::vector<GpuSegment> extract_k_segments(
+    const std::vector<uint32_t>& k_hist)
+{
+    std::vector<GpuSegment> segments;
+    if (k_hist.empty()) return segments;
+
+    uint32_t seg_start = 0;
+    uint32_t local_peak = k_hist[0];
+
+    for (size_t i = 1; i < k_hist.size(); ++i) {
+        uint32_t k_prev = k_hist[i - 1];
+        uint32_t k_cur = k_hist[i];
+
+        local_peak = std::max(local_peak, k_cur);
+
+        // Split at transitions from k > 0 to k = 0
+        if (k_prev > 0 && k_cur == 0) {
+            segments.push_back({seg_start, static_cast<uint32_t>(i),
+                                local_peak, tier_for_peak_k(local_peak)});
+            seg_start = static_cast<uint32_t>(i);
+            local_peak = 0;
+        }
+    }
+    // Close final segment
+    segments.push_back({seg_start, static_cast<uint32_t>(k_hist.size()),
+                        local_peak, tier_for_peak_k(local_peak)});
+    return segments;
+}
+
+/// Merge consecutive segments that are too small to justify a split boundary.
+/// Adjacent segments are merged if either is shorter than min_instructions,
+/// as long as they have the same tier. If tiers differ, only merge the
+/// smaller segment into its neighbor (adopting the higher tier).
+std::vector<GpuSegment> merge_small_segments(
+    const std::vector<GpuSegment>& segments, uint32_t min_instructions = 64)
+{
+    std::vector<GpuSegment> merged;
+    if (segments.empty()) return merged;
+
+    merged.push_back(segments[0]);
+    for (size_t i = 1; i < segments.size(); ++i) {
+        auto& prev = merged.back();
+        const auto& cur = segments[i];
+        uint32_t prev_len = prev.bc_end - prev.bc_start;
+        uint32_t cur_len = cur.bc_end - cur.bc_start;
+
+        // Merge if either is too small
+        if (prev_len < min_instructions || cur_len < min_instructions) {
+            prev.bc_end = cur.bc_end;
+            prev.local_peak_k = std::max(prev.local_peak_k, cur.local_peak_k);
+            prev.tier = tier_for_peak_k(prev.local_peak_k);
+        } else {
+            merged.push_back(cur);
+        }
+    }
+    return merged;
+}
+
+/// Determine if the hybrid kernel is profitable for the given segments.
+/// Returns true when segments span multiple tiers and enough instructions
+/// benefit from tier downgrading to overcome dispatch overhead.
+bool should_use_hybrid(const std::vector<GpuSegment>& segments) {
+    if (segments.size() <= 1) return false;
+
+    // Check that segments span multiple tiers
+    std::set<uint8_t> tiers;
+    for (const auto& s : segments) tiers.insert(s.tier);
+    if (tiers.size() <= 1) return false;
+
+    // Compute total instructions
+    uint32_t total_instrs = 0;
+    for (const auto& s : segments) total_instrs += s.bc_end - s.bc_start;
+    if (total_instrs < 256) return false;
+
+    // Compute the global tier (what the whole-program tier would be)
+    uint32_t global_peak = 0;
+    for (const auto& s : segments) global_peak = std::max(global_peak, s.local_peak_k);
+    uint8_t global_tier = tier_for_peak_k(global_peak);
+
+    // Count instructions that would be downgraded from global_tier
+    uint32_t downgraded_instrs = 0;
+    for (const auto& s : segments) {
+        if (s.tier < global_tier) {
+            downgraded_instrs += s.bc_end - s.bc_start;
+        }
+    }
+
+    // Profitability: at least 20% of instructions benefit (conservative).
+    // The persistent kernel has zero launch overhead between segments, so
+    // even modest downgrade fractions are beneficial.
+    return downgraded_instrs > total_instrs / 5;
+}
+
+/// Build the segment table for the hybrid kernel from a CompiledModule.
+/// Populates the segments vector and use_hybrid_kernel flag in the
+/// FlattenedProgram.
+void build_segments(FlattenedProgram& flat, const CompiledModule& program) {
+    const auto& k_hist = program.source_map.active_k_history();
+    if (k_hist.empty() || k_hist.size() != program.bytecode.size()) {
+        // No active_k history or size mismatch -- skip segment analysis.
+        flat.use_hybrid_kernel = false;
+        return;
+    }
+
+    auto raw_segments = extract_k_segments(k_hist);
+    auto segments = merge_small_segments(raw_segments, 64);
+    flat.use_hybrid_kernel = should_use_hybrid(segments);
+    flat.segments = std::move(segments);
 }
 
 }  // namespace
@@ -286,6 +409,9 @@ FlattenedProgram flatten_program(const CompiledModule& program) {
         evm.sign = view.sign() ? 1 : 0;
         flat.exp_val_masks.push_back(evm);
     }
+
+    // Build segment table from compile-time active_k profile.
+    build_segments(flat, program);
 
     return flat;
 }
