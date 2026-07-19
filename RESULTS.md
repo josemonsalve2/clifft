@@ -583,3 +583,23 @@ All optimizations applied:
 3. GpuComplex 8-byte alignment (vectorized LDS)
 4. `__shfl` gate matrix broadcast (reduced global loads)
 5. `load_complex64`/`store_complex64` (64-bit LDS loads)
+
+## All-Workspace Benchmark (Pre-built, Same Node)
+
+All approach branches benchmarked using pre-built workspace binaries.
+Note: workspace branches (svm-optimized, split, per-op, hipgraph) have GEAK warp-shuffle
+but NOT the load_complex64 or NUMA optimizations (compiled-kernel branch only).
+
+| Workspace | D5 rank=10 | D3 rank=4 | QEC rank=0 | D7 rank=19 |
+|-----------|-----------|----------|-----------|-----------|
+| **compiled-kernel** | 5.40M | 43.6M | **50.0M** | **145.8K** |
+| svm-optimized | **5.59M** | 41.6M | 47.1M | 145.7K |
+| split-kernel | 5.22M | 41.4M | 46.6M | — |
+| per-op-kernel | 5.61M | **44.6M** | 48.6M | — |
+| hipgraph | 5.19M | **44.9M** | 50.0M | — |
+
+**Observations:**
+- svm-optimized leads on coop tier (D5 rank=10): 5.59M vs 5.40M — the 7 SVM micro-opts help for coop
+- compiled-kernel leads on global-coop (D7 rank=19): 145.8K — the NUMA per-XCD counters matter
+- per-op and hipgraph are competitive on per-thread circuits (D3 rank=4, QEC rank=0)
+- At rank=19, all approaches converge to 145-146K shots/s (HBM bandwidth ceiling)
