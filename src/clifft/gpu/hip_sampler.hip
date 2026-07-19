@@ -847,6 +847,9 @@ struct CoopShotState {
     uint32_t* cached_axis2;      // last axis2 used for 2-axis LUT
     uint32_t* cached_lut_k;      // last active_k used for LUT
     uint32_t* cached_lut_mode;   // 0=none, 1=scatter_1, 2=scatter_2
+    // LDS tile buffers for global-coop kernel pipelining (nullptr when unused)
+    GpuComplex* lds_tile_a;      // first LDS tile  (kTileElems elements)
+    GpuComplex* lds_tile_b;      // second LDS tile (kTileElems elements)
 };
 
 // Precompute scatter_bits_1 LUT for all i in [0, 2^(active_k-1)).
@@ -1477,6 +1480,711 @@ __device__ void coop_exec_exp_val(CoopShotState& st, const GpuProgram& program,
     __syncthreads();
 }
 
+// ============================================================================
+// LDS-pipelined tiling for global-coop kernel (rank 11-19)
+//
+// The ThunderKittens/HipKittens pattern: tile the amplitude array through LDS
+// to replace 400-cycle HBM accesses with 20-cycle LDS accesses.
+//
+// Tiling strategy:
+//   - For operations where both elements of a pair are within the same tile
+//     (axis_bit < kTileElems), use a single tile: load tile, process, store.
+//   - For operations where the pair spans two tiles (axis_bit >= kTileElems),
+//     use two tiles (tile_a, tile_b): load both, process cross-tile pairs,
+//     store both back.
+//   - For single-element operations (phase, cz), use a single tile.
+//
+// All tiled functions are guarded by `st.lds_tile_a != nullptr` and fall
+// through to the existing direct-HBM path when tiles are unavailable.
+// ============================================================================
+
+// Cooperative load: HBM[base..base+count) -> LDS tile[0..count)
+__device__ __forceinline__ void tile_load(GpuComplex* tile, const GpuComplex* hbm,
+                                          uint64_t base, uint32_t count) {
+    for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+        store_complex64(&tile[i], load_complex64(&hbm[base + i]));
+    }
+    __syncthreads();
+}
+
+// Cooperative store: LDS tile[0..count) -> HBM[base..base+count)
+__device__ __forceinline__ void tile_store(GpuComplex* hbm, const GpuComplex* tile,
+                                           uint64_t base, uint32_t count) {
+    for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+        store_complex64(&hbm[base + i], load_complex64(&tile[i]));
+    }
+    __syncthreads();
+}
+
+// --- Tiled Hadamard (1-qubit butterfly) ---
+// For axis_bit < kTileElems: both v[idx0] and v[idx0|axis_bit] are in the
+// same tile (since the tile covers a contiguous range and the bit distance
+// is less than the tile size).  For axis_bit >= kTileElems: we load two
+// tiles — one for the low-bit region, one for the high-bit region.
+__device__ void tiled_array_h(CoopShotState& st, uint32_t axis) {
+    uint64_t axis_bit = 1ULL << axis;
+    uint64_t array_size = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+    GpuComplex* tile_b = st.lds_tile_b;
+
+    if (axis_bit < kTileElems) {
+        // Intra-tile case: both butterfly partners are within the same tile.
+        // For each contiguous block of kTileElems in the global array,
+        // process all pairs (j, j|axis_bit) where j&axis_bit==0.
+        for (uint64_t base = 0; base < array_size; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), array_size - base));
+            tile_load(tile_a, st.v, base, count);
+
+            // Iterate over local indices j with axis bit clear.
+            // Total pairs = count / 2.
+            uint32_t pairs = count >> 1;
+            for (uint32_t p = threadIdx.x; p < pairs; p += blockDim.x) {
+                // Map pair index p to local tile index j with axis bit clear:
+                // insert a zero at the axis position.
+                uint32_t j = static_cast<uint32_t>(insert_zero_bit(p, axis));
+                GpuComplex a = load_complex64(&tile_a[j]);
+                GpuComplex b = load_complex64(&tile_a[j | axis_bit]);
+                store_complex64(&tile_a[j], cscale(cadd(a, b), kInvSqrt2));
+                store_complex64(&tile_a[j | axis_bit], cscale(csub(a, b), kInvSqrt2));
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, base, count);
+        }
+    } else {
+        // Cross-tile case: the butterfly partner is axis_bit away in HBM.
+        // We iterate over contiguous blocks that do NOT have the axis bit set,
+        // loading tile_a from that block and tile_b from the corresponding
+        // block with axis_bit set.
+        //
+        // When axis >= kTileBits, the index space partitions cleanly:
+        // addresses with axis bit = 0 form one contiguous half,
+        // addresses with axis bit = 1 form another (interleaved at granularity
+        // >= kTileElems).  We iterate in chunks of kTileElems over each half.
+        uint64_t half_array = array_size >> 1;
+        for (uint64_t off = 0; off < half_array; off += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), half_array - off));
+            // actual_base: the global index for this chunk of the "low" half.
+            uint64_t actual_base = insert_zero_bit(off, axis);
+            tile_load(tile_a, st.v, actual_base, count);
+            tile_load(tile_b, st.v, actual_base | axis_bit, count);
+
+            for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+                GpuComplex a = load_complex64(&tile_a[i]);
+                GpuComplex b = load_complex64(&tile_b[i]);
+                store_complex64(&tile_a[i], cscale(cadd(a, b), kInvSqrt2));
+                store_complex64(&tile_b[i], cscale(csub(a, b), kInvSqrt2));
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, actual_base, count);
+            tile_store(st.v, tile_b, actual_base | axis_bit, count);
+        }
+    }
+
+    if (threadIdx.x == 0) {
+        bool px = bit_get(st.px, axis);
+        bool pz = bit_get(st.pz, axis);
+        bit_set(st.px, axis, pz);
+        bit_set(st.pz, axis, px);
+    }
+    __syncthreads();
+}
+
+// --- Tiled phase application (diagonal gate) ---
+// Applies phase to all elements with the axis bit set.
+__device__ void tiled_apply_phase(CoopShotState& st, uint32_t axis, GpuComplex phase) {
+    uint64_t axis_bit = 1ULL << axis;
+    uint64_t array_size = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+
+    if (axis_bit < kTileElems) {
+        // Intra-tile: load each tile, apply phase to elements with axis bit set
+        for (uint64_t base = 0; base < array_size; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), array_size - base));
+            tile_load(tile_a, st.v, base, count);
+
+            uint32_t pairs = count >> 1;
+            for (uint32_t p = threadIdx.x; p < pairs; p += blockDim.x) {
+                uint32_t idx = static_cast<uint32_t>(insert_zero_bit(p, axis)) | axis_bit;
+                GpuComplex val = load_complex64(&tile_a[idx]);
+                store_complex64(&tile_a[idx], cmul(val, phase));
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, base, count);
+        }
+    } else {
+        // Cross-tile: only elements with axis_bit set need modification.
+        // Iterate over the "low" half and load from the axis_bit offset.
+        uint64_t half_array = array_size >> 1;
+        for (uint64_t off = 0; off < half_array; off += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), half_array - off));
+            uint64_t actual_base = insert_zero_bit(off, axis) | axis_bit;
+            tile_load(tile_a, st.v, actual_base, count);
+
+            for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+                GpuComplex val = load_complex64(&tile_a[i]);
+                store_complex64(&tile_a[i], cmul(val, phase));
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, actual_base, count);
+        }
+    }
+    __syncthreads();
+}
+
+// --- Tiled CNOT (permutation: swap v[idx|c_bit] with v[idx|c_bit|t_bit]) ---
+__device__ void tiled_array_cnot(CoopShotState& st, uint32_t c, uint32_t t) {
+    uint64_t c_bit = 1ULL << c;
+    uint64_t t_bit = 1ULL << t;
+    uint64_t array_size = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+    GpuComplex* tile_b = st.lds_tile_b;
+    uint64_t iters = array_size >> 2;  // total swap pairs
+
+    if (c_bit < kTileElems && t_bit < kTileElems) {
+        // Both bits within tile: single-tile approach.
+        // Within each contiguous tile, the pair (idx|c_bit, idx|c_bit|t_bit)
+        // has both elements local because max(c_bit,t_bit) < kTileElems.
+        for (uint64_t base = 0; base < array_size; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), array_size - base));
+            tile_load(tile_a, st.v, base, count);
+
+            uint32_t quarter = count >> 2;
+            for (uint32_t p = threadIdx.x; p < quarter; p += blockDim.x) {
+                uint32_t idx = static_cast<uint32_t>(scatter_bits_2(p, c, t)) | c_bit;
+                GpuComplex tmp = load_complex64(&tile_a[idx]);
+                GpuComplex tmp2 = load_complex64(&tile_a[idx | t_bit]);
+                store_complex64(&tile_a[idx], tmp2);
+                store_complex64(&tile_a[idx | t_bit], tmp);
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, base, count);
+        }
+    } else if (c_bit >= kTileElems && t_bit >= kTileElems) {
+        // Both bits beyond tile size: the swap partners are far apart.
+        // Use two tiles to load from the two regions and swap.
+        uint32_t lo = min(c, t);
+        uint32_t hi = max(c, t);
+        uint64_t quarter = array_size >> 2;
+        for (uint64_t off = 0; off < quarter; off += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), quarter - off));
+            uint64_t actual_base_c = insert_zero_bit(insert_zero_bit(off, lo), hi) | c_bit;
+            tile_load(tile_a, st.v, actual_base_c, count);
+            tile_load(tile_b, st.v, actual_base_c | t_bit, count);
+
+            for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+                GpuComplex tmp_a = load_complex64(&tile_a[i]);
+                GpuComplex tmp_b = load_complex64(&tile_b[i]);
+                store_complex64(&tile_a[i], tmp_b);
+                store_complex64(&tile_b[i], tmp_a);
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, actual_base_c, count);
+            tile_store(st.v, tile_b, actual_base_c | t_bit, count);
+        }
+    } else {
+        // Mixed case: one bit within tile, one beyond — fall back to direct
+        // HBM.  This is a moderately rare case (one low qubit + one high qubit).
+        for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
+            uint64_t idx = scatter_bits_2(i, c, t) | c_bit;
+            GpuComplex tmp = load_complex64(&st.v[idx]);
+            GpuComplex tmp2 = load_complex64(&st.v[idx | t_bit]);
+            store_complex64(&st.v[idx], tmp2);
+            store_complex64(&st.v[idx | t_bit], tmp);
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+        bool px_c = bit_get(st.px, c);
+        bool pz_t = bit_get(st.pz, t);
+        bit_xor(st.px, t, px_c);
+        bit_xor(st.pz, c, pz_t);
+    }
+    __syncthreads();
+}
+
+// --- Tiled CZ (negate elements with both bits set) ---
+__device__ void tiled_array_cz(CoopShotState& st, uint32_t a, uint32_t b) {
+    uint64_t a_bit = 1ULL << a;
+    uint64_t b_bit = 1ULL << b;
+    uint64_t both_bits = a_bit | b_bit;
+    uint64_t array_size = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+
+    uint32_t lo = min(a, b);
+    uint32_t hi = max(a, b);
+
+    if (a_bit < kTileElems && b_bit < kTileElems) {
+        // Both bits within tile: negate in-place within each tile
+        for (uint64_t base = 0; base < array_size; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), array_size - base));
+            tile_load(tile_a, st.v, base, count);
+
+            uint32_t quarter = count >> 2;
+            for (uint32_t p = threadIdx.x; p < quarter; p += blockDim.x) {
+                uint32_t idx = static_cast<uint32_t>(scatter_bits_2(p, a, b)) | both_bits;
+                GpuComplex val = load_complex64(&tile_a[idx]);
+                val.re = -val.re;
+                val.im = -val.im;
+                store_complex64(&tile_a[idx], val);
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, base, count);
+        }
+    } else {
+        // At least one bit beyond tile: negate elements with both bits set.
+        // These form a contiguous quarter of the array.
+        uint64_t quarter = array_size >> 2;
+        for (uint64_t off = 0; off < quarter; off += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), quarter - off));
+            uint64_t actual_base = insert_zero_bit(insert_zero_bit(off, lo), hi) | both_bits;
+            tile_load(tile_a, st.v, actual_base, count);
+
+            for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+                GpuComplex val = load_complex64(&tile_a[i]);
+                val.re = -val.re;
+                val.im = -val.im;
+                store_complex64(&tile_a[i], val);
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, actual_base, count);
+        }
+    }
+
+    if (threadIdx.x == 0) {
+        bool px_a = bit_get(st.px, a);
+        bool px_b = bit_get(st.px, b);
+        bit_xor(st.pz, b, px_a);
+        bit_xor(st.pz, a, px_b);
+    }
+    __syncthreads();
+}
+
+// --- Tiled SWAP ---
+__device__ void tiled_array_swap(CoopShotState& st, uint32_t a, uint32_t b) {
+    uint64_t a_bit = 1ULL << a;
+    uint64_t b_bit = 1ULL << b;
+    uint64_t array_size = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+    GpuComplex* tile_b = st.lds_tile_b;
+
+    uint32_t lo = min(a, b);
+    uint32_t hi = max(a, b);
+
+    if (a_bit < kTileElems && b_bit < kTileElems) {
+        // Both bits within tile: swap in-place
+        for (uint64_t base = 0; base < array_size; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), array_size - base));
+            tile_load(tile_a, st.v, base, count);
+
+            uint32_t quarter = count >> 2;
+            for (uint32_t p = threadIdx.x; p < quarter; p += blockDim.x) {
+                uint32_t idx = static_cast<uint32_t>(scatter_bits_2(p, a, b));
+                GpuComplex tmp_a_v = load_complex64(&tile_a[idx | a_bit]);
+                GpuComplex tmp_b_v = load_complex64(&tile_a[idx | b_bit]);
+                store_complex64(&tile_a[idx | a_bit], tmp_b_v);
+                store_complex64(&tile_a[idx | b_bit], tmp_a_v);
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, base, count);
+        }
+    } else if (a_bit >= kTileElems && b_bit >= kTileElems) {
+        // Both bits beyond tile: swap between two distinct regions
+        uint64_t quarter = array_size >> 2;
+        for (uint64_t off = 0; off < quarter; off += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), quarter - off));
+            uint64_t actual_base = insert_zero_bit(insert_zero_bit(off, lo), hi);
+            tile_load(tile_a, st.v, actual_base | a_bit, count);
+            tile_load(tile_b, st.v, actual_base | b_bit, count);
+
+            for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+                GpuComplex tmp_a_v = load_complex64(&tile_a[i]);
+                GpuComplex tmp_b_v = load_complex64(&tile_b[i]);
+                store_complex64(&tile_a[i], tmp_b_v);
+                store_complex64(&tile_b[i], tmp_a_v);
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, actual_base | a_bit, count);
+            tile_store(st.v, tile_b, actual_base | b_bit, count);
+        }
+    } else {
+        // Mixed case: fall back to direct HBM
+        uint64_t iters = array_size >> 2;
+        for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
+            uint64_t idx = scatter_bits_2(i, a, b);
+            GpuComplex tmp_a_v = load_complex64(&st.v[idx | a_bit]);
+            GpuComplex tmp_b_v = load_complex64(&st.v[idx | b_bit]);
+            store_complex64(&st.v[idx | a_bit], tmp_b_v);
+            store_complex64(&st.v[idx | b_bit], tmp_a_v);
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+        bit_swap(st.px, a, st.px, b);
+        bit_swap(st.pz, a, st.pz, b);
+    }
+    __syncthreads();
+}
+
+// --- Tiled U2 sweep (arbitrary 2x2 matrix on one qubit) ---
+__device__ void tiled_u2_sweep(CoopShotState& st, uint32_t axis, const GpuComplex* mat) {
+    uint64_t axis_bit = 1ULL << axis;
+    uint64_t array_size = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+    GpuComplex* tile_b = st.lds_tile_b;
+
+    if (axis_bit < kTileElems) {
+        // Intra-tile: both butterfly elements within the same tile
+        for (uint64_t base = 0; base < array_size; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), array_size - base));
+            tile_load(tile_a, st.v, base, count);
+
+            uint32_t pairs = count >> 1;
+            for (uint32_t p = threadIdx.x; p < pairs; p += blockDim.x) {
+                uint32_t idx0 = static_cast<uint32_t>(insert_zero_bit(p, axis));
+                uint32_t idx1 = idx0 | axis_bit;
+                GpuComplex a = load_complex64(&tile_a[idx0]);
+                GpuComplex b = load_complex64(&tile_a[idx1]);
+                store_complex64(&tile_a[idx0], cadd(cmul(a, mat[0]), cmul(b, mat[1])));
+                store_complex64(&tile_a[idx1], cadd(cmul(a, mat[2]), cmul(b, mat[3])));
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, base, count);
+        }
+    } else {
+        // Cross-tile: load paired regions
+        uint64_t half_array = array_size >> 1;
+        for (uint64_t off = 0; off < half_array; off += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), half_array - off));
+            uint64_t actual_base = insert_zero_bit(off, axis);
+            tile_load(tile_a, st.v, actual_base, count);
+            tile_load(tile_b, st.v, actual_base | axis_bit, count);
+
+            for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+                GpuComplex a = load_complex64(&tile_a[i]);
+                GpuComplex b = load_complex64(&tile_b[i]);
+                store_complex64(&tile_a[i], cadd(cmul(a, mat[0]), cmul(b, mat[1])));
+                store_complex64(&tile_b[i], cadd(cmul(a, mat[2]), cmul(b, mat[3])));
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, actual_base, count);
+            tile_store(st.v, tile_b, actual_base | axis_bit, count);
+        }
+    }
+}
+
+// --- Tiled U4 sweep (4x4 matrix on two qubits) ---
+__device__ void tiled_u4_sweep(CoopShotState& st, uint32_t axis_lo, uint32_t axis_hi,
+                               const GpuComplex mat[4][4]) {
+    uint64_t lo_bit = 1ULL << axis_lo;
+    uint64_t hi_bit = 1ULL << axis_hi;
+    uint64_t array_size = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+
+    if (lo_bit < kTileElems && hi_bit < kTileElems) {
+        // Both qubits within tile: all 4 elements of each group are local
+        for (uint64_t base = 0; base < array_size; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), array_size - base));
+            tile_load(tile_a, st.v, base, count);
+
+            uint32_t quarter = count >> 2;
+            for (uint32_t p = threadIdx.x; p < quarter; p += blockDim.x) {
+                uint32_t idx = static_cast<uint32_t>(scatter_bits_2(p, axis_lo, axis_hi));
+                uint32_t i0 = idx;
+                uint32_t i1 = idx | lo_bit;
+                uint32_t i2 = idx | hi_bit;
+                uint32_t i3 = idx | lo_bit | hi_bit;
+                GpuComplex v0 = load_complex64(&tile_a[i0]);
+                GpuComplex v1 = load_complex64(&tile_a[i1]);
+                GpuComplex v2 = load_complex64(&tile_a[i2]);
+                GpuComplex v3 = load_complex64(&tile_a[i3]);
+                store_complex64(&tile_a[i0],
+                    cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
+                         cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3]))));
+                store_complex64(&tile_a[i1],
+                    cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
+                         cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3]))));
+                store_complex64(&tile_a[i2],
+                    cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
+                         cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3]))));
+                store_complex64(&tile_a[i3],
+                    cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
+                         cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3]))));
+            }
+            __syncthreads();
+
+            tile_store(st.v, tile_a, base, count);
+        }
+    } else {
+        // At least one qubit beyond tile: fall back to direct HBM.
+        // A multi-tile U4 would require loading up to 4 tiles simultaneously;
+        // the added complexity is not yet justified.
+        uint64_t iters = array_size >> 2;
+        for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
+            uint64_t idx = scatter_bits_2(i, axis_lo, axis_hi);
+            uint64_t i0 = idx;
+            uint64_t i1 = idx | lo_bit;
+            uint64_t i2 = idx | hi_bit;
+            uint64_t i3 = idx | lo_bit | hi_bit;
+            GpuComplex v0 = load_complex64(&st.v[i0]);
+            GpuComplex v1 = load_complex64(&st.v[i1]);
+            GpuComplex v2 = load_complex64(&st.v[i2]);
+            GpuComplex v3 = load_complex64(&st.v[i3]);
+            store_complex64(&st.v[i0],
+                cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
+                     cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3]))));
+            store_complex64(&st.v[i1],
+                cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
+                     cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3]))));
+            store_complex64(&st.v[i2],
+                cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
+                     cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3]))));
+            store_complex64(&st.v[i3],
+                cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
+                     cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3]))));
+        }
+        __syncthreads();
+    }
+}
+
+// --- Tiled array_rot (phase rotation, diagonal gate) ---
+__device__ void tiled_array_rot(CoopShotState& st, uint32_t axis, double z_re, double z_im) {
+    if (axis >= *st.active_k) {
+        __syncthreads();
+        return;
+    }
+    bool px = bit_get(st.px, axis);
+    double im = px ? -z_im : z_im;
+    GpuComplex phase{static_cast<float>(z_re), static_cast<float>(im)};
+    tiled_apply_phase(st, axis, phase);
+}
+
+// --- Tiled expand_plain (duplicate array for new qubit) ---
+__device__ void tiled_expand_plain(CoopShotState& st) {
+    uint64_t half = 1ULL << *st.active_k;
+    GpuComplex* tile_a = st.lds_tile_a;
+
+    for (uint64_t base = 0; base < half; base += kTileElems) {
+        uint32_t count = static_cast<uint32_t>(
+            min(static_cast<uint64_t>(kTileElems), half - base));
+        tile_load(tile_a, st.v, base, count);
+        tile_store(st.v, tile_a, base + half, count);
+    }
+
+    if (threadIdx.x == 0) {
+        ++*st.active_k;
+    }
+    __syncthreads();
+}
+
+// --- Tiled expand_t ---
+__device__ void tiled_expand_t(CoopShotState& st, uint32_t axis, bool dagger) {
+    uint64_t half = 1ULL << *st.active_k;
+    bool px = bit_get(st.px, axis);
+    double imag = dagger ? -kInvSqrt2 : kInvSqrt2;
+    if (px) imag = -imag;
+    GpuComplex phase{static_cast<float>(kInvSqrt2), static_cast<float>(imag)};
+    GpuComplex* tile_a = st.lds_tile_a;
+
+    for (uint64_t base = 0; base < half; base += kTileElems) {
+        uint32_t count = static_cast<uint32_t>(
+            min(static_cast<uint64_t>(kTileElems), half - base));
+        tile_load(tile_a, st.v, base, count);
+
+        // Apply phase and write to upper half
+        for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+            GpuComplex val = load_complex64(&tile_a[i]);
+            store_complex64(&tile_a[i], cmul(val, phase));
+        }
+        __syncthreads();
+
+        tile_store(st.v, tile_a, base + half, count);
+    }
+
+    if (threadIdx.x == 0) {
+        ++*st.active_k;
+    }
+    __syncthreads();
+}
+
+// --- Tiled expand_rot ---
+__device__ void tiled_expand_rot(CoopShotState& st, uint32_t axis, double z_re, double z_im) {
+    uint64_t half = 1ULL << *st.active_k;
+    bool px = bit_get(st.px, axis);
+    double im = px ? -z_im : z_im;
+    GpuComplex phase{static_cast<float>(z_re), static_cast<float>(im)};
+    GpuComplex* tile_a = st.lds_tile_a;
+
+    for (uint64_t base = 0; base < half; base += kTileElems) {
+        uint32_t count = static_cast<uint32_t>(
+            min(static_cast<uint64_t>(kTileElems), half - base));
+        tile_load(tile_a, st.v, base, count);
+
+        for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+            GpuComplex val = load_complex64(&tile_a[i]);
+            store_complex64(&tile_a[i], cmul(val, phase));
+        }
+        __syncthreads();
+
+        tile_store(st.v, tile_a, base + half, count);
+    }
+
+    if (threadIdx.x == 0) {
+        (*st.active_k)++;
+    }
+    __syncthreads();
+}
+
+// --- Tiled measurement (active diagonal) ---
+// The measurement reads from v[i] and v[i+half], which is a cross-tile
+// butterfly on the highest qubit.  We tile the reduce and collapse phases.
+__device__ void tiled_meas_active_diagonal(CoopShotState& st, Rng& rng, uint32_t axis,
+                                           uint32_t classical_idx, bool sign) {
+    uint64_t half = 1ULL << (*st.active_k - 1);
+    bool px = bit_get(st.px, axis);
+    GpuComplex* tile_a = st.lds_tile_a;
+    GpuComplex* tile_b = st.lds_tile_b;
+
+    // Phase 1: tiled probability accumulation
+    double l0 = 0.0;
+    double l1 = 0.0;
+    for (uint64_t base = 0; base < half; base += kTileElems) {
+        uint32_t count = static_cast<uint32_t>(
+            min(static_cast<uint64_t>(kTileElems), half - base));
+        tile_load(tile_a, st.v, base, count);
+        tile_load(tile_b, st.v, base + half, count);
+
+        for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+            l0 += cnorm(load_complex64(&tile_a[i]));
+            l1 += cnorm(load_complex64(&tile_b[i]));
+        }
+        __syncthreads();
+    }
+
+    double p0 = 0.0;
+    double p1 = 0.0;
+    coop_reduce2(st, l0, l1, p0, p1);
+    if (threadIdx.x == 0) {
+        uint8_t b = sample_branch(rng, p0, p1, p0 + p1);
+        *st.branch = b;
+        uint8_t m_abs = b ^ static_cast<uint8_t>(px);
+        st.meas[classical_idx] = m_abs ^ static_cast<uint8_t>(sign);
+    }
+    __syncthreads();
+
+    // Phase 2: collapse (copy upper half to lower half if branch=1)
+    if (*st.branch != 0) {
+        for (uint64_t base = 0; base < half; base += kTileElems) {
+            uint32_t count = static_cast<uint32_t>(
+                min(static_cast<uint64_t>(kTileElems), half - base));
+            tile_load(tile_a, st.v, base + half, count);
+            tile_store(st.v, tile_a, base, count);
+        }
+    }
+
+    if (threadIdx.x == 0) {
+        --*st.active_k;
+        uint8_t m_abs = st.meas[classical_idx] ^ static_cast<uint8_t>(sign);
+        bit_set(st.px, axis, m_abs != 0);
+        bit_set(st.pz, axis, false);
+    }
+    __syncthreads();
+}
+
+// --- Tiled measurement (active interfere) ---
+__device__ void tiled_meas_active_interfere(CoopShotState& st, Rng& rng, uint32_t axis,
+                                            uint32_t classical_idx, bool sign) {
+    uint64_t half = 1ULL << (*st.active_k - 1);
+    bool pz = bit_get(st.pz, axis);
+    GpuComplex* tile_a = st.lds_tile_a;
+    GpuComplex* tile_b = st.lds_tile_b;
+
+    // Phase 1: tiled probability accumulation
+    double lp = 0.0;
+    double lm = 0.0;
+    for (uint64_t base = 0; base < half; base += kTileElems) {
+        uint32_t count = static_cast<uint32_t>(
+            min(static_cast<uint64_t>(kTileElems), half - base));
+        tile_load(tile_a, st.v, base, count);
+        tile_load(tile_b, st.v, base + half, count);
+
+        for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+            GpuComplex vi = load_complex64(&tile_a[i]);
+            GpuComplex vh = load_complex64(&tile_b[i]);
+            lp += cnorm(cadd(vi, vh));
+            lm += cnorm(csub(vi, vh));
+        }
+        __syncthreads();
+    }
+
+    double p_plus = 0.0;
+    double p_minus = 0.0;
+    coop_reduce2(st, lp, lm, p_plus, p_minus);
+    if (threadIdx.x == 0) {
+        uint8_t b = sample_branch(rng, p_plus, p_minus, p_plus + p_minus);
+        *st.branch = b;
+        uint8_t m_abs = b ^ static_cast<uint8_t>(pz);
+        st.meas[classical_idx] = m_abs ^ static_cast<uint8_t>(sign);
+    }
+    __syncthreads();
+
+    // Phase 2: collapse with interference
+    for (uint64_t base = 0; base < half; base += kTileElems) {
+        uint32_t count = static_cast<uint32_t>(
+            min(static_cast<uint64_t>(kTileElems), half - base));
+        tile_load(tile_a, st.v, base, count);
+        tile_load(tile_b, st.v, base + half, count);
+
+        for (uint32_t i = threadIdx.x; i < count; i += blockDim.x) {
+            GpuComplex vi = load_complex64(&tile_a[i]);
+            GpuComplex vh = load_complex64(&tile_b[i]);
+            GpuComplex folded = (*st.branch == 0) ? cadd(vi, vh) : csub(vi, vh);
+            store_complex64(&tile_a[i], cscale(folded, kInvSqrt2));
+        }
+        __syncthreads();
+
+        tile_store(st.v, tile_a, base, count);
+    }
+
+    if (threadIdx.x == 0) {
+        --*st.active_k;
+        uint8_t m_abs = st.meas[classical_idx] ^ static_cast<uint8_t>(sign);
+        bit_set(st.px, axis, m_abs != 0);
+        bit_set(st.pz, axis, false);
+    }
+    __syncthreads();
+}
+
+// ============================================================================
+// End of LDS-pipelined tiling functions
+// ============================================================================
+
 __device__ bool is_frame_only_op(uint8_t opcode) {
     switch (opcode) {
         case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CNOT):
@@ -1489,6 +2197,13 @@ __device__ bool is_frame_only_op(uint8_t opcode) {
         default:
             return false;
     }
+}
+
+// Helper: should we use the LDS-tiled path for this operation?
+// True when tile buffers are available AND the array is large enough
+// to benefit from tiling (more than one tile, i.e. active_k > kTileBits).
+__device__ __forceinline__ bool use_lds_tiling(const CoopShotState& st) {
+    return st.lds_tile_a != nullptr && *st.active_k > kTileBits;
 }
 
 __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotState& st) {
@@ -1548,55 +2263,166 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                 }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_CNOT):
-                coop_array_cnot(st, instr.axis_1, instr.axis_2);
+                if (use_lds_tiling(st))
+                    tiled_array_cnot(st, instr.axis_1, instr.axis_2);
+                else
+                    coop_array_cnot(st, instr.axis_1, instr.axis_2);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_CZ):
-                coop_array_cz(st, instr.axis_1, instr.axis_2);
+                if (use_lds_tiling(st))
+                    tiled_array_cz(st, instr.axis_1, instr.axis_2);
+                else
+                    coop_array_cz(st, instr.axis_1, instr.axis_2);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_SWAP):
-                coop_array_swap(st, instr.axis_1, instr.axis_2);
+                if (use_lds_tiling(st))
+                    tiled_array_swap(st, instr.axis_1, instr.axis_2);
+                else
+                    coop_array_swap(st, instr.axis_1, instr.axis_2);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_MULTI_CNOT):
+                // multi_cnot has complex index patterns — tiling not yet
+                // implemented; falls through to the direct HBM path.
                 coop_array_multi_cnot(st, instr.axis_1, instr.mask);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_MULTI_CZ):
                 coop_array_multi_cz(st, instr.axis_1, instr.mask);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_H):
-                coop_array_h(st, instr.axis_1);
+                if (use_lds_tiling(st))
+                    tiled_array_h(st, instr.axis_1);
+                else
+                    coop_array_h(st, instr.axis_1);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_S):
-                coop_array_s(st, instr.axis_1, false);
+                if (use_lds_tiling(st)) {
+                    tiled_apply_phase(st, instr.axis_1,
+                                      GpuComplex{0.0f, 1.0f});
+                    if (threadIdx.x == 0) {
+                        bool px = bit_get(st.px, instr.axis_1);
+                        bit_xor(st.pz, instr.axis_1, px);
+                    }
+                    __syncthreads();
+                } else {
+                    coop_array_s(st, instr.axis_1, false);
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_S_DAG):
-                coop_array_s(st, instr.axis_1, true);
+                if (use_lds_tiling(st)) {
+                    tiled_apply_phase(st, instr.axis_1,
+                                      GpuComplex{0.0f, -1.0f});
+                    if (threadIdx.x == 0) {
+                        bool px = bit_get(st.px, instr.axis_1);
+                        bit_xor(st.pz, instr.axis_1, px);
+                    }
+                    __syncthreads();
+                } else {
+                    coop_array_s(st, instr.axis_1, true);
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_T):
-                coop_array_t(st, instr.axis_1, false);
+                if (use_lds_tiling(st)) {
+                    bool px = bit_get(st.px, instr.axis_1);
+                    if (instr.axis_1 < *st.active_k) {
+                        double imag = kInvSqrt2;
+                        if (px) imag = -imag;
+                        tiled_apply_phase(st, instr.axis_1,
+                            {static_cast<float>(kInvSqrt2), static_cast<float>(imag)});
+                    } else {
+                        __syncthreads();
+                    }
+                } else {
+                    coop_array_t(st, instr.axis_1, false);
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_T_DAG):
-                coop_array_t(st, instr.axis_1, true);
+                if (use_lds_tiling(st)) {
+                    bool px = bit_get(st.px, instr.axis_1);
+                    if (instr.axis_1 < *st.active_k) {
+                        double imag = -kInvSqrt2;
+                        if (px) imag = -imag;
+                        tiled_apply_phase(st, instr.axis_1,
+                            {static_cast<float>(kInvSqrt2), static_cast<float>(imag)});
+                    } else {
+                        __syncthreads();
+                    }
+                } else {
+                    coop_array_t(st, instr.axis_1, true);
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND):
-                coop_expand_plain(st);
+                if (use_lds_tiling(st))
+                    tiled_expand_plain(st);
+                else
+                    coop_expand_plain(st);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_T):
-                coop_expand_t(st, instr.axis_1, false);
+                if (use_lds_tiling(st))
+                    tiled_expand_t(st, instr.axis_1, false);
+                else
+                    coop_expand_t(st, instr.axis_1, false);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_T_DAG):
-                coop_expand_t(st, instr.axis_1, true);
+                if (use_lds_tiling(st))
+                    tiled_expand_t(st, instr.axis_1, true);
+                else
+                    coop_expand_t(st, instr.axis_1, true);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_ROT):
-                coop_expand_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
+                if (use_lds_tiling(st))
+                    tiled_expand_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
+                else
+                    coop_expand_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_ROT):
-                coop_array_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
+                if (use_lds_tiling(st))
+                    tiled_array_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
+                else
+                    coop_array_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U2):
-                coop_array_u2(st, program, instr.axis_1, instr.a);
+                if (use_lds_tiling(st)) {
+                    const auto& entry = program.fused_u2[instr.a];
+                    uint8_t in_state = (bit_get(st.pz, instr.axis_1) ? 2 : 0)
+                                     | (bit_get(st.px, instr.axis_1) ? 1 : 0);
+                    if (instr.axis_1 < *st.active_k) {
+                        tiled_u2_sweep(st, instr.axis_1, entry.matrices[in_state]);
+                    }
+                    __syncthreads();
+                    if (threadIdx.x == 0) {
+                        uint8_t out = entry.out_states[in_state];
+                        bit_set(st.px, instr.axis_1, (out & 1) != 0);
+                        bit_set(st.pz, instr.axis_1, (out & 2) != 0);
+                    }
+                    __syncthreads();
+                } else {
+                    coop_array_u2(st, program, instr.axis_1, instr.a);
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U4):
-                coop_array_u4(st, program, instr.axis_1, instr.axis_2, instr.a);
+                if (use_lds_tiling(st)) {
+                    const auto& node = program.fused_u4[instr.a];
+                    uint8_t px_lo = bit_get(st.px, instr.axis_1) ? 1 : 0;
+                    uint8_t pz_lo = bit_get(st.pz, instr.axis_1) ? 1 : 0;
+                    uint8_t px_hi = bit_get(st.px, instr.axis_2) ? 1 : 0;
+                    uint8_t pz_hi = bit_get(st.pz, instr.axis_2) ? 1 : 0;
+                    uint8_t in_state = (pz_hi << 3) | (px_hi << 2) | (pz_lo << 1) | px_lo;
+                    const auto& entry = node.entries[in_state];
+                    if (instr.axis_2 < *st.active_k) {
+                        tiled_u4_sweep(st, instr.axis_1, instr.axis_2, entry.matrix);
+                    }
+                    __syncthreads();
+                    if (threadIdx.x == 0) {
+                        uint8_t out = entry.out_state;
+                        bit_set(st.px, instr.axis_1, (out & 1) != 0);
+                        bit_set(st.pz, instr.axis_1, (out & 2) != 0);
+                        bit_set(st.px, instr.axis_2, (out & 4) != 0);
+                        bit_set(st.pz, instr.axis_2, (out & 8) != 0);
+                    }
+                    __syncthreads();
+                } else {
+                    coop_array_u4(st, program, instr.axis_1, instr.axis_2, instr.a);
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_DORMANT_STATIC):
                 if (threadIdx.x == 0) {
@@ -1620,14 +2446,24 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                 __syncthreads();
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_ACTIVE_DIAGONAL):
-                coop_meas_active_diagonal(st, rng, instr.axis_1, instr.a,
-                                          (instr.flags & kFlagSign) != 0);
+                if (use_lds_tiling(st))
+                    tiled_meas_active_diagonal(st, rng, instr.axis_1, instr.a,
+                                               (instr.flags & kFlagSign) != 0);
+                else
+                    coop_meas_active_diagonal(st, rng, instr.axis_1, instr.a,
+                                              (instr.flags & kFlagSign) != 0);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_ACTIVE_INTERFERE):
-                coop_meas_active_interfere(st, rng, instr.axis_1, instr.a,
-                                           (instr.flags & kFlagSign) != 0);
+                if (use_lds_tiling(st))
+                    tiled_meas_active_interfere(st, rng, instr.axis_1, instr.a,
+                                                (instr.flags & kFlagSign) != 0);
+                else
+                    coop_meas_active_interfere(st, rng, instr.axis_1, instr.a,
+                                               (instr.flags & kFlagSign) != 0);
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_SWAP_MEAS_INTERFERE):
+                // swap_meas_interfere has complex index patterns with bit
+                // remapping — not yet tiled; uses direct HBM path.
                 coop_swap_meas_interfere(st, rng, instr.axis_1, instr.axis_2, instr.a,
                                          (instr.flags & kFlagSign) != 0);
                 break;
@@ -1876,7 +2712,8 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
         CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
                          &discarded, &branch, red0, red1, nullptr,
                          scatter_lut, &cached_axis1, &cached_axis2,
-                         &cached_lut_k, &cached_lut_mode};
+                         &cached_lut_k, &cached_lut_mode,
+                         nullptr, nullptr};  // no LDS tiles for shared-coop
         coop_draw_next_noise(st, program, rng);
     }
     __syncthreads();
@@ -1884,7 +2721,8 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
                      &discarded, &branch, red0, red1, nullptr,
                      scatter_lut, &cached_axis1, &cached_axis2,
-                     &cached_lut_k, &cached_lut_mode};
+                     &cached_lut_k, &cached_lut_mode,
+                     nullptr, nullptr};  // no LDS tiles for shared-coop
     execute_shot_coop(program, rng, st);
 
     if (threadIdx.x == 0 && discarded == 0) {
@@ -1926,6 +2764,12 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
     __shared__ uint64_t batch_shot_id;
     __shared__ double red0[256];
     __shared__ double red1[256];
+
+    // LDS tile buffers for pipelined HBM access (ThunderKittens pattern).
+    // Two tiles of kTileElems GpuComplex elements each = 64 KB total.
+    // These replace the ~400-cycle HBM loads with ~20-cycle LDS loads.
+    __shared__ GpuComplex lds_tile_a[kTileElems];
+    __shared__ GpuComplex lds_tile_b[kTileElems];
 
     // Read hardware XCD ID once per block (uniform across all threads in a block).
     // work_counter is an array of kNumXCDs counters; each XCD atomics on its own
@@ -1972,14 +2816,16 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
             rng.seed(seed, shot_offset + batch_shot_id);
             CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
                              &discarded, &branch, red0, red1, nullptr,
-                             nullptr, nullptr, nullptr, nullptr, nullptr};
+                             nullptr, nullptr, nullptr, nullptr, nullptr,
+                             lds_tile_a, lds_tile_b};
             coop_draw_next_noise(st, program, rng);
         }
         __syncthreads();
 
         CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
                          &discarded, &branch, red0, red1, nullptr,
-                         nullptr, nullptr, nullptr, nullptr, nullptr};
+                         nullptr, nullptr, nullptr, nullptr, nullptr,
+                         lds_tile_a, lds_tile_b};
         execute_shot_coop(program, rng, st);
 
         if (threadIdx.x == 0 && discarded == 0) {
