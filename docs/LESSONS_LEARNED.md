@@ -145,3 +145,61 @@ RDNA (gfx1100) would need 32-wide handling but is not a target.
 `StatevectorSqueezePass` reduces synthetic circuits to rank ≤ 1 regardless of
 T-gate count. Only real QEC circuits with genuinely entangled T-gate blocks
 achieve rank > 4. This means the per-thread tier handles nearly all workloads.
+
+---
+
+## Re-evaluation: Scatter LUT at Rank=19
+
+**Date:** 2026-07-19
+**Context:** The scatter-bits LUT (F1, OPT-3) was reverted at rank=10 due to a
+VGPR regression (108->128, -3.8%). At rank=19 (d7), VGPRs are already at 128
+and occupancy is 4 waves/SIMD regardless, so the VGPR concern no longer applies.
+The workload is VALU-dominated (SALU/VALU = 0.82x vs 1.81x at rank=10). Does the
+LUT help here?
+
+### Answer: No --- the LUT physically cannot fit in LDS at rank=19.
+
+At rank=19, `scatter_bits_1` iterates over 2^18 = 262,144 pairs. The LUT would
+need 262,144 x 4 bytes = **1,024 KB**. MI300X provides **64 KB of LDS per
+workgroup**. After existing shared-memory allocations (reduction buffers, Pauli
+frames, meas/obs arrays = ~5 KB), only ~59 KB remains. The LUT exceeds the
+available LDS by **16x**.
+
+`scatter_bits_2` is worse: 2^17 entries = 512 KB.
+
+The maximum rank where a scatter_bits_1 LUT fits is **rank=14** (2^13 = 8,192
+entries = 32 KB). Above rank=14, the LUT is infeasible in LDS.
+
+### Even if it could fit, the benefit is marginal
+
+The user's back-of-envelope calculation is correct in approach but the conclusion
+shifts with the 500K-shot benchmark data from RESULTS.md:
+
+- SALU at rank=19: 19.2B instructions (500K shots)
+- Hypothetical 30% SALU reduction: 5.8B fewer instructions
+- Time saved: 5.8B / (304 CUs x 2.1 GHz) = 9.1 ms
+- Total duration (500K shots at 143,916 shots/s): 3,474 ms
+- **Saving: 0.26%** (below measurement noise)
+
+At rank=10 (where the LUT fits), it saved ~30% SALU but the VGPR cost outweighed
+the benefit. At rank=19 (where VGPRs are neutral), the LUT cannot fit. This is an
+inherent mismatch: the ranks where the LUT is physically feasible (rank <= 14) are
+the same ranks where the VGPR cost matters most.
+
+### What the SALU/VALU inversion actually means
+
+At rank=10, SALU/VALU = 1.81x because the array is small (1,024 elements) and
+each sweep finishes in a few iterations, making address computation dominate. At
+rank=19, SALU/VALU = 0.82x because each sweep processes 262K elements, and the
+VALU cost of complex multiply-add over 262K elements dwarfs the SALU cost of
+`scatter_bits` index computation. The SALU is **not** the bottleneck at rank=19;
+HBM bandwidth is (confirmed by all approaches converging to ~143K shots/s).
+
+### Recommendation
+
+**Do not pursue.** The scatter-bits LUT is fundamentally incompatible with
+rank >= 15 due to LDS capacity, and at rank <= 14 the VGPR cost makes it a net
+negative. The SALU address computation at rank=19 accounts for ~30% of cycles
+(per MI300X_NUMA.md section 6.3) but this is better addressed by the compiled
+megakernel (which bakes axis constants, enabling the compiler to strength-reduce
+`insert_zero_bit` to a constant shift-and-mask) than by an LDS lookup table.
