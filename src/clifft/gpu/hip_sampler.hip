@@ -825,7 +825,67 @@ struct CoopShotState {
     double* red0;
     double* red1;
     double* exp_vals;
+    uint32_t* scatter_lut;       // precomputed index LUT in LDS (nullptr for global-coop)
+    uint32_t* cached_axis1;      // last axis used for scatter LUT
+    uint32_t* cached_axis2;      // last axis2 used for 2-axis LUT
+    uint32_t* cached_lut_k;      // last active_k used for LUT
+    uint32_t* cached_lut_mode;   // 0=none, 1=scatter_1, 2=scatter_2
 };
+
+// Precompute scatter_bits_1 LUT for all i in [0, 2^(active_k-1)).
+// After this call, lut[i] == insert_zero_bit(i, axis).
+__device__ void precompute_scatter_1(uint32_t* lut, uint32_t active_k, uint32_t axis) {
+    uint32_t n = 1u << (active_k - 1);
+    for (uint32_t i = threadIdx.x; i < n; i += blockDim.x) {
+        lut[i] = static_cast<uint32_t>(insert_zero_bit(i, axis));
+    }
+    __syncthreads();
+}
+
+// Precompute scatter_bits_2 LUT for all i in [0, 2^(active_k-2)).
+// After this call, lut[i] == scatter_bits_2(i, axis1, axis2).
+__device__ void precompute_scatter_2(uint32_t* lut, uint32_t active_k,
+                                     uint32_t axis1, uint32_t axis2) {
+    uint32_t n = 1u << (active_k - 2);
+    for (uint32_t i = threadIdx.x; i < n; i += blockDim.x) {
+        lut[i] = static_cast<uint32_t>(scatter_bits_2(i, axis1, axis2));
+    }
+    __syncthreads();
+}
+
+// Ensure scatter_1 LUT is populated for the given (active_k, axis).
+// Uses cached state to skip recomputation when possible.
+__device__ void ensure_scatter_1(CoopShotState& st, uint32_t axis) {
+    if (st.scatter_lut == nullptr) return;
+    uint32_t k = *st.active_k;
+    if (*st.cached_lut_mode == 1 && *st.cached_axis1 == axis && *st.cached_lut_k == k) {
+        return;  // already populated
+    }
+    precompute_scatter_1(st.scatter_lut, k, axis);
+    if (threadIdx.x == 0) {
+        *st.cached_axis1 = axis;
+        *st.cached_lut_k = k;
+        *st.cached_lut_mode = 1;
+    }
+    // No extra syncthreads needed: precompute_scatter_1 already did one
+}
+
+// Ensure scatter_2 LUT is populated for the given (active_k, axis1, axis2).
+__device__ void ensure_scatter_2(CoopShotState& st, uint32_t axis1, uint32_t axis2) {
+    if (st.scatter_lut == nullptr) return;
+    uint32_t k = *st.active_k;
+    if (*st.cached_lut_mode == 2 && *st.cached_axis1 == axis1 &&
+        *st.cached_axis2 == axis2 && *st.cached_lut_k == k) {
+        return;  // already populated
+    }
+    precompute_scatter_2(st.scatter_lut, k, axis1, axis2);
+    if (threadIdx.x == 0) {
+        *st.cached_axis1 = axis1;
+        *st.cached_axis2 = axis2;
+        *st.cached_lut_k = k;
+        *st.cached_lut_mode = 2;
+    }
+}
 
 __device__ void coop_reduce2(CoopShotState& st, double local0, double local1, double& out0,
                              double& out1) {
@@ -886,8 +946,11 @@ __device__ void coop_array_cnot(CoopShotState& st, uint32_t c, uint32_t t) {
     uint64_t c_bit = 1ULL << c;
     uint64_t t_bit = 1ULL << t;
     uint64_t iters = 1ULL << (*st.active_k - 2);
+    ensure_scatter_2(st, c, t);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t base = scatter_bits_2(i, c, t) | c_bit;
+        uint64_t base = (st.scatter_lut ? st.scatter_lut[i]
+                                        : static_cast<uint32_t>(scatter_bits_2(i, c, t)))
+                        | c_bit;
         GpuComplex tmp = st.v[base];
         st.v[base] = st.v[base | t_bit];
         st.v[base | t_bit] = tmp;
@@ -905,8 +968,11 @@ __device__ void coop_array_cnot(CoopShotState& st, uint32_t c, uint32_t t) {
 __device__ void coop_array_cz(CoopShotState& st, uint32_t a, uint32_t b) {
     uint64_t both_bits = (1ULL << a) | (1ULL << b);
     uint64_t iters = 1ULL << (*st.active_k - 2);
+    ensure_scatter_2(st, a, b);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx = scatter_bits_2(i, a, b) | both_bits;
+        uint64_t idx = (st.scatter_lut ? st.scatter_lut[i]
+                                       : static_cast<uint32_t>(scatter_bits_2(i, a, b)))
+                       | both_bits;
         st.v[idx].re = -st.v[idx].re;
         st.v[idx].im = -st.v[idx].im;
     }
@@ -924,8 +990,10 @@ __device__ void coop_array_swap(CoopShotState& st, uint32_t a, uint32_t b) {
     uint64_t a_bit = 1ULL << a;
     uint64_t b_bit = 1ULL << b;
     uint64_t iters = 1ULL << (*st.active_k - 2);
+    ensure_scatter_2(st, a, b);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t base = scatter_bits_2(i, a, b);
+        uint64_t base = st.scatter_lut ? st.scatter_lut[i]
+                                       : static_cast<uint32_t>(scatter_bits_2(i, a, b));
         GpuComplex tmp = st.v[base | a_bit];
         st.v[base | a_bit] = st.v[base | b_bit];
         st.v[base | b_bit] = tmp;
@@ -941,8 +1009,10 @@ __device__ void coop_array_swap(CoopShotState& st, uint32_t a, uint32_t b) {
 __device__ void coop_array_multi_cnot(CoopShotState& st, uint32_t target, uint64_t ctrl_mask) {
     uint64_t t_bit = 1ULL << target;
     uint64_t half = 1ULL << (*st.active_k - 1);
+    ensure_scatter_1(st, target);
     for (uint64_t idx = threadIdx.x; idx < half; idx += blockDim.x) {
-        uint64_t actual = scatter_bits_1(idx, target);
+        uint64_t actual = st.scatter_lut ? st.scatter_lut[idx]
+                                         : static_cast<uint32_t>(scatter_bits_1(idx, target));
         bool parity = (__popcll(actual & ctrl_mask) & 1) != 0;
         if (parity) {
             GpuComplex tmp = st.v[actual];
@@ -967,8 +1037,11 @@ __device__ void coop_array_multi_cnot(CoopShotState& st, uint32_t target, uint64
 __device__ void coop_array_multi_cz(CoopShotState& st, uint32_t control, uint64_t target_mask) {
     uint64_t c_bit = 1ULL << control;
     uint64_t half = 1ULL << (*st.active_k - 1);
+    ensure_scatter_1(st, control);
     for (uint64_t idx = threadIdx.x; idx < half; idx += blockDim.x) {
-        uint64_t actual = scatter_bits_1(idx, control) | c_bit;
+        uint64_t actual = (st.scatter_lut ? st.scatter_lut[idx]
+                                          : static_cast<uint32_t>(scatter_bits_1(idx, control)))
+                          | c_bit;
         bool negate = (__popcll(actual & target_mask) & 1) != 0;
         if (negate) {
             st.v[actual].re = -st.v[actual].re;
@@ -992,8 +1065,10 @@ __device__ void coop_array_multi_cz(CoopShotState& st, uint32_t control, uint64_
 __device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
     uint64_t axis_bit = 1ULL << axis;
     uint64_t iters = 1ULL << (*st.active_k - 1);
+    ensure_scatter_1(st, axis);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx0 = scatter_bits_1(i, axis);
+        uint64_t idx0 = st.scatter_lut ? st.scatter_lut[i]
+                                       : static_cast<uint32_t>(scatter_bits_1(i, axis));
         uint64_t idx1 = idx0 | axis_bit;
         GpuComplex a = st.v[idx0];
         GpuComplex b = st.v[idx1];
@@ -1013,8 +1088,11 @@ __device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
 __device__ void coop_apply_phase(CoopShotState& st, uint32_t axis, GpuComplex phase) {
     uint64_t axis_bit = 1ULL << axis;
     uint64_t iters = 1ULL << (*st.active_k - 1);
+    ensure_scatter_1(st, axis);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx = scatter_bits_1(i, axis) | axis_bit;
+        uint64_t idx = (st.scatter_lut ? st.scatter_lut[i]
+                                       : static_cast<uint32_t>(scatter_bits_1(i, axis)))
+                       | axis_bit;
         st.v[idx] = cmul(st.v[idx], phase);
     }
     __syncthreads();
@@ -1207,8 +1285,11 @@ __device__ void coop_array_rot(CoopShotState& st, uint32_t axis, double z_re, do
         uint64_t axis_bit = 1ULL << axis;
         uint64_t iters = 1ULL << (*st.active_k - 1);
         GpuComplex phase{static_cast<float>(z_re), static_cast<float>(im)};
+        ensure_scatter_1(st, axis);
         for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-            uint64_t idx = scatter_bits_1(i, axis) | axis_bit;
+            uint64_t idx = (st.scatter_lut ? st.scatter_lut[i]
+                                           : static_cast<uint32_t>(scatter_bits_1(i, axis)))
+                           | axis_bit;
             st.v[idx] = cmul(st.v[idx], phase);
         }
     }
@@ -1231,11 +1312,13 @@ __device__ void coop_expand_rot(CoopShotState& st, uint32_t axis, double z_re, d
 }
 
 __device__ __noinline__ void coop_u2_sweep(GpuComplex* v, uint32_t active_k,
-                                           uint32_t axis, const GpuComplex* mat) {
+                                           uint32_t axis, const GpuComplex* mat,
+                                           const uint32_t* lut) {
     uint64_t axis_bit = 1ULL << axis;
     uint64_t iters = 1ULL << (active_k - 1);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx0 = scatter_bits_1(i, axis);
+        uint64_t idx0 = lut ? lut[i]
+                            : static_cast<uint32_t>(scatter_bits_1(i, axis));
         uint64_t idx1 = idx0 | axis_bit;
         GpuComplex a = v[idx0], b = v[idx1];
         v[idx0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
@@ -1248,7 +1331,8 @@ __device__ void coop_array_u2(CoopShotState& st, const GpuProgram& program,
     const auto& entry = program.fused_u2[cp_idx];
     uint8_t in_state = (bit_get(st.pz, axis) ? 2 : 0) | (bit_get(st.px, axis) ? 1 : 0);
     if (axis < *st.active_k) {
-        coop_u2_sweep(st.v, *st.active_k, axis, entry.matrices[in_state]);
+        ensure_scatter_1(st, axis);
+        coop_u2_sweep(st.v, *st.active_k, axis, entry.matrices[in_state], st.scatter_lut);
     }
     __syncthreads();
     if (threadIdx.x == 0) {
@@ -1261,12 +1345,14 @@ __device__ void coop_array_u2(CoopShotState& st, const GpuProgram& program,
 
 __device__ __noinline__ void coop_u4_sweep(GpuComplex* v, uint32_t active_k,
                                            uint32_t axis_lo, uint32_t axis_hi,
-                                           const GpuComplex mat[4][4]) {
+                                           const GpuComplex mat[4][4],
+                                           const uint32_t* lut) {
     uint64_t lo_bit = 1ULL << axis_lo;
     uint64_t hi_bit = 1ULL << axis_hi;
     uint64_t iters = 1ULL << (active_k - 2);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t base = scatter_bits_2(i, axis_lo, axis_hi);
+        uint64_t base = lut ? lut[i]
+                            : static_cast<uint32_t>(scatter_bits_2(i, axis_lo, axis_hi));
         uint64_t i0 = base;
         uint64_t i1 = base | lo_bit;
         uint64_t i2 = base | hi_bit;
@@ -1293,7 +1379,8 @@ __device__ void coop_array_u4(CoopShotState& st, const GpuProgram& program,
     uint8_t in_state = (pz_hi << 3) | (px_hi << 2) | (pz_lo << 1) | px_lo;
     const auto& entry = node.entries[in_state];
     if (axis_hi < *st.active_k) {
-        coop_u4_sweep(st.v, *st.active_k, axis_lo, axis_hi, entry.matrix);
+        ensure_scatter_2(st, axis_lo, axis_hi);
+        coop_u4_sweep(st.v, *st.active_k, axis_lo, axis_hi, entry.matrix, st.scatter_lut);
     }
     __syncthreads();
     if (threadIdx.x == 0) {
@@ -1719,6 +1806,12 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     __shared__ uint8_t branch;
     __shared__ double red0[256];
     __shared__ double red1[256];
+    // Precomputed scatter-bits LUT: max 2^(k-1) = 512 entries for rank 10
+    __shared__ uint32_t scatter_lut[kSharedMaxAmplitudes / 2];
+    __shared__ uint32_t cached_axis1;
+    __shared__ uint32_t cached_axis2;
+    __shared__ uint32_t cached_lut_k;
+    __shared__ uint32_t cached_lut_mode;
 
     if (threadIdx.x == 0) {
         px[0] = 0;
@@ -1730,6 +1823,7 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
         discarded = 0;
         branch = 0;
         v[0] = {1.0f, 0.0f};
+        cached_lut_mode = 0;  // invalidate LUT cache
         for (uint32_t i = 0; i < program.num_observables; ++i) {
             obs[i] = 0;
         }
@@ -1740,13 +1834,17 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     if (threadIdx.x == 0) {
         rng.seed(seed, shot_offset + batch_shot_id);
         CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                         &discarded, &branch, red0, red1};
+                         &discarded, &branch, red0, red1, nullptr,
+                         scatter_lut, &cached_axis1, &cached_axis2,
+                         &cached_lut_k, &cached_lut_mode};
         coop_draw_next_noise(st, program, rng);
     }
     __syncthreads();
 
     CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                     &discarded, &branch, red0, red1};
+                     &discarded, &branch, red0, red1, nullptr,
+                     scatter_lut, &cached_axis1, &cached_axis2,
+                     &cached_lut_k, &cached_lut_mode};
     execute_shot_coop(program, rng, st);
 
     if (threadIdx.x == 0 && discarded == 0) {
@@ -1819,13 +1917,15 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
         if (threadIdx.x == 0) {
             rng.seed(seed, shot_offset + batch_shot_id);
             CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                             &discarded, &branch, red0, red1};
+                             &discarded, &branch, red0, red1, nullptr,
+                             nullptr, nullptr, nullptr, nullptr, nullptr};
             coop_draw_next_noise(st, program, rng);
         }
         __syncthreads();
 
         CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                         &discarded, &branch, red0, red1};
+                         &discarded, &branch, red0, red1, nullptr,
+                         nullptr, nullptr, nullptr, nullptr, nullptr};
         execute_shot_coop(program, rng, st);
 
         if (threadIdx.x == 0 && discarded == 0) {
