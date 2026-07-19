@@ -5,7 +5,7 @@
 #   ./scripts/bench_sweep.sh <approach> [shots] [gpu_partition]
 #
 # Approaches: svm, compiled, per-op, graph, split, persistent, svm-opt
-# GPU partitions: mi300x, mi300x-es, mi325x, mi350x-es
+# GPU partitions: mi300x, mi300x, mi325x, mi350x-es
 #
 # Output: results/<approach>_<gpu>_<timestamp>.csv
 #
@@ -16,7 +16,7 @@ set -euo pipefail
 
 APPROACH="${1:-svm}"
 SHOTS="${2:-1000000}"
-PARTITION="${3:-mi300x-es}"
+PARTITION="${3:-mi300x}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTDIR="results"
 OUTFILE="${OUTDIR}/${APPROACH}_${PARTITION}_${TIMESTAMP}.csv"
@@ -42,7 +42,7 @@ echo "approach,partition,circuit,qubits,t_gates,depth_rounds,peak_rank,shots,pas
 
 # Determine GPU arch based on partition
 case "$PARTITION" in
-    mi300x|mi300x-es) ARCH="gfx942" ;;
+    mi300x|mi300x) ARCH="gfx942" ;;
     mi325x)           ARCH="gfx942" ;;  # MI325X is same ISA
     mi350x-es)        ARCH="gfx950" ;;  # MI350X uses gfx950
     *)                ARCH="gfx942" ;;

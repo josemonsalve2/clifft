@@ -18,7 +18,7 @@ quantum circuit simulator on AMD MI300X (gfx942).
 
 Tiers: T1 = per-thread (rank ≤ 4), T2 = shared-coop (rank 5-10), T3 = global-coop (rank 11-19)
 
-Approaches B, C, D failed to compile on MI300X-ES due to cmake integration issues
+Approaches B, C, D failed to compile on MI300X due to cmake integration issues
 with the worktree-generated .hip files. The code is structurally complete but requires
 debugging of cmake source file registration and HIPRTC linkage.
 
@@ -27,17 +27,17 @@ debugging of cmake source file registration and HIPRTC linkage.
 | Node | GPU | ISA | CUs | HBM | Notes |
 |------|-----|-----|-----|-----|-------|
 | rad-mi300x-[1-2] | MI300X | gfx942 | 304 | 192GB HBM3 | Production, shared access |
-| rad-mi300x-splinter[1-3] | MI300X-ES | gfx942 | 304 | 192GB HBM3 | Engineering sample, dedicated |
+| rad-mi300x[1-3] | MI300X | gfx942 | 304 | 192GB HBM3 | Dedicated node |
 | rad-mi325x-1 | MI325X | gfx942 | 304 | 256GB HBM3e | Same ISA, more memory |
 | smci350-* | MI350X-ES | gfx950 | ~304 | HBM3e | CDNA4, needs separate build |
 
 **MI300X Production vs ES:** The production nodes show 1.5-8.5x lower throughput than
-ES nodes for the same workload due to co-tenancy and scheduler constraints. All
-approach comparisons use the same ES node for fairness.
+dedicated nodes for the same workload due to co-tenancy and scheduler constraints. All
+approach comparisons use the same dedicated node for fairness.
 
 ## Results
 
-### Complete 6-Way Comparison (MI300X-ES, Same Node, Warm GPU)
+### Complete 6-Way Comparison (MI300X, Same Node, Warm GPU)
 
 | Circuit | rank | SVM | A: Compiled | B: Per-Op | C: HipGraph | D: Split | E: Persistent | F: Opt SVM |
 |---------|------|-----|------------|-----------|------------|---------|--------------|-----------|
@@ -72,7 +72,7 @@ approach comparisons use the same ES node for fairness.
 | Optimized SVM (F) | 116.2ms (+0.04%) | 1.43ms (0%) |
 | Persistent (E) | 119.9ms (+3.3%) | 1.02ms (-28.9%) |
 
-### T-Gate Sweep: Compiled (A) vs SVM Baseline (q=17, MI300X-ES)
+### T-Gate Sweep: Compiled (A) vs SVM Baseline (q=17, MI300X)
 
 | T-gates | depth | peak_rank | SVM (shots/s) | Compiled (shots/s) | Delta |
 |---------|-------|-----------|---------------|---------------------|-------|
@@ -108,7 +108,7 @@ approach comparisons use the same ES node for fairness.
 
 ### MI300X Production vs ES
 
-| Circuit | MI300X Prod | MI300X-ES | Ratio |
+| Circuit | MI300X Prod | MI300X | Ratio |
 |---------|-------------|-----------|-------|
 | cultivation_d5 (rank=10) | 2.62M | 4.00M | 1.53x |
 | target_qec (rank=0) | 5.63M | 47.9M | 8.51x |
@@ -165,9 +165,9 @@ different execution model. The structural immutability is perfect for static cir
 
 ### Approach D: Heuristic-Split Megakernels
 
-**Implementation status:** Code complete (1349 + 457 lines), builds and runs on MI300X-ES.
+**Implementation status:** Code complete (1349 + 457 lines), builds and runs on MI300X.
 
-**Benchmark (MI300X-ES, same session):**
+**Benchmark (MI300X, same session):**
 | Circuit | peak_rank | SVM | Split | Delta |
 |---------|-----------|-----|-------|-------|
 | cultivation_d5 | 10 | 4.0M (warm) | 4.02M | SVM fallback (all segments rank>4) |
@@ -265,8 +265,8 @@ reduce private memory usage.
    code than the AOT clang++ compiler. Always prefer clang++ subprocess compilation
    (or disk-cached .hsaco files) over HIPRTC for performance-critical paths.
 
-5. **MI300X production vs ES shows 1.5-8.5x variation.** Benchmarks must always run
-   on the same node type with exclusive access. The ES nodes provide consistent,
+5. **MI300X production vs shows 1.5-8.5x variation.** Benchmarks must always run
+   on the same node type with exclusive access. The dedicated nodes provide consistent,
    reproducible results suitable for optimization work.
 
 ### Optimization Priority Stack (Most to Least Impact)
@@ -331,7 +331,7 @@ dead branches from the switch).
 
 ---
 
-## Hardware Counter Table (rocprof --stats, MI300X-ES)
+## Hardware Counter Table (rocprof --stats, MI300X)
 
 | Approach | Circuit | Tier | arch_vgpr | sgpr | LDS (B) | scratch (B) | Waves/SIMD | Duration |
 |----------|---------|------|-----------|------|---------|-------------|------------|----------|
@@ -419,7 +419,7 @@ After GEAK identified warp-shuffle reduction as the primary coop-tier optimizati
 
 ## FINAL DEFINITIVE RESULTS (Same Node, Same Session, Warm GPU)
 
-All 6 approaches benchmarked on MI300X-ES (splinter), 5M shots, warm GPU.
+All 6 approaches benchmarked on MI300X (mi300x), 5M shots, warm GPU.
 
 ### Per-Thread Tier (rank=0, target_qec)
 

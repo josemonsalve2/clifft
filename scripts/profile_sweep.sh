@@ -10,7 +10,7 @@
 set -euo pipefail
 
 APPROACH="${1:-svm}"
-PARTITION="${2:-mi300x-es}"
+PARTITION="${2:-mi300x}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTDIR="results"
 OUTFILE="${OUTDIR}/profile_${APPROACH}_${PARTITION}_${TIMESTAMP}.csv"
@@ -31,7 +31,7 @@ case "$APPROACH" in
 esac
 
 case "$PARTITION" in
-    mi300x|mi300x-es) ARCH="gfx942" ;;
+    mi300x|mi300x) ARCH="gfx942" ;;
     mi325x)           ARCH="gfx942" ;;
     mi350x-es)        ARCH="gfx950" ;;
     *)                ARCH="gfx942" ;;
