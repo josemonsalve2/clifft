@@ -141,57 +141,23 @@ __device__ void coop_array_u2(CoopShotState& st, ...) {
 
 ---
 
-## OPT-3: Precomputed Scatter-Bits LUT (pending measurement)
+## OPT-3: Precomputed Scatter-Bits LUT — REVERTED
 
 **Tag:** `svm-opt-4-scatter-lut`
-**Commit:** `d2d22a4`
+**Commit:** `d2d22a4` (reverted)
 
-Every coop array sweep calls `scatter_bits_1(i, axis)` or `scatter_bits_2(i, a, b)`
-in a loop over amplitude pairs. These functions compute bit permutations via
-shift/mask/OR — ~15 SALU instructions per call.
+**Status:** Reverted due to VGPR regression. The LUT's 512-entry `__shared__`
+array plus 4 cache-state variables increased VGPR pressure from 108 to 128,
+causing a -3.8% throughput regression on the coop tier. The extra LDS footprint
+reduced occupancy enough to outweigh the SALU savings.
 
-**Fix:** Precompute the permutation table into `__shared__ uint32_t scatter_lut[512]`
-once per axis change, using all threads cooperatively. Subsequent loop iterations
-use `scatter_lut[i]` (1 LDS load) instead of the scalar computation.
+**Original idea:** Precompute `scatter_bits_1`/`scatter_bits_2` into a shared LUT
+once per axis change, replacing ~15 SALU instructions per loop iteration with
+1 LDS load. PMC counters showed SALU-heavy execution (13.6B vs 7.5B VALU), but
+the register spill cost dominated.
 
-**Why it should help:** PMC counters show SQ_INSTS_SALU = 13.6B vs SQ_INSTS_VALU = 7.5B
-(1.81x ratio). Scatter-bits computation is a major contributor to the SALU count.
-
-**Cache:** The LUT is only recomputed when `(active_k, axis)` changes. Consecutive
-same-axis ops reuse the cached table. Cache invalidation on expand/contract ops.
-
-**Before:**
-```cpp
-__device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
-    uint32_t iters = 1u << (*st.active_k - 1);
-    for (uint32_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx0 = scatter_bits_1(i, axis);  // ~15 SALU per call
-        uint64_t idx1 = idx0 | (1ULL << axis);
-        GpuComplex a = st.v[idx0], b = st.v[idx1];
-        st.v[idx0] = cscale(cadd(a, b), kInvSqrt2);
-        st.v[idx1] = cscale(csub(a, b), kInvSqrt2);
-    }
-    __syncthreads();
-}
-```
-
-**After:**
-```cpp
-__device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
-    // Precompute once (all threads cooperate), cached across calls
-    ensure_scatter_1(st, axis);
-    uint32_t iters = 1u << (*st.active_k - 1);
-    uint32_t axis_bit = 1u << axis;
-    for (uint32_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint32_t idx0 = st.scatter_lut[i];  // 1 LDS load instead of ~15 SALU
-        uint32_t idx1 = idx0 | axis_bit;
-        GpuComplex a = st.v[idx0], b = st.v[idx1];
-        st.v[idx0] = cscale(cadd(a, b), kInvSqrt2);
-        st.v[idx1] = cscale(csub(a, b), kInvSqrt2);
-    }
-    __syncthreads();
-}
-```
+**Lesson:** LDS-cached index tables must be evaluated against VGPR budget.
+On MI300X, crossing the 108-VGPR boundary drops occupancy from 8 to 7 waves/CU.
 
 ---
 

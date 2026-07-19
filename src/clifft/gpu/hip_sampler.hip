@@ -67,7 +67,6 @@ void free_buffers(DeviceBuffers& b) {
     hipFree(b.fused_u2);
     hipFree(b.fused_u4);
     hipFree(b.exp_val_masks);
-    hipFree(b.segments);
 }
 
 __device__ inline uint64_t rotl64(uint64_t x, int k) {
@@ -812,149 +811,6 @@ __device__ void execute_shot(const GpuProgram& program, Rng& rng, ShotState& st)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parameterized per-thread segment execution for the hybrid kernel.
-// Identical to execute_shot() but operates on instruction range
-// [bc_start, bc_end) instead of the full program.
-// ---------------------------------------------------------------------------
-__device__ void execute_segment_thread(const GpuProgram& program, Rng& rng,
-                                        ShotState& st,
-                                        uint32_t bc_start, uint32_t bc_end) {
-    for (uint32_t pc = bc_start; pc < bc_end; ++pc) {
-        const GpuInstr& instr = program.instrs[pc];
-        switch (instr.opcode) {
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CNOT):
-                frame_cnot(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CZ):
-                frame_cz(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_H):
-                frame_h(st, instr.axis_1);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S):
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S_DAG):
-                frame_s(st, instr.axis_1);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_SWAP):
-                frame_swap(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_CNOT):
-                array_cnot(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_CZ):
-                array_cz(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_SWAP):
-                array_swap(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_MULTI_CNOT):
-                array_multi_cnot(st, instr.axis_1, instr.mask);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_MULTI_CZ):
-                array_multi_cz(st, instr.axis_1, instr.mask);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_H):
-                array_h(st, instr.axis_1);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_S):
-                array_s(st, instr.axis_1, false);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_S_DAG):
-                array_s(st, instr.axis_1, true);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_T):
-                array_t(st, instr.axis_1, false);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_T_DAG):
-                array_t(st, instr.axis_1, true);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND):
-                expand_plain(st);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_T):
-                expand_t(st, instr.axis_1, false);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_T_DAG):
-                expand_t(st, instr.axis_1, true);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_DORMANT_STATIC):
-                if (instr.flags & kFlagIdentity) {
-                    st.meas[instr.a] = (instr.flags & kFlagSign) ? 1 : 0;
-                } else {
-                    uint8_t outcome = bit_get(st.px, instr.axis_1) ? 1 : 0;
-                    st.meas[instr.a] = outcome ^ static_cast<uint8_t>((instr.flags & kFlagSign) != 0);
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_DORMANT_RANDOM):
-                meas_dormant_random(st, rng, instr.axis_1, instr.a,
-                                    (instr.flags & kFlagSign) != 0);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_ACTIVE_DIAGONAL):
-                meas_active_diagonal(st, rng, instr.axis_1, instr.a,
-                                     (instr.flags & kFlagSign) != 0);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_ACTIVE_INTERFERE):
-                meas_active_interfere(st, rng, instr.axis_1, instr.a,
-                                      (instr.flags & kFlagSign) != 0);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_SWAP_MEAS_INTERFERE):
-                swap_meas_interfere(st, rng, instr.axis_1, instr.axis_2, instr.a,
-                                    (instr.flags & kFlagSign) != 0);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_APPLY_PAULI):
-                apply_pauli(st, program, instr.a, instr.b);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_NOISE):
-                exec_noise(st, program, rng, instr.a);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_NOISE_BLOCK):
-                exec_noise_block(st, program, rng, instr.a, instr.b);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_READOUT_NOISE): {
-                const GpuReadoutNoise& r = program.readout_noise[instr.a];
-                if (rng.uniform() < r.prob) {
-                    st.meas[r.meas_idx] ^= 1;
-                }
-                break;
-            }
-            case static_cast<uint8_t>(clifft::Opcode::OP_DETECTOR):
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_POSTSELECT):
-                exec_postselect(st, program, instr);
-                if (st.discarded) {
-                    return;
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_OBSERVABLE):
-                exec_observable(st, program, instr);
-                break;
-            default:
-                switch (instr.opcode) {
-                    case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_ROT):
-                        expand_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
-                        break;
-                    case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_ROT):
-                        array_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
-                        break;
-                    case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U2):
-                        array_u2(st, program, instr.axis_1, instr.a);
-                        break;
-                    case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U4):
-                        array_u4(st, program, instr.axis_1, instr.axis_2, instr.a);
-                        break;
-                    case static_cast<uint8_t>(clifft::Opcode::OP_EXP_VAL):
-                        exec_exp_val(st, program, instr.a, instr.b);
-                        break;
-                    default:
-                        st.discarded = true;
-                        return;
-                }
-                break;
-        }
-    }
-}
-
 struct CoopShotState {
     GpuComplex* v;
     GpuComplex* scratch;
@@ -969,67 +825,7 @@ struct CoopShotState {
     double* red0;
     double* red1;
     double* exp_vals;
-    uint32_t* scatter_lut;       // precomputed index LUT in LDS (nullptr for global-coop)
-    uint32_t* cached_axis1;      // last axis used for scatter LUT
-    uint32_t* cached_axis2;      // last axis2 used for 2-axis LUT
-    uint32_t* cached_lut_k;      // last active_k used for LUT
-    uint32_t* cached_lut_mode;   // 0=none, 1=scatter_1, 2=scatter_2
 };
-
-// Precompute scatter_bits_1 LUT for all i in [0, 2^(active_k-1)).
-// After this call, lut[i] == insert_zero_bit(i, axis).
-__device__ void precompute_scatter_1(uint32_t* lut, uint32_t active_k, uint32_t axis) {
-    uint32_t n = 1u << (active_k - 1);
-    for (uint32_t i = threadIdx.x; i < n; i += blockDim.x) {
-        lut[i] = static_cast<uint32_t>(insert_zero_bit(i, axis));
-    }
-    __syncthreads();
-}
-
-// Precompute scatter_bits_2 LUT for all i in [0, 2^(active_k-2)).
-// After this call, lut[i] == scatter_bits_2(i, axis1, axis2).
-__device__ void precompute_scatter_2(uint32_t* lut, uint32_t active_k,
-                                     uint32_t axis1, uint32_t axis2) {
-    uint32_t n = 1u << (active_k - 2);
-    for (uint32_t i = threadIdx.x; i < n; i += blockDim.x) {
-        lut[i] = static_cast<uint32_t>(scatter_bits_2(i, axis1, axis2));
-    }
-    __syncthreads();
-}
-
-// Ensure scatter_1 LUT is populated for the given (active_k, axis).
-// Uses cached state to skip recomputation when possible.
-__device__ void ensure_scatter_1(CoopShotState& st, uint32_t axis) {
-    if (st.scatter_lut == nullptr) return;
-    uint32_t k = *st.active_k;
-    if (*st.cached_lut_mode == 1 && *st.cached_axis1 == axis && *st.cached_lut_k == k) {
-        return;  // already populated
-    }
-    precompute_scatter_1(st.scatter_lut, k, axis);
-    if (threadIdx.x == 0) {
-        *st.cached_axis1 = axis;
-        *st.cached_lut_k = k;
-        *st.cached_lut_mode = 1;
-    }
-    // No extra syncthreads needed: precompute_scatter_1 already did one
-}
-
-// Ensure scatter_2 LUT is populated for the given (active_k, axis1, axis2).
-__device__ void ensure_scatter_2(CoopShotState& st, uint32_t axis1, uint32_t axis2) {
-    if (st.scatter_lut == nullptr) return;
-    uint32_t k = *st.active_k;
-    if (*st.cached_lut_mode == 2 && *st.cached_axis1 == axis1 &&
-        *st.cached_axis2 == axis2 && *st.cached_lut_k == k) {
-        return;  // already populated
-    }
-    precompute_scatter_2(st.scatter_lut, k, axis1, axis2);
-    if (threadIdx.x == 0) {
-        *st.cached_axis1 = axis1;
-        *st.cached_axis2 = axis2;
-        *st.cached_lut_k = k;
-        *st.cached_lut_mode = 2;
-    }
-}
 
 __device__ void coop_reduce2(CoopShotState& st, double local0, double local1, double& out0,
                              double& out1) {
@@ -1090,11 +886,8 @@ __device__ void coop_array_cnot(CoopShotState& st, uint32_t c, uint32_t t) {
     uint64_t c_bit = 1ULL << c;
     uint64_t t_bit = 1ULL << t;
     uint64_t iters = 1ULL << (*st.active_k - 2);
-    ensure_scatter_2(st, c, t);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t base = (st.scatter_lut ? st.scatter_lut[i]
-                                        : static_cast<uint32_t>(scatter_bits_2(i, c, t)))
-                        | c_bit;
+        uint64_t base = scatter_bits_2(i, c, t) | c_bit;
         GpuComplex tmp = st.v[base];
         st.v[base] = st.v[base | t_bit];
         st.v[base | t_bit] = tmp;
@@ -1112,11 +905,8 @@ __device__ void coop_array_cnot(CoopShotState& st, uint32_t c, uint32_t t) {
 __device__ void coop_array_cz(CoopShotState& st, uint32_t a, uint32_t b) {
     uint64_t both_bits = (1ULL << a) | (1ULL << b);
     uint64_t iters = 1ULL << (*st.active_k - 2);
-    ensure_scatter_2(st, a, b);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx = (st.scatter_lut ? st.scatter_lut[i]
-                                       : static_cast<uint32_t>(scatter_bits_2(i, a, b)))
-                       | both_bits;
+        uint64_t idx = scatter_bits_2(i, a, b) | both_bits;
         st.v[idx].re = -st.v[idx].re;
         st.v[idx].im = -st.v[idx].im;
     }
@@ -1134,10 +924,8 @@ __device__ void coop_array_swap(CoopShotState& st, uint32_t a, uint32_t b) {
     uint64_t a_bit = 1ULL << a;
     uint64_t b_bit = 1ULL << b;
     uint64_t iters = 1ULL << (*st.active_k - 2);
-    ensure_scatter_2(st, a, b);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t base = st.scatter_lut ? st.scatter_lut[i]
-                                       : static_cast<uint32_t>(scatter_bits_2(i, a, b));
+        uint64_t base = scatter_bits_2(i, a, b);
         GpuComplex tmp = st.v[base | a_bit];
         st.v[base | a_bit] = st.v[base | b_bit];
         st.v[base | b_bit] = tmp;
@@ -1153,10 +941,8 @@ __device__ void coop_array_swap(CoopShotState& st, uint32_t a, uint32_t b) {
 __device__ void coop_array_multi_cnot(CoopShotState& st, uint32_t target, uint64_t ctrl_mask) {
     uint64_t t_bit = 1ULL << target;
     uint64_t half = 1ULL << (*st.active_k - 1);
-    ensure_scatter_1(st, target);
     for (uint64_t idx = threadIdx.x; idx < half; idx += blockDim.x) {
-        uint64_t actual = st.scatter_lut ? st.scatter_lut[idx]
-                                         : static_cast<uint32_t>(scatter_bits_1(idx, target));
+        uint64_t actual = scatter_bits_1(idx, target);
         bool parity = (__popcll(actual & ctrl_mask) & 1) != 0;
         if (parity) {
             GpuComplex tmp = st.v[actual];
@@ -1181,11 +967,8 @@ __device__ void coop_array_multi_cnot(CoopShotState& st, uint32_t target, uint64
 __device__ void coop_array_multi_cz(CoopShotState& st, uint32_t control, uint64_t target_mask) {
     uint64_t c_bit = 1ULL << control;
     uint64_t half = 1ULL << (*st.active_k - 1);
-    ensure_scatter_1(st, control);
     for (uint64_t idx = threadIdx.x; idx < half; idx += blockDim.x) {
-        uint64_t actual = (st.scatter_lut ? st.scatter_lut[idx]
-                                          : static_cast<uint32_t>(scatter_bits_1(idx, control)))
-                          | c_bit;
+        uint64_t actual = scatter_bits_1(idx, control) | c_bit;
         bool negate = (__popcll(actual & target_mask) & 1) != 0;
         if (negate) {
             st.v[actual].re = -st.v[actual].re;
@@ -1209,10 +992,8 @@ __device__ void coop_array_multi_cz(CoopShotState& st, uint32_t control, uint64_
 __device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
     uint64_t axis_bit = 1ULL << axis;
     uint64_t iters = 1ULL << (*st.active_k - 1);
-    ensure_scatter_1(st, axis);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx0 = st.scatter_lut ? st.scatter_lut[i]
-                                       : static_cast<uint32_t>(scatter_bits_1(i, axis));
+        uint64_t idx0 = scatter_bits_1(i, axis);
         uint64_t idx1 = idx0 | axis_bit;
         GpuComplex a = st.v[idx0];
         GpuComplex b = st.v[idx1];
@@ -1232,11 +1013,8 @@ __device__ void coop_array_h(CoopShotState& st, uint32_t axis) {
 __device__ void coop_apply_phase(CoopShotState& st, uint32_t axis, GpuComplex phase) {
     uint64_t axis_bit = 1ULL << axis;
     uint64_t iters = 1ULL << (*st.active_k - 1);
-    ensure_scatter_1(st, axis);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx = (st.scatter_lut ? st.scatter_lut[i]
-                                       : static_cast<uint32_t>(scatter_bits_1(i, axis)))
-                       | axis_bit;
+        uint64_t idx = scatter_bits_1(i, axis) | axis_bit;
         st.v[idx] = cmul(st.v[idx], phase);
     }
     __syncthreads();
@@ -1429,11 +1207,8 @@ __device__ void coop_array_rot(CoopShotState& st, uint32_t axis, double z_re, do
         uint64_t axis_bit = 1ULL << axis;
         uint64_t iters = 1ULL << (*st.active_k - 1);
         GpuComplex phase{static_cast<float>(z_re), static_cast<float>(im)};
-        ensure_scatter_1(st, axis);
         for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-            uint64_t idx = (st.scatter_lut ? st.scatter_lut[i]
-                                           : static_cast<uint32_t>(scatter_bits_1(i, axis)))
-                           | axis_bit;
+            uint64_t idx = scatter_bits_1(i, axis) | axis_bit;
             st.v[idx] = cmul(st.v[idx], phase);
         }
     }
@@ -1456,17 +1231,34 @@ __device__ void coop_expand_rot(CoopShotState& st, uint32_t axis, double z_re, d
 }
 
 __device__ __noinline__ void coop_u2_sweep(GpuComplex* v, uint32_t active_k,
-                                           uint32_t axis, const GpuComplex* mat,
-                                           const uint32_t* lut) {
+                                           uint32_t axis, const GpuComplex* mat) {
+    // Broadcast 2x2 gate matrix via __shfl: only lane 0 of each wavefront
+    // loads from global memory; all other lanes receive via register shuffle.
+    // Saves 63 global-memory loads per wavefront (4 GpuComplex = 8 floats).
+    uint32_t lane = threadIdx.x & 63;
+    float m0_re = 0.0f, m0_im = 0.0f, m1_re = 0.0f, m1_im = 0.0f;
+    float m2_re = 0.0f, m2_im = 0.0f, m3_re = 0.0f, m3_im = 0.0f;
+    if (lane == 0) {
+        m0_re = mat[0].re; m0_im = mat[0].im;
+        m1_re = mat[1].re; m1_im = mat[1].im;
+        m2_re = mat[2].re; m2_im = mat[2].im;
+        m3_re = mat[3].re; m3_im = mat[3].im;
+    }
+    m0_re = __shfl(m0_re, 0); m0_im = __shfl(m0_im, 0);
+    m1_re = __shfl(m1_re, 0); m1_im = __shfl(m1_im, 0);
+    m2_re = __shfl(m2_re, 0); m2_im = __shfl(m2_im, 0);
+    m3_re = __shfl(m3_re, 0); m3_im = __shfl(m3_im, 0);
+    GpuComplex m0{m0_re, m0_im}, m1{m1_re, m1_im};
+    GpuComplex m2{m2_re, m2_im}, m3{m3_re, m3_im};
+
     uint64_t axis_bit = 1ULL << axis;
     uint64_t iters = 1ULL << (active_k - 1);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t idx0 = lut ? lut[i]
-                            : static_cast<uint32_t>(scatter_bits_1(i, axis));
+        uint64_t idx0 = scatter_bits_1(i, axis);
         uint64_t idx1 = idx0 | axis_bit;
         GpuComplex a = v[idx0], b = v[idx1];
-        v[idx0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
-        v[idx1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
+        v[idx0] = cadd(cmul(a, m0), cmul(b, m1));
+        v[idx1] = cadd(cmul(a, m2), cmul(b, m3));
     }
 }
 
@@ -1475,8 +1267,7 @@ __device__ void coop_array_u2(CoopShotState& st, const GpuProgram& program,
     const auto& entry = program.fused_u2[cp_idx];
     uint8_t in_state = (bit_get(st.pz, axis) ? 2 : 0) | (bit_get(st.px, axis) ? 1 : 0);
     if (axis < *st.active_k) {
-        ensure_scatter_1(st, axis);
-        coop_u2_sweep(st.v, *st.active_k, axis, entry.matrices[in_state], st.scatter_lut);
+        coop_u2_sweep(st.v, *st.active_k, axis, entry.matrices[in_state]);
     }
     __syncthreads();
     if (threadIdx.x == 0) {
@@ -1489,27 +1280,42 @@ __device__ void coop_array_u2(CoopShotState& st, const GpuProgram& program,
 
 __device__ __noinline__ void coop_u4_sweep(GpuComplex* v, uint32_t active_k,
                                            uint32_t axis_lo, uint32_t axis_hi,
-                                           const GpuComplex mat[4][4],
-                                           const uint32_t* lut) {
+                                           const GpuComplex mat[4][4]) {
+    // Broadcast 4x4 gate matrix via __shfl: only lane 0 of each wavefront
+    // loads from global memory; all other lanes receive via register shuffle.
+    // Saves 63 global-memory loads per wavefront (16 GpuComplex = 32 floats).
+    uint32_t lane = threadIdx.x & 63;
+    GpuComplex lm[4][4];
+    float tmp_re = 0.0f, tmp_im = 0.0f;
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            if (lane == 0) {
+                tmp_re = mat[r][c].re;
+                tmp_im = mat[r][c].im;
+            }
+            lm[r][c].re = __shfl(tmp_re, 0);
+            lm[r][c].im = __shfl(tmp_im, 0);
+        }
+    }
+
     uint64_t lo_bit = 1ULL << axis_lo;
     uint64_t hi_bit = 1ULL << axis_hi;
     uint64_t iters = 1ULL << (active_k - 2);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
-        uint64_t base = lut ? lut[i]
-                            : static_cast<uint32_t>(scatter_bits_2(i, axis_lo, axis_hi));
+        uint64_t base = scatter_bits_2(i, axis_lo, axis_hi);
         uint64_t i0 = base;
         uint64_t i1 = base | lo_bit;
         uint64_t i2 = base | hi_bit;
         uint64_t i3 = base | lo_bit | hi_bit;
         GpuComplex v0 = v[i0], v1 = v[i1], v2 = v[i2], v3 = v[i3];
-        v[i0] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
-                     cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3])));
-        v[i1] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
-                     cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3])));
-        v[i2] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
-                     cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3])));
-        v[i3] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
-                     cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
+        v[i0] = cadd(cadd(cmul(v0, lm[0][0]), cmul(v1, lm[0][1])),
+                     cadd(cmul(v2, lm[0][2]), cmul(v3, lm[0][3])));
+        v[i1] = cadd(cadd(cmul(v0, lm[1][0]), cmul(v1, lm[1][1])),
+                     cadd(cmul(v2, lm[1][2]), cmul(v3, lm[1][3])));
+        v[i2] = cadd(cadd(cmul(v0, lm[2][0]), cmul(v1, lm[2][1])),
+                     cadd(cmul(v2, lm[2][2]), cmul(v3, lm[2][3])));
+        v[i3] = cadd(cadd(cmul(v0, lm[3][0]), cmul(v1, lm[3][1])),
+                     cadd(cmul(v2, lm[3][2]), cmul(v3, lm[3][3])));
     }
 }
 
@@ -1523,8 +1329,7 @@ __device__ void coop_array_u4(CoopShotState& st, const GpuProgram& program,
     uint8_t in_state = (pz_hi << 3) | (px_hi << 2) | (pz_lo << 1) | px_lo;
     const auto& entry = node.entries[in_state];
     if (axis_hi < *st.active_k) {
-        ensure_scatter_2(st, axis_lo, axis_hi);
-        coop_u4_sweep(st.v, *st.active_k, axis_lo, axis_hi, entry.matrix, st.scatter_lut);
+        coop_u4_sweep(st.v, *st.active_k, axis_lo, axis_hi, entry.matrix);
     }
     __syncthreads();
     if (threadIdx.x == 0) {
@@ -1845,263 +1650,6 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parameterized cooperative segment execution for the hybrid kernel.
-// Identical to execute_shot_coop() but operates on instruction range
-// [bc_start, bc_end) instead of the full program.
-// ---------------------------------------------------------------------------
-__device__ void execute_segment_coop(const GpuProgram& program, Rng& rng,
-                                      CoopShotState& st,
-                                      uint32_t bc_start, uint32_t bc_end) {
-    for (uint32_t pc = bc_start; pc < bc_end; ++pc) {
-        const GpuInstr& instr = program.instrs[pc];
-        switch (instr.opcode) {
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CNOT):
-                if (threadIdx.x == 0) {
-                    bool px_c = bit_get(st.px, instr.axis_1);
-                    bool pz_t = bit_get(st.pz, instr.axis_2);
-                    bit_xor(st.px, instr.axis_2, px_c);
-                    bit_xor(st.pz, instr.axis_1, pz_t);
-                }
-                if (pc + 1 >= bc_end || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
-                    __syncthreads();
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CZ):
-                if (threadIdx.x == 0) {
-                    bool px_a = bit_get(st.px, instr.axis_1);
-                    bool px_b = bit_get(st.px, instr.axis_2);
-                    bit_xor(st.pz, instr.axis_2, px_a);
-                    bit_xor(st.pz, instr.axis_1, px_b);
-                }
-                if (pc + 1 >= bc_end || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
-                    __syncthreads();
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_H):
-                if (threadIdx.x == 0) {
-                    bool px = bit_get(st.px, instr.axis_1);
-                    bool pz = bit_get(st.pz, instr.axis_1);
-                    bit_set(st.px, instr.axis_1, pz);
-                    bit_set(st.pz, instr.axis_1, px);
-                }
-                if (pc + 1 >= bc_end || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
-                    __syncthreads();
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S):
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S_DAG):
-                if (threadIdx.x == 0) {
-                    bool px = bit_get(st.px, instr.axis_1);
-                    bit_xor(st.pz, instr.axis_1, px);
-                }
-                if (pc + 1 >= bc_end || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
-                    __syncthreads();
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_SWAP):
-                if (threadIdx.x == 0) {
-                    bit_swap(st.px, instr.axis_1, st.px, instr.axis_2);
-                    bit_swap(st.pz, instr.axis_1, st.pz, instr.axis_2);
-                }
-                if (pc + 1 >= bc_end || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
-                    __syncthreads();
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_CNOT):
-                coop_array_cnot(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_CZ):
-                coop_array_cz(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_SWAP):
-                coop_array_swap(st, instr.axis_1, instr.axis_2);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_MULTI_CNOT):
-                coop_array_multi_cnot(st, instr.axis_1, instr.mask);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_MULTI_CZ):
-                coop_array_multi_cz(st, instr.axis_1, instr.mask);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_H):
-                coop_array_h(st, instr.axis_1);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_S):
-                coop_array_s(st, instr.axis_1, false);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_S_DAG):
-                coop_array_s(st, instr.axis_1, true);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_T):
-                coop_array_t(st, instr.axis_1, false);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_T_DAG):
-                coop_array_t(st, instr.axis_1, true);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND):
-                coop_expand_plain(st);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_T):
-                coop_expand_t(st, instr.axis_1, false);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_T_DAG):
-                coop_expand_t(st, instr.axis_1, true);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXPAND_ROT):
-                coop_expand_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_ROT):
-                coop_array_rot(st, instr.axis_1, instr.weight_re, instr.weight_im);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U2):
-                coop_array_u2(st, program, instr.axis_1, instr.a);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_U4):
-                coop_array_u4(st, program, instr.axis_1, instr.axis_2, instr.a);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_DORMANT_STATIC):
-                if (threadIdx.x == 0) {
-                    if (instr.flags & kFlagIdentity) {
-                        st.meas[instr.a] = (instr.flags & kFlagSign) ? 1 : 0;
-                    } else {
-                        uint8_t outcome = bit_get(st.px, instr.axis_1) ? 1 : 0;
-                        st.meas[instr.a] =
-                            outcome ^ static_cast<uint8_t>((instr.flags & kFlagSign) != 0);
-                    }
-                }
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_DORMANT_RANDOM):
-                if (threadIdx.x == 0) {
-                    uint8_t m_abs = rng.uniform() < 0.5 ? 0 : 1;
-                    bit_set(st.px, instr.axis_1, m_abs != 0);
-                    bit_set(st.pz, instr.axis_1, false);
-                    st.meas[instr.a] = m_abs ^ static_cast<uint8_t>((instr.flags & kFlagSign) != 0);
-                }
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_ACTIVE_DIAGONAL):
-                coop_meas_active_diagonal(st, rng, instr.axis_1, instr.a,
-                                          (instr.flags & kFlagSign) != 0);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_MEAS_ACTIVE_INTERFERE):
-                coop_meas_active_interfere(st, rng, instr.axis_1, instr.a,
-                                           (instr.flags & kFlagSign) != 0);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_SWAP_MEAS_INTERFERE):
-                coop_swap_meas_interfere(st, rng, instr.axis_1, instr.axis_2, instr.a,
-                                         (instr.flags & kFlagSign) != 0);
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_APPLY_PAULI):
-                if (threadIdx.x == 0 && st.meas[instr.b] != 0) {
-                    const GpuMask& mask = program.pauli_masks[instr.a];
-                    st.px[0] ^= mask.x[0];
-                    st.px[1] ^= mask.x[1];
-                    st.pz[0] ^= mask.z[0];
-                    st.pz[1] ^= mask.z[1];
-                }
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_NOISE):
-                if (threadIdx.x == 0 && instr.a == *st.next_noise_idx) {
-                    const GpuNoiseSite& site = program.noise_sites[instr.a];
-                    double roll = rng.uniform() * site.prob_sum;
-                    double cumulative = 0.0;
-                    for (uint32_t k = 0; k < site.count; ++k) {
-                        const GpuChannel& ch = program.noise_channels[site.offset + k];
-                        cumulative += ch.prob;
-                        if (roll < cumulative) {
-                            st.px[0] ^= ch.x[0];
-                            st.px[1] ^= ch.x[1];
-                            st.pz[0] ^= ch.z[0];
-                            st.pz[1] ^= ch.z[1];
-                            break;
-                        }
-                    }
-                    *st.next_noise_idx = instr.a + 1;
-                    coop_draw_next_noise(st, program, rng);
-                }
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_NOISE_BLOCK):
-                if (threadIdx.x == 0) {
-                    uint32_t end = instr.a + instr.b;
-                    while (*st.next_noise_idx >= instr.a && *st.next_noise_idx < end) {
-                        uint32_t site_idx = *st.next_noise_idx;
-                        const GpuNoiseSite& site = program.noise_sites[site_idx];
-                        double roll = rng.uniform() * site.prob_sum;
-                        double cumulative = 0.0;
-                        for (uint32_t k = 0; k < site.count; ++k) {
-                            const GpuChannel& ch = program.noise_channels[site.offset + k];
-                            cumulative += ch.prob;
-                            if (roll < cumulative) {
-                                st.px[0] ^= ch.x[0];
-                                st.px[1] ^= ch.x[1];
-                                st.pz[0] ^= ch.z[0];
-                                st.pz[1] ^= ch.z[1];
-                                break;
-                            }
-                        }
-                        *st.next_noise_idx = site_idx + 1;
-                        coop_draw_next_noise(st, program, rng);
-                    }
-                }
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_READOUT_NOISE):
-                if (threadIdx.x == 0) {
-                    const GpuReadoutNoise& r = program.readout_noise[instr.a];
-                    if (rng.uniform() < r.prob) {
-                        st.meas[r.meas_idx] ^= 1;
-                    }
-                }
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_DETECTOR):
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_POSTSELECT):
-                if (threadIdx.x == 0) {
-                    uint32_t start = program.detector_offsets[instr.a];
-                    uint32_t end = program.detector_offsets[instr.a + 1];
-                    uint8_t parity = (instr.flags & kFlagExpectedOne) ? 1 : 0;
-                    for (uint32_t i = start; i < end; ++i) {
-                        parity ^= st.meas[program.detector_targets[i]];
-                    }
-                    if (parity != 0) {
-                        *st.discarded = 1;
-                    }
-                }
-                __syncthreads();
-                if (*st.discarded) {
-                    return;
-                }
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_OBSERVABLE):
-                if (threadIdx.x == 0) {
-                    uint32_t start = program.observable_offsets[instr.a];
-                    uint32_t end = program.observable_offsets[instr.a + 1];
-                    uint8_t parity = 0;
-                    for (uint32_t i = start; i < end; ++i) {
-                        parity ^= st.meas[program.observable_targets[i]];
-                    }
-                    st.obs[instr.b] ^= parity;
-                }
-                __syncthreads();
-                break;
-            case static_cast<uint8_t>(clifft::Opcode::OP_EXP_VAL):
-                coop_exec_exp_val(st, program, instr.a, instr.b);
-                break;
-            default:
-                if (threadIdx.x == 0) {
-                    *st.discarded = 1;
-                }
-                __syncthreads();
-                return;
-        }
-    }
-}
-
 __global__ void sample_kernel(GpuProgram program, uint64_t shot_offset, uint64_t shots,
                               uint64_t seed, BlockCounts* block_counts) {
     extern __shared__ uint64_t shared_counts[];
@@ -2195,6 +1743,14 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
         return;
     }
 
+    // NOTE: Known LDS bank conflict when axis == 5 (stride 32).
+    // With GpuComplex = 8 bytes and 32 banks * 4 bytes, butterfly pairs
+    // v[idx0] and v[idx0 | 32] map to the same bank:
+    //   bank(idx) = (idx * 8 / 4) % 32 = (idx * 2) % 32
+    //   bank(idx | 32) = ((idx | 32) * 2) % 32 = (idx * 2) % 32  [collision]
+    // A swizzled layout (XOR or padding) would eliminate this but requires
+    // changing all v[] accesses across ~20 coop functions. Profile first
+    // to confirm axis==5 is frequent enough to justify the complexity.
     __shared__ GpuComplex v[kSharedMaxAmplitudes];
     __shared__ GpuComplex scratch[kSharedMaxAmplitudes / 2];
     __shared__ uint8_t meas[kMaxMeas];
@@ -2207,12 +1763,6 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     __shared__ uint8_t branch;
     __shared__ double red0[256];
     __shared__ double red1[256];
-    // Precomputed scatter-bits LUT: max 2^(k-1) = 512 entries for rank 10
-    __shared__ uint32_t scatter_lut[kSharedMaxAmplitudes / 2];
-    __shared__ uint32_t cached_axis1;
-    __shared__ uint32_t cached_axis2;
-    __shared__ uint32_t cached_lut_k;
-    __shared__ uint32_t cached_lut_mode;
 
     if (threadIdx.x == 0) {
         px[0] = 0;
@@ -2224,7 +1774,6 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
         discarded = 0;
         branch = 0;
         v[0] = {1.0f, 0.0f};
-        cached_lut_mode = 0;  // invalidate LUT cache
         for (uint32_t i = 0; i < program.num_observables; ++i) {
             obs[i] = 0;
         }
@@ -2235,17 +1784,13 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     if (threadIdx.x == 0) {
         rng.seed(seed, shot_offset + batch_shot_id);
         CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                         &discarded, &branch, red0, red1, nullptr,
-                         scatter_lut, &cached_axis1, &cached_axis2,
-                         &cached_lut_k, &cached_lut_mode};
+                         &discarded, &branch, red0, red1, nullptr};
         coop_draw_next_noise(st, program, rng);
     }
     __syncthreads();
 
     CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                     &discarded, &branch, red0, red1, nullptr,
-                     scatter_lut, &cached_axis1, &cached_axis2,
-                     &cached_lut_k, &cached_lut_mode};
+                     &discarded, &branch, red0, red1, nullptr};
     execute_shot_coop(program, rng, st);
 
     if (threadIdx.x == 0 && discarded == 0) {
@@ -2318,15 +1863,13 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
         if (threadIdx.x == 0) {
             rng.seed(seed, shot_offset + batch_shot_id);
             CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                             &discarded, &branch, red0, red1, nullptr,
-                             nullptr, nullptr, nullptr, nullptr, nullptr};
+                             &discarded, &branch, red0, red1, nullptr};
             coop_draw_next_noise(st, program, rng);
         }
         __syncthreads();
 
         CoopShotState st{v, scratch, meas, obs, px, pz, &active_k, &next_noise_idx,
-                         &discarded, &branch, red0, red1, nullptr,
-                         nullptr, nullptr, nullptr, nullptr, nullptr};
+                         &discarded, &branch, red0, red1, nullptr};
         execute_shot_coop(program, rng, st);
 
         if (threadIdx.x == 0 && discarded == 0) {
@@ -2351,183 +1894,6 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
     }
 }
 
-// ---------------------------------------------------------------------------
-// Split/Persistent Hybrid Kernel
-// ---------------------------------------------------------------------------
-//
-// Combines circuit splitting at k-transitions with persistent work-stealing.
-// For each shot, iterates over compile-time segments:
-//   - Per-thread segments (tier 0): only thread 0 runs the per-thread
-//     execute_segment_thread() path. Other threads idle. This avoids the
-//     __syncthreads() overhead of the coop path for frame-only code.
-//   - Coop segments (tier 1): all threads cooperate via
-//     execute_segment_coop() with LDS-based amplitude arrays.
-//
-// State transfer between modes is near-zero cost at k=0 boundaries:
-// the amplitude array has exactly 1 entry, so only frame bits (~32 bytes),
-// measurement record, and RNG state need to move between ShotState and
-// CoopShotState representations.
-//
-// The kernel uses a persistent work-stealing loop (same pattern as
-// sample_kernel_global_coop) where each block claims shots via atomicAdd
-// on a global work counter.
-
-__global__ void sample_kernel_hybrid(GpuProgram program, uint64_t shot_offset,
-                                     uint64_t shots, uint64_t seed,
-                                     uint64_t* work_counter, BlockCounts* counts) {
-    // Shared memory for coop segments
-    __shared__ GpuComplex v[kSharedMaxAmplitudes];
-    __shared__ GpuComplex scratch[kSharedMaxAmplitudes / 2];
-    __shared__ uint8_t meas[kMaxMeas];
-    __shared__ uint8_t obs[kMaxObs];
-    __shared__ uint64_t px[2];
-    __shared__ uint64_t pz[2];
-    __shared__ uint32_t active_k;
-    __shared__ uint32_t next_noise_idx;
-    __shared__ uint8_t discarded;
-    __shared__ uint8_t branch;
-    __shared__ double red0[256];
-    __shared__ double red1[256];
-    __shared__ uint64_t batch_shot_id;
-    __shared__ double exp_vals_buf[kMaxExpVals];
-    // Precomputed scatter-bits LUT for coop segments
-    __shared__ uint32_t scatter_lut[kSharedMaxAmplitudes / 2];
-    __shared__ uint32_t cached_axis1;
-    __shared__ uint32_t cached_axis2;
-    __shared__ uint32_t cached_lut_k;
-    __shared__ uint32_t cached_lut_mode;
-
-    while (true) {
-        // Work-stealing: claim next shot
-        if (threadIdx.x == 0) {
-            batch_shot_id =
-                atomicAdd(reinterpret_cast<unsigned long long*>(work_counter), 1ULL);
-        }
-        __syncthreads();
-        if (batch_shot_id >= shots) return;
-
-        // Initialize shared state for this shot
-        if (threadIdx.x == 0) {
-            px[0] = 0;
-            px[1] = 0;
-            pz[0] = 0;
-            pz[1] = 0;
-            active_k = 0;
-            next_noise_idx = 0;
-            discarded = 0;
-            branch = 0;
-            v[0] = {1.0f, 0.0f};
-            cached_lut_mode = 0;
-            for (uint32_t i = 0; i < program.num_observables; ++i) obs[i] = 0;
-        }
-        __syncthreads();
-
-        // Initialize RNG (thread 0 only for deterministic shot ordering)
-        Rng rng;
-        if (threadIdx.x == 0) {
-            rng.seed(seed, shot_offset + batch_shot_id);
-            // Initialize noise sampling
-            for (uint32_t i = 0; i < kMaxExpVals; ++i) exp_vals_buf[i] = 0.0;
-            CoopShotState init_st{v, scratch, meas, obs, px, pz, &active_k,
-                                  &next_noise_idx, &discarded, &branch,
-                                  red0, red1, exp_vals_buf,
-                                  scatter_lut, &cached_axis1, &cached_axis2,
-                                  &cached_lut_k, &cached_lut_mode};
-            coop_draw_next_noise(init_st, program, rng);
-        }
-        __syncthreads();
-
-        CoopShotState coop_st{v, scratch, meas, obs, px, pz, &active_k,
-                              &next_noise_idx, &discarded, &branch,
-                              red0, red1, exp_vals_buf,
-                              scatter_lut, &cached_axis1, &cached_axis2,
-                              &cached_lut_k, &cached_lut_mode};
-
-        // Execute segments with per-segment tier selection
-        for (uint32_t seg = 0; seg < program.num_segments; ++seg) {
-            const GpuSegmentDevice& s = program.segments[seg];
-
-            if (s.tier == 0) {
-                // Per-thread fast path: only thread 0 runs.
-                // At k=0 boundaries, the shared state is trivially
-                // converted to a ShotState (amplitude array has 1 entry).
-                if (threadIdx.x == 0) {
-                    // Build thread-local ShotState from shared state
-                    ShotState thr_st;
-                    thr_st.px[0] = px[0];
-                    thr_st.px[1] = px[1];
-                    thr_st.pz[0] = pz[0];
-                    thr_st.pz[1] = pz[1];
-                    thr_st.active_k = active_k;
-                    thr_st.next_noise_idx = next_noise_idx;
-                    thr_st.discarded = discarded != 0;
-                    thr_st.v[0] = v[0];
-                    for (uint32_t i = 0; i < program.total_meas_slots; ++i)
-                        thr_st.meas[i] = meas[i];
-                    for (uint32_t i = 0; i < program.num_observables; ++i)
-                        thr_st.obs[i] = obs[i];
-                    for (uint32_t i = 0; i < program.num_exp_vals; ++i)
-                        thr_st.exp_vals[i] = exp_vals_buf[i];
-
-                    // Execute the per-thread segment
-                    execute_segment_thread(program, rng, thr_st,
-                                           s.bc_start, s.bc_end);
-
-                    // Write back to shared state
-                    px[0] = thr_st.px[0];
-                    px[1] = thr_st.px[1];
-                    pz[0] = thr_st.pz[0];
-                    pz[1] = thr_st.pz[1];
-                    active_k = thr_st.active_k;
-                    next_noise_idx = thr_st.next_noise_idx;
-                    discarded = thr_st.discarded ? 1 : 0;
-                    v[0] = thr_st.v[0];
-                    for (uint32_t i = 0; i < program.total_meas_slots; ++i)
-                        meas[i] = thr_st.meas[i];
-                    for (uint32_t i = 0; i < program.num_observables; ++i)
-                        obs[i] = thr_st.obs[i];
-                    for (uint32_t i = 0; i < program.num_exp_vals; ++i)
-                        exp_vals_buf[i] = thr_st.exp_vals[i];
-                }
-                __syncthreads();
-            } else {
-                // Cooperative path: all threads participate.
-                // Invalidate scatter LUT cache at segment boundary
-                // (active_k may have changed).
-                if (threadIdx.x == 0) {
-                    cached_lut_mode = 0;
-                }
-                __syncthreads();
-                execute_segment_coop(program, rng, coop_st,
-                                     s.bc_start, s.bc_end);
-            }
-
-            if (discarded) break;
-        }
-
-        // Accumulate results (same as existing persistent kernel)
-        if (threadIdx.x == 0 && discarded == 0) {
-            bool any_logical = false;
-            for (uint32_t i = 0; i < program.num_observables; ++i) {
-                uint8_t val = obs[i];
-                if (program.expected_observables[i] != 0) val ^= 1;
-                if (val != 0) {
-                    atomicAdd(reinterpret_cast<unsigned long long*>(
-                        &counts->observable_ones[i]), 1ULL);
-                    any_logical = true;
-                }
-            }
-            atomicAdd(reinterpret_cast<unsigned long long*>(
-                &counts->passed), 1ULL);
-            if (any_logical) {
-                atomicAdd(reinterpret_cast<unsigned long long*>(
-                    &counts->logical_errors), 1ULL);
-            }
-        }
-        __syncthreads();
-    }
-}
-
 }  // namespace
 
 SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shots,
@@ -2542,43 +1908,24 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         throw std::runtime_error("GPU aggregate sampler does not keep per-shot records yet");
     }
 
-    // Determine if the hybrid kernel should be used.
-    // The hybrid path is selected when (a) --hybrid is explicitly requested
-    // and segments are available, or (b) the profitability analysis in
-    // flatten_program() determined it is beneficial.
-    bool use_hybrid_kernel = false;
-    if (!flat.segments.empty() && flat.segments.size() > 1) {
-        if (options.hybrid) {
-            use_hybrid_kernel = true;
-        } else if (flat.use_hybrid_kernel) {
-            use_hybrid_kernel = true;
-        }
-    }
-
-    bool use_thread_kernel = !use_hybrid_kernel && flat.peak_rank <= kThreadMaxPeakRank;
+    bool use_thread_kernel = flat.peak_rank <= kThreadMaxPeakRank;
     bool use_shared_coop_kernel =
-        !use_hybrid_kernel && flat.peak_rank > kThreadMaxPeakRank && flat.peak_rank <= kSharedMaxPeakRank;
-    bool use_global_coop_kernel = !use_hybrid_kernel && flat.peak_rank > kSharedMaxPeakRank;
+        flat.peak_rank > kThreadMaxPeakRank && flat.peak_rank <= kSharedMaxPeakRank;
+    bool use_global_coop_kernel = flat.peak_rank > kSharedMaxPeakRank;
     uint64_t max_batch_shots = std::min<uint64_t>(shots, kMaxBatchShots);
     uint32_t max_blocks = use_thread_kernel
                               ? static_cast<uint32_t>((max_batch_shots + block_size - 1) /
                                                       block_size)
                               : 1u;
     uint32_t global_worker_blocks = 0;
-    uint32_t hybrid_worker_blocks = 0;
-    if (use_global_coop_kernel || use_hybrid_kernel) {
+    if (use_global_coop_kernel) {
         int device = 0;
         hipDeviceProp_t prop{};
         check_hip(hipGetDevice(&device), "get HIP device");
         check_hip(hipGetDeviceProperties(&prop, device), "get HIP device properties");
-        uint32_t worker_blocks = std::max(1, prop.multiProcessorCount * 2);
-        if (max_batch_shots < worker_blocks) {
-            worker_blocks = static_cast<uint32_t>(max_batch_shots);
-        }
-        if (use_global_coop_kernel) {
-            global_worker_blocks = worker_blocks;
-        } else {
-            hybrid_worker_blocks = worker_blocks;
+        global_worker_blocks = std::max(1, prop.multiProcessorCount * 2);
+        if (max_batch_shots < global_worker_blocks) {
+            global_worker_blocks = static_cast<uint32_t>(max_batch_shots);
         }
     }
 
@@ -2615,28 +1962,6 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                                   sizeof(uint64_t)),
                        "allocate global cooperative work counter");
         }
-        if (use_hybrid_kernel) {
-            // Upload segment table to device memory.
-            std::vector<GpuSegmentDevice> device_segments;
-            device_segments.reserve(flat.segments.size());
-            for (const auto& seg : flat.segments) {
-                device_segments.push_back({seg.bc_start, seg.bc_end,
-                                           seg.local_peak_k, seg.tier});
-            }
-            check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.segments),
-                                  device_segments.size() * sizeof(GpuSegmentDevice)),
-                       "allocate hybrid segments");
-            check_hip(hipMemcpy(buffers.segments, device_segments.data(),
-                                  device_segments.size() * sizeof(GpuSegmentDevice),
-                                  hipMemcpyHostToDevice),
-                       "copy hybrid segments");
-            // Hybrid kernel uses work-stealing, needs a work counter
-            if (!buffers.work_counter) {
-                check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.work_counter),
-                                      sizeof(uint64_t)),
-                           "allocate hybrid work counter");
-            }
-        }
 
         GpuProgram gpu_program{};
         gpu_program.instrs = buffers.instrs;
@@ -2660,9 +1985,6 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         gpu_program.fused_u4 = buffers.fused_u4;
         gpu_program.exp_val_masks = buffers.exp_val_masks;
         gpu_program.has_extended_opcodes = flat.has_extended_opcodes;
-        gpu_program.segments = buffers.segments;
-        gpu_program.num_segments = use_hybrid_kernel
-            ? static_cast<uint32_t>(flat.segments.size()) : 0;
 
         hipEvent_t start{};
         hipEvent_t stop{};
@@ -2686,22 +2008,12 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     static_cast<uint32_t>((batch_shots + block_size - 1) / block_size);
             } else if (use_shared_coop_kernel) {
                 batch_blocks = static_cast<uint32_t>(batch_shots);
-            } else if (use_hybrid_kernel) {
-                batch_blocks = hybrid_worker_blocks;
             } else {
                 batch_blocks = global_worker_blocks;
             }
 
             check_hip(hipEventRecord(start), "record start event");
-            if (use_hybrid_kernel) {
-                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
-                           "clear hybrid counts");
-                check_hip(hipMemset(buffers.work_counter, 0, sizeof(uint64_t)),
-                           "clear hybrid work counter");
-                sample_kernel_hybrid<<<batch_blocks, block_size>>>(
-                    gpu_program, shot_offset, batch_shots, options.seed,
-                    buffers.work_counter, buffers.block_counts);
-            } else if (use_shared_coop_kernel) {
+            if (use_shared_coop_kernel) {
                 check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
                            "clear coop counts");
                 sample_kernel_coop<<<batch_blocks, block_size>>>(
