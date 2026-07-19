@@ -331,6 +331,78 @@ dead branches from the switch).
 
 ---
 
+## Hardware Counter Table (rocprof --stats, MI300X-ES)
+
+| Approach | Circuit | Tier | arch_vgpr | sgpr | LDS (B) | scratch (B) | Waves/SIMD | Duration |
+|----------|---------|------|-----------|------|---------|-------------|------------|----------|
+| SVM baseline+GEAK | cultivation_d5 | T2 coop | **116** | 96 | 17920 | 0 | 4 | 80.2ms |
+| SVM baseline | target_qec | T1 thread | **84** | 96 | 20480 | 1344 | 6 | 767μs |
+| A: Compiled (SVM fb) | target_qec | T1 thread | **84** | 96 | 20480 | 1344 | 6 | 731μs (-5%) |
+
+Occupancy: MI300X has 512 VGPRs per SIMD. waves = floor(512 / arch_vgpr).
+
+GEAK's warp-shuffle patch increased VGPRs from 108→116 (more register-resident temporaries)
+but reduced synchronization overhead enough for a net +14.9% speedup on coop tier.
+
+## T-Gate Sweep Results
+
+### Sweep Design
+- 164 synthetic circuits: q={9,17,33,65} × t={0-15} × d={1,3,5,10}
+- 44 targeted rank-sweep circuits: q={17,33} × target_rank={0-15} × d={1,3}
+
+### Critical Finding: Compiler Minimizes Peak_Rank
+All 208 synthetic circuits compiled to **peak_rank ≤ 1** regardless of T-gate count.
+Clifft's `StatevectorSqueezePass` aggressively reorders gates to minimize the active
+dimension. Only real QEC circuits with genuinely entangled T-gate blocks (cultivation_d5,
+qv10) achieve peak_rank > 4. This means:
+- The per-thread tier (rank ≤ 4) handles nearly all workloads in practice
+- The coop tier is only needed for specific, highly-entangled circuit structures
+- Optimization of the per-thread tier has the broadest practical impact
+
+### Per-Thread Tier Performance (q=17, rank=1, SVM vs Compiled)
+
+| T-gates | depth | SVM (shots/s) | Compiled (shots/s) | Delta |
+|---------|-------|---------------|---------------------|-------|
+| 0 | 3 | 10.2M | 10.4M | +1.4% |
+| 1 | 3 | 10.4M | 10.5M | +1.4% |
+| 2 | 5 | 9.77M | 11.5M | **+17.7%** |
+| 3 | 5 | 10.3M | 11.6M | **+12.6%** |
+| 4 | 5 | 10.4M | 11.1M | **+6.0%** |
+| 5 | 5 | 10.4M | 11.2M | **+7.1%** |
+| 8 | 5 | 10.4M | 11.5M | **+11.2%** |
+| 10 | 5 | 10.6M | 11.0M | **+3.7%** |
+
+### Per-Thread Tier Performance (q=33, rank=1)
+
+| T-gates | depth | SVM (shots/s) | Compiled (shots/s) | Delta |
+|---------|-------|---------------|---------------------|-------|
+| 2 | 5 | 10.3M | 11.2M | **+8.7%** |
+| 3 | 3 | 10.2M | 11.5M | **+12.1%** |
+| 8 | 5 | 10.3M | 11.5M | **+11.1%** |
+| 10 | 3 | 10.4M | 11.5M | **+9.6%** |
+
+### Coop Tier Performance (real QEC circuits)
+
+| Circuit | peak_rank | SVM (shots/s) | GEAK-optimized SVM | Delta |
+|---------|-----------|---------------|---------------------|-------|
+| cultivation_d5 | 10 | 3.97M | 4.58M (est) | **+15.4%** |
+| qv10 | 10 | 3.55M | 3.74M (est) | **+5.6%** |
+
+## Iteration: Cross-Pollination of GEAK Findings
+
+After GEAK identified warp-shuffle reduction as the primary coop-tier optimization
+(+14.9%), the finding was cross-pollinated to:
+
+1. **Approach D (split kernel)**: `reduce_results` kernel updated from 256 per-thread
+   atomics to warp-shuffle + single atomic per block (256x reduction in contention).
+
+2. **Approach E (persistent kernel)**: Warp-shuffle applied to all coop reductions
+   (in progress).
+
+3. **Approach A (compiled kernel)**: Template specialization to only emit needed
+   device functions — reducing dead code and enabling lower VGPR allocation for
+   simple circuits (in progress).
+
 ## Appendix: Research References
 
 8 comprehensive reference files were created covering:
