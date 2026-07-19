@@ -461,3 +461,31 @@ to the existing SVM interpreter.
 2. **Persistent kernel work-stealing** (E): +1% coop (minor, on top of GEAK)
 3. **Compiled kernel** (A): +5-18% thread (for deeper circuits with T-gates)
 4. All other approaches: negative or zero impact vs SVM+GEAK baseline
+
+## Post-Iteration Results (All Approaches with GEAK Warp-Shuffle)
+
+| Circuit | rank | SVM+GEAK | A:Compiled | E:Persistent | F:OptSVM | D:Split | B:PerOp | C:Graph |
+|---------|------|----------|-----------|-------------|---------|---------|---------|---------|
+| target_qec | 0 | 43.5M | **47.7M** | 42.6M | 10.6M* | 44.2M | 44.7M | 46.1M |
+| cultivation_d5 | 10 | 5.59M | 5.62M | 5.58M | 5.59M | 5.59M | 5.58M | 5.59M |
+
+\* F thread tier regression from OPT changes conflicting with GEAK patch
+
+### SVM+GEAK vs Original clifft-amd (100M shots, d5 p=0.001)
+
+| Version | shots/s | vs clifft-amd |
+|---------|---------|---------------|
+| clifft-amd (original) | 7.93M | baseline |
+| **SVM+GEAK (gpu-backend)** | **11.0M** | **+39%** |
+
+Both produce identical results (passed_shots=2,318,545).
+
+### Complete Hardware Counter Table
+
+| Kernel | Circuit | arch_vgpr | sgpr | LDS | scratch | SQ_WAVES | SQ_INSTS_VALU | SQ_INSTS_SALU | SQ_WAIT |
+|--------|---------|-----------|------|-----|---------|----------|---------------|---------------|---------|
+| sample_kernel_coop | d5 (rank=10) | 108 | 96 | 30208 | 0 | 2.0M | 7.51B | 13.6B | 2.56B |
+| sample_kernel | qec (rank=0) | 76 | 64 | 20480 | 800 | 7.8K | 95.5M | 106.6M | 52.4M |
+
+SALU/VALU ratio = 1.81x on coop tier — dominated by address computation
+(scatter_bits, insert_zero_bit, bit_get/set), not interpreter dispatch.
