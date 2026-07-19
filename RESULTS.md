@@ -300,12 +300,34 @@ negative improvement. Further optimization of the interpreter dispatch loop woul
 be productive. Approach A (compiled) works well for per-thread tier (+5-18%) and should
 be kept as-is.
 
-### GEAK Integration
+### GEAK Kernel Optimization Results
 
-GEAK's kernel_workflow was invoked on the SVM kernel to search for additional
-optimizations via its multi-agent specialist pipeline (algorithm, memory, compute,
-host_runtime, deep_explore engineers). The workflow is running with budget=3 and
-focused on reducing VGPRs in the shared-cooperative kernel.
+GEAK's kernel_workflow (14 agents, budget=3, 1M tokens) was invoked on the SVM
+kernel targeting VGPR reduction and coop-tier performance.
+
+**Verified speedup: 6.7% geomean** (Director-validated, independent baseline).
+
+| Circuit | Baseline (ms) | Optimized (ms) | Speedup |
+|---------|---------------|----------------|---------|
+| cultivation_d5 (5M, coop) | 1924 | 1675 | **1.149x** |
+| qv10 (1M, coop) | 996 | 943 | **1.056x** |
+| target_qec (5M, thread) | 839 | 837 | 1.002x |
+
+**What GEAK found:**
+1. **Warp-shuffle reduction** (primary win): Replace 8-barrier shared-memory tree
+   reduction with `__shfl_xor` intra-wavefront + 2-barrier inter-wavefront step.
+2. **Frame barrier batching**: Skip `__syncthreads` between consecutive frame ops.
+3. **LDS right-sizing**: `red0[256]`/`red1[256]` instead of `[1024]`.
+
+**What GEAK ruled out as dead ends:**
+- `__noinline__` on all handlers: +10-22% function call overhead per opcode
+- `__launch_bounds__(256, 4)`: scratch spills → 15-25% regression
+- `meas[]` bitfield packing: untested (engineer failed to produce valid patch)
+
+**Key insight from GEAK**: The compiler's natural 108 VGPRs is locally optimal for
+the interpreter architecture. Forcing lower VGPR counts causes spilling. The only
+path to higher occupancy is template specialization per circuit type (eliminating
+dead branches from the switch).
 
 ---
 
