@@ -560,3 +560,26 @@ LDS tiling was reverted after benchmarking showed:
 | Scatter LUT | ❌ -3.8% | No effect | ❌ LDS overflow |
 | Compiled megakernel | SVM fallback | ✅ +5-18% | SVM fallback |
 | Hybrid split | +0.8% | ✅ +2-8% | No effect |
+
+## Hardware Counter Analysis — Final Optimization Stack
+
+Measured on MI300X with all optimizations (GEAK warp-shuffle + NUMA + load_complex64 + shfl):
+
+| Kernel | arch_vgpr | sgpr | LDS (B) | Duration (500K shots) |
+|--------|-----------|------|---------|----------------------|
+| sample_kernel_coop (d5, rank=10) | **124** | 112 | **19968** | 83ms |
+| Previous (GEAK-only, no LDS opt) | 108 | 96 | 30208 | 116ms |
+
+**+39% speedup from duration reduction** (116ms → 83ms). VGPRs increased 108→124 due to
+`load_complex64` helper functions, but LDS decreased 34% (30208→19968 bytes).
+
+Stable throughput (3 repeated runs): **5.41-5.43M shots/s** on cultivation_d5.
+
+### Final Tag: `perf-full-stack-v2`
+
+All optimizations applied:
+1. GEAK warp-shuffle reduction (+40% from sync reduction)
+2. NUMA per-XCD work counters (+1.4% global-coop)
+3. GpuComplex 8-byte alignment (vectorized LDS)
+4. `__shfl` gate matrix broadcast (reduced global loads)
+5. `load_complex64`/`store_complex64` (64-bit LDS loads)
