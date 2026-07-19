@@ -203,3 +203,25 @@ negative. The SALU address computation at rank=19 accounts for ~30% of cycles
 (per MI300X_NUMA.md section 6.3) but this is better addressed by the compiled
 megakernel (which bakes axis constants, enabling the compiler to strength-reduce
 `insert_zero_bit` to a constant shift-and-mask) than by an LDS lookup table.
+
+### F8. LDS-Pipelined Tiling for Global-Coop Sweeps: -66% coop, -17% global-coop
+
+**Commit:** b70b90d (reverted in eb77d0f)
+**Expected:** Replace random HBM accesses with coalesced tile loads through LDS
+**Actual:**
+- D7 (rank=19): 143.9K → 120.1K shots/s (**-16.5%**)
+- D5 (rank=10): 5.59M → 1.90M shots/s (**-66.1%**)
+- QEC (rank=0): 48.3M → 45.1M shots/s (-6.6%)
+
+**Root causes:**
+1. **Cooperative load/store overhead**: Each tile requires 3 `__syncthreads` (before load, before compute, before store). For the shared-coop kernel where the amplitude array ALREADY lives in LDS, adding tile boundaries introduces entirely new barriers where none existed before.
+2. **Shared-coop double-penalty**: The existing coop kernel (`sample_kernel_coop`) passed `nullptr` for tile pointers and used the direct-LDS path. But the CoopShotState struct extension added overhead even on the null path.
+3. **False premise for global-coop**: The butterfly access pattern (pairs at `v[i]` and `v[i | axis_bit]`) is not inherently cache-hostile — the access stride is `axis_bit * 8` bytes. For large axes (axis > tile_bits), the two tiles load exactly the needed data; but the barrier synchronization (3 per sweep vs 0 before) dominates.
+4. **Tile boundary irregularity**: For "mixed" cases (one axis qubit inside tile, one outside), fallback to direct HBM removes the tiling benefit while the overhead remains.
+
+**Lesson:** LDS tiling only helps when:
+1. The untiled access pattern causes L2/cache thrashing (random access)
+2. The tiling barrier cost << memory latency saved
+3. The existing code doesn't already use LDS (the coop kernel already does!)
+
+For quantum amplitude butterflies, the access is strided (predictable), not random, so the L2 hardware prefetcher handles it reasonably. Adding explicit tiling barriers destroys the benefit.
