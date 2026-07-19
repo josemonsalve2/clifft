@@ -87,6 +87,15 @@ struct GpuInstr {
     double weight_im;
 };
 
+/// Device-side segment descriptor for the hybrid kernel.
+/// Mirrors GpuSegment from device_program.h but is POD for GPU use.
+struct GpuSegmentDevice {
+    uint32_t bc_start;       ///< First instruction index (inclusive)
+    uint32_t bc_end;         ///< Last instruction index (exclusive)
+    uint32_t local_peak_k;   ///< Maximum active_k within this segment
+    uint8_t tier;            ///< 0 = per-thread, 1 = shared-coop, 2 = global-coop
+};
+
 struct GpuProgram {
     const GpuInstr* instrs;
     uint32_t num_instrs;
@@ -109,6 +118,8 @@ struct GpuProgram {
     const GpuFusedU4Entry* fused_u4;
     const GpuExpValMask* exp_val_masks;
     bool has_extended_opcodes;
+    const GpuSegmentDevice* segments;
+    uint32_t num_segments;
 };
 
 struct BlockCounts {
@@ -138,6 +149,7 @@ struct DeviceBuffers {
     GpuFusedU2Entry* fused_u2 = nullptr;
     GpuFusedU4Entry* fused_u4 = nullptr;
     GpuExpValMask* exp_val_masks = nullptr;
+    GpuSegmentDevice* segments = nullptr;
 };
 
 }  // namespace gpu
