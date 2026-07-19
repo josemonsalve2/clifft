@@ -489,3 +489,40 @@ Both produce identical results (passed_shots=2,318,545).
 
 SALU/VALU ratio = 1.81x on coop tier — dominated by address computation
 (scatter_bits, insert_zero_bit, bit_get/set), not interpreter dispatch.
+
+## D7 Circuit — All Approaches at Rank=19 (Global-Coop Tier)
+
+**Circuit:** circuit_d7_p0.0005.stim — 5472 instructions, 355 measurements, peak_rank=19
+**Amplitude array:** 2^19 = 524,288 complex floats = 4MB per shot in HBM
+**GPU:** MI300X (gfx942), 500K shots
+
+| Rank | Approach | shots/s | vs SVM+GEAK |
+|------|----------|---------|-------------|
+| 1 | Compiled (A) | 144,232 | +0.2% |
+| 2 | clifft-amd original | 144,240 | +0.2% |
+| 3 | **SVM+GEAK** | **143,916** | **baseline** |
+| 4 | OptSVM (F) | 143,345 | -0.4% |
+| 5 | Hybrid | 143,541 | -0.3% |
+| 6-12 | All others | ~142-143K | -0.4% to -1.1% |
+| 13 | Persistent (E) | **129,929** | **-9.7%** |
+
+### D7 Hardware Counters
+
+| Counter | rank=19 (d7) | rank=10 (d5) | Ratio |
+|---------|-------------|-------------|-------|
+| arch_vgpr | 128 | 108 | 1.19x |
+| SALU/VALU | **0.82x** | **1.81x** | inverted |
+| SQ_INSTS_VALU | 23.4B | 7.5B | 3.1x |
+| SQ_WAIT | 3.19B | 2.56B | 1.25x |
+
+**Key insight:** At rank=19, the workload shifts from SALU-dominated (d5) to 
+VALU-dominated (d7). The array sweeps over 524K elements dwarf the address 
+computation. The warp-shuffle optimization has no effect here because 
+measurements are a tiny fraction of execution time.
+
+**All approaches converge to ~143K shots/s** — this is the HBM bandwidth ceiling.
+No dispatch optimization, kernel architecture, or compilation strategy can improve 
+this. The only paths forward are:
+1. NUMA-aware per-XCD amplitude pinning (estimated +8-20%)
+2. Reducing array sweep computation (FMA optimization, loop unrolling)
+3. Higher HBM bandwidth hardware (MI350X)
