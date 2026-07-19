@@ -89,7 +89,7 @@ if(CLIFFT_ENABLE_HIP)
     if(NOT CMAKE_HIP_ARCHITECTURES)
         set(CMAKE_HIP_ARCHITECTURES gfx942)
     endif()
-    target_sources(clifft_core PRIVATE gpu/hip_sampler.hip gpu/device_program.cc)
+    target_sources(clifft_core PRIVATE gpu/hip_sampler.hip gpu/device_program.cc gpu/kernel_codegen.cc)
     set_source_files_properties(gpu/hip_sampler.hip PROPERTIES LANGUAGE HIP)
     set_source_files_properties(gpu/hip_sampler.hip
         PROPERTIES COMPILE_OPTIONS "-ffp-contract=off"
@@ -98,7 +98,7 @@ if(CLIFFT_ENABLE_HIP)
     target_link_libraries(clifft_core PRIVATE hip::host)
     target_compile_definitions(clifft_core PUBLIC CLIFFT_ENABLE_GPU)
 else()
-    target_sources(clifft_core PRIVATE gpu/hip_sampler_stub.cc gpu/device_program.cc)
+    target_sources(clifft_core PRIVATE gpu/hip_sampler_stub.cc gpu/device_program.cc gpu/kernel_codegen.cc)
 endif()
 
 # Code coverage instrumentation (only for Clifft code, not dependencies)
