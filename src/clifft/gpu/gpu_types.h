@@ -21,15 +21,12 @@ constexpr uint8_t kFlagIdentity = 1u << 2;
 constexpr uint8_t kFlagExpectedOne = 1u << 3;
 constexpr double kInvSqrt2 = 0.70710678118654752440084436210484903928;
 constexpr double kDustEpsilon = 1e-18;
+constexpr uint32_t kNumXCDs = 8;  // MI300X has 8 XCDs
 
-// alignas(8) ensures the compiler emits ds_read_b64 / ds_write_b64 for
-// LDS loads/stores of GpuComplex (8 bytes = re + im loaded atomically).
-struct alignas(8) GpuComplex {
+struct __attribute__((aligned(8))) GpuComplex {
     float re;
     float im;
 };
-static_assert(alignof(GpuComplex) >= 8,
-              "GpuComplex must be 8-byte aligned for vectorized LDS loads (ds_read_b64)");
 
 struct GpuMask {
     uint64_t x[2];

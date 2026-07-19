@@ -118,10 +118,10 @@ GpuMask flatten_arena_mask(const PauliMaskArena& arena, PauliMaskHandle handle) 
     auto view = arena.at(handle);
     auto x_view = view.x();
     auto z_view = view.z();
-    if (x_view.num_words() > 0) dst.x[0] = x_view.words[0];
-    if (x_view.num_words() > 1) dst.x[1] = x_view.words[1];
-    if (z_view.num_words() > 0) dst.z[0] = z_view.words[0];
-    if (z_view.num_words() > 1) dst.z[1] = z_view.words[1];
+    for (uint32_t w = 0; w < kPauliWords && w < x_view.num_words(); ++w)
+        dst.x[w] = x_view.words[w];
+    for (uint32_t w = 0; w < kPauliWords && w < z_view.num_words(); ++w)
+        dst.z[w] = z_view.words[w];
     dst.sign = view.sign() ? 1 : 0;
     return dst;
 }
@@ -281,8 +281,12 @@ void validate_program(const CompiledModule& program) {
     if (program.num_exp_vals > kMaxExpVals) {
         throw std::runtime_error("GPU sampler expectation value limit exceeded");
     }
-    if (program.num_qubits > 128) {
-        throw std::runtime_error("GPU sampler currently supports at most 128 qubits");
+    if (program.num_qubits > kMaxQubits) {
+        std::ostringstream ss;
+        ss << "GPU sampler supports at most " << kMaxQubits << " qubits"
+           << " (" << kPauliWords << " Pauli words); circuit has "
+           << program.num_qubits;
+        throw std::runtime_error(ss.str());
     }
     for (const auto& instr : program.bytecode) {
         if (!is_supported_opcode(instr.opcode)) {
@@ -338,10 +342,10 @@ FlattenedProgram flatten_program(const CompiledModule& program) {
             auto mask_view = pool.noise_channel_masks.at(ch.mask);
             auto x_view = mask_view.x();
             auto z_view = mask_view.z();
-            if (x_view.num_words() > 0) flat_ch.x[0] = x_view.words[0];
-            if (x_view.num_words() > 1) flat_ch.x[1] = x_view.words[1];
-            if (z_view.num_words() > 0) flat_ch.z[0] = z_view.words[0];
-            if (z_view.num_words() > 1) flat_ch.z[1] = z_view.words[1];
+            for (uint32_t w = 0; w < kPauliWords && w < x_view.num_words(); ++w)
+                flat_ch.x[w] = x_view.words[w];
+            for (uint32_t w = 0; w < kPauliWords && w < z_view.num_words(); ++w)
+                flat_ch.z[w] = z_view.words[w];
             flat_ch.prob = ch.prob;
             flat_site.prob_sum += ch.prob;
             flat.noise_channels.push_back(flat_ch);
@@ -402,10 +406,10 @@ FlattenedProgram flatten_program(const CompiledModule& program) {
         auto view = pool.exp_val_masks.at(static_cast<PauliMaskHandle>(i));
         auto x_view = view.x();
         auto z_view = view.z();
-        if (x_view.num_words() > 0) evm.x[0] = x_view.words[0];
-        if (x_view.num_words() > 1) evm.x[1] = x_view.words[1];
-        if (z_view.num_words() > 0) evm.z[0] = z_view.words[0];
-        if (z_view.num_words() > 1) evm.z[1] = z_view.words[1];
+        for (uint32_t w = 0; w < kPauliWords && w < x_view.num_words(); ++w)
+            evm.x[w] = x_view.words[w];
+        for (uint32_t w = 0; w < kPauliWords && w < z_view.num_words(); ++w)
+            evm.z[w] = z_view.words[w];
         evm.sign = view.sign() ? 1 : 0;
         flat.exp_val_masks.push_back(evm);
     }
