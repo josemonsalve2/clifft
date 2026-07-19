@@ -204,3 +204,37 @@ inflation from inlining large functions into the switch dispatch body.
 ### HIPRTC JIT compilation (-14% vs AOT)
 - HIPRTC has fewer optimization passes than the AOT clang++ compiler
 - Always use clang++ subprocess with disk-cached .hsaco files
+
+---
+
+## OPT-6: Vectorized 64-bit LDS Loads for GpuComplex
+
+**Tag:** `perf-full-stack-v2`
+**Commit:** already in HEAD (applied via Engineer 1 from GEAK round 2)
+
+The `GpuComplex { float re, float im }` struct (8 bytes) was being loaded as
+two separate 32-bit reads from LDS (`ds_read_b32` × 2). With `alignas(8)` on
+the struct, a single 64-bit read (`ds_read_b64`) loads both components atomically.
+
+**Before:**
+```cpp
+GpuComplex a = st.v[idx0];  // compiler: ds_read_b32 re + ds_read_b32 im (2 ops)
+GpuComplex b = st.v[idx1];
+```
+
+**After:**
+```cpp
+__device__ __forceinline__ GpuComplex load_complex64(const GpuComplex* ptr) {
+    uint64_t raw = *reinterpret_cast<const uint64_t*>(ptr);  // ds_read_b64 (1 op)
+    GpuComplex c;
+    c.re = __uint_as_float(static_cast<uint32_t>(raw));
+    c.im = __uint_as_float(static_cast<uint32_t>(raw >> 32));
+    return c;
+}
+GpuComplex a = load_complex64(&st.v[idx0]);
+GpuComplex b = load_complex64(&st.v[idx1]);
+```
+
+Applied to 57 load/store pairs across all coop array sweep functions.
+Expected: -50% LDS instruction count → less SALU address computation per amplitude access.
+Measured: Pending GEAK round 2 verification (SALU reduction from 13.6B→? expected).
