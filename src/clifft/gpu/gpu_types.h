@@ -21,7 +21,14 @@ constexpr uint8_t kFlagIdentity = 1u << 2;
 constexpr uint8_t kFlagExpectedOne = 1u << 3;
 constexpr double kInvSqrt2 = 0.70710678118654752440084436210484903928;
 constexpr double kDustEpsilon = 1e-18;
-constexpr uint32_t kNumXCDs = 8;  // MI300X has 8 XCDs
+constexpr uint32_t kNumXCDs = 8;   // MI300X has 8 XCDs
+// kPauliWords: number of 64-bit words per Pauli frame row (x or z).
+// kMaxQubits: maximum qubit count supported by the GPU backend.
+// Currently set to 2 words = 128 qubits. Increase kPauliWords to 4
+// for 256-qubit support (requires updating GpuMask, GpuChannel, GpuExpValMask
+// struct fields and ShotState px/pz arrays in hip_sampler.hip).
+constexpr uint32_t kPauliWords = 2;
+constexpr uint32_t kMaxQubits = kPauliWords * 64;
 
 struct __attribute__((aligned(8))) GpuComplex {
     float re;
