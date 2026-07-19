@@ -23,15 +23,6 @@ constexpr double kInvSqrt2 = 0.70710678118654752440084436210484903928;
 constexpr double kDustEpsilon = 1e-18;
 constexpr uint32_t kNumXCDs = 8;  // MI300X has 8 XCDs
 
-// LDS tile size for global-coop kernel pipelining (ThunderKittens pattern).
-// Two tiles of this size (tile_a + tile_b) provide the double-buffering
-// needed for butterfly operations that span tile boundaries.
-// With GpuComplex at 8 bytes: 2048 * 8 = 16 KB per tile, total 32 KB.
-// Remaining ~32KB of the 64KB LDS is used for reduction arrays, meas/obs,
-// frame state, and other shared variables.
-constexpr uint32_t kTileElems = 2048;
-constexpr uint32_t kTileBits = 11;  // log2(kTileElems)
-
 struct __attribute__((aligned(8))) GpuComplex {
     float re;
     float im;
