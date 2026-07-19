@@ -10,8 +10,8 @@ quantum circuit simulator on AMD MI300X (gfx942).
 |----------|--------|-------------|-------|--------------|
 | Baseline | `gpu-backend` | Switch-dispatch SVM interpreter | All 3 | ✓ |
 | A: Compiled Megakernel | `gpu-compiled-kernel` | HIPRTC/clang++ JIT-compiled straight-line kernel | T1 | ✓ |
-| B: Per-Op Kernels | `gpu-per-op-kernel` | One small kernel per opcode, stream dispatch | T1 | ✗ build error |
-| C: HipGraph | `gpu-hipgraph` | hipGraph_t with kernel nodes and dependency edges | T1 | ✗ build error |
+| B: Per-Op Kernels | `gpu-per-op-kernel` | One small kernel per opcode, stream dispatch | T1 | ✓ |
+| C: HipGraph | `gpu-hipgraph` | hipGraph_t with kernel nodes and dependency edges | T1 | ✓ |
 | D: Heuristic Split | `gpu-split-kernel` | Circuit split at measurement boundaries, per-segment kernels | T1 | ✓ |
 | E: Persistent Kernel | `gpu-persistent` | Persistent kernel with phase-sorted dispatch and work stealing | All 3 | ✓ |
 | F: Optimized SVM | `gpu-svm-optimized` | SVM with hot/cold split, frame batching, reduced ShotState | All 3 | ✓ |
@@ -37,15 +37,31 @@ approach comparisons use the same ES node for fairness.
 
 ## Results
 
-### Primary Comparison (Same MI300X-ES Node, Same Session)
+### Complete 6-Way Comparison (MI300X-ES, Same Node, Warm GPU)
 
-| Circuit | peak_rank | Tier | Baseline SVM | Compiled (A) | Persistent (E) | Optimized SVM (F) |
-|---------|-----------|------|-------------|-------------|----------------|-------------------|
-| cultivation_d5 | 10 | T2 | 4.00M* | 4.02M | 4.02M | 3.11M** |
-| target_qec | 0 | T1 | 47.9M | 48.4M | 45.9M | 47.1M |
+| Circuit | rank | SVM | A: Compiled | B: Per-Op | C: HipGraph | D: Split | E: Persistent | F: Opt SVM |
+|---------|------|-----|------------|-----------|------------|---------|--------------|-----------|
+| target_qec | 0 | 43.0M | 48.4M (+13%) | 43.8M (+2%) | 42.6M (-1%) | 50.4M (**+17%**) | 45.9M (+7%) | 47.1M (+10%) |
+| cultivation_d5 | 10 | 3.55M | 4.02M (fb) | 3.24M (-9%) | 3.57M (+1%) | 4.02M (fb) | 4.02M (**+13%**) | 3.11M (-12%) |
 
-\* Warm-GPU baseline (cold-start run was 3.09M)
-\** Approach F ran during a different session; likely cold-start artifact
+(fb = SVM fallback for approaches that only support per-thread tier)
+
+### Rankings by Circuit Type
+
+**Per-thread tier (rank=0, target_qec):**
+1. D: Split — **+17%** (50.4M shots/s)
+2. A: Compiled — +13% (48.4M)
+3. F: Optimized SVM — +10% (47.1M)
+4. E: Persistent — +7% (45.9M)
+5. B: Per-Op — +2% (43.8M)
+6. C: HipGraph — -1% (42.6M)
+
+**Coop tier (rank=10, cultivation_d5):**
+1. E: Persistent — **+13%** (4.02M shots/s)
+2. C: HipGraph — +1% (3.57M)
+3. Baseline SVM — 3.55M
+4. B: Per-Op — -9% (3.24M)
+5. F: Optimized SVM — -12% (3.11M)
 
 ### Kernel Duration from rocprof (500K shots, Same Node)
 
