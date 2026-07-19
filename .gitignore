@@ -69,3 +69,5 @@ venv/
 results/
 build-gpu/
 GEAK
+build-gpu-*/
+.claude/worktrees/
