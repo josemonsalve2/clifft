@@ -1318,7 +1318,8 @@ __device__ __noinline__ void coop_u2_sweep(GpuComplex* v, uint32_t active_k,
     // loads from global memory; all other lanes receive via register shuffle.
     // Saves 63 global-memory loads per wavefront (4 GpuComplex = 8 floats).
     uint32_t lane = threadIdx.x & 63;
-    float m0_re, m0_im, m1_re, m1_im, m2_re, m2_im, m3_re, m3_im;
+    float m0_re = 0.0f, m0_im = 0.0f, m1_re = 0.0f, m1_im = 0.0f;
+    float m2_re = 0.0f, m2_im = 0.0f, m3_re = 0.0f, m3_im = 0.0f;
     if (lane == 0) {
         m0_re = mat[0].re; m0_im = mat[0].im;
         m1_re = mat[1].re; m1_im = mat[1].im;
@@ -1370,7 +1371,7 @@ __device__ __noinline__ void coop_u4_sweep(GpuComplex* v, uint32_t active_k,
     // Saves 63 global-memory loads per wavefront (16 GpuComplex = 32 floats).
     uint32_t lane = threadIdx.x & 63;
     GpuComplex lm[4][4];
-    float tmp_re, tmp_im;
+    float tmp_re = 0.0f, tmp_im = 0.0f;
     for (int r = 0; r < 4; ++r) {
         for (int c = 0; c < 4; ++c) {
             if (lane == 0) {
@@ -1829,6 +1830,14 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
         return;
     }
 
+    // NOTE: Known LDS bank conflict when axis == 5 (stride 32).
+    // With GpuComplex = 8 bytes and 32 banks * 4 bytes, butterfly pairs
+    // v[idx0] and v[idx0 | 32] map to the same bank:
+    //   bank(idx) = (idx * 8 / 4) % 32 = (idx * 2) % 32
+    //   bank(idx | 32) = ((idx | 32) * 2) % 32 = (idx * 2) % 32  [collision]
+    // A swizzled layout (XOR or padding) would eliminate this but requires
+    // changing all v[] accesses across ~20 coop functions. Profile first
+    // to confirm axis==5 is frequent enough to justify the complexity.
     __shared__ GpuComplex v[kSharedMaxAmplitudes];
     __shared__ GpuComplex scratch[kSharedMaxAmplitudes / 2];
     __shared__ uint8_t meas[kMaxMeas];
