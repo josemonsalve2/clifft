@@ -1314,6 +1314,24 @@ __device__ void coop_expand_rot(CoopShotState& st, uint32_t axis, double z_re, d
 __device__ __noinline__ void coop_u2_sweep(GpuComplex* v, uint32_t active_k,
                                            uint32_t axis, const GpuComplex* mat,
                                            const uint32_t* lut) {
+    // Broadcast 2x2 gate matrix via __shfl: only lane 0 of each wavefront
+    // loads from global memory; all other lanes receive via register shuffle.
+    // Saves 63 global-memory loads per wavefront (4 GpuComplex = 8 floats).
+    uint32_t lane = threadIdx.x & 63;
+    float m0_re, m0_im, m1_re, m1_im, m2_re, m2_im, m3_re, m3_im;
+    if (lane == 0) {
+        m0_re = mat[0].re; m0_im = mat[0].im;
+        m1_re = mat[1].re; m1_im = mat[1].im;
+        m2_re = mat[2].re; m2_im = mat[2].im;
+        m3_re = mat[3].re; m3_im = mat[3].im;
+    }
+    m0_re = __shfl(m0_re, 0); m0_im = __shfl(m0_im, 0);
+    m1_re = __shfl(m1_re, 0); m1_im = __shfl(m1_im, 0);
+    m2_re = __shfl(m2_re, 0); m2_im = __shfl(m2_im, 0);
+    m3_re = __shfl(m3_re, 0); m3_im = __shfl(m3_im, 0);
+    GpuComplex m0{m0_re, m0_im}, m1{m1_re, m1_im};
+    GpuComplex m2{m2_re, m2_im}, m3{m3_re, m3_im};
+
     uint64_t axis_bit = 1ULL << axis;
     uint64_t iters = 1ULL << (active_k - 1);
     for (uint64_t i = threadIdx.x; i < iters; i += blockDim.x) {
@@ -1321,8 +1339,8 @@ __device__ __noinline__ void coop_u2_sweep(GpuComplex* v, uint32_t active_k,
                             : static_cast<uint32_t>(scatter_bits_1(i, axis));
         uint64_t idx1 = idx0 | axis_bit;
         GpuComplex a = v[idx0], b = v[idx1];
-        v[idx0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
-        v[idx1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
+        v[idx0] = cadd(cmul(a, m0), cmul(b, m1));
+        v[idx1] = cadd(cmul(a, m2), cmul(b, m3));
     }
 }
 
@@ -1347,6 +1365,23 @@ __device__ __noinline__ void coop_u4_sweep(GpuComplex* v, uint32_t active_k,
                                            uint32_t axis_lo, uint32_t axis_hi,
                                            const GpuComplex mat[4][4],
                                            const uint32_t* lut) {
+    // Broadcast 4x4 gate matrix via __shfl: only lane 0 of each wavefront
+    // loads from global memory; all other lanes receive via register shuffle.
+    // Saves 63 global-memory loads per wavefront (16 GpuComplex = 32 floats).
+    uint32_t lane = threadIdx.x & 63;
+    GpuComplex lm[4][4];
+    float tmp_re, tmp_im;
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            if (lane == 0) {
+                tmp_re = mat[r][c].re;
+                tmp_im = mat[r][c].im;
+            }
+            lm[r][c].re = __shfl(tmp_re, 0);
+            lm[r][c].im = __shfl(tmp_im, 0);
+        }
+    }
+
     uint64_t lo_bit = 1ULL << axis_lo;
     uint64_t hi_bit = 1ULL << axis_hi;
     uint64_t iters = 1ULL << (active_k - 2);
@@ -1358,14 +1393,14 @@ __device__ __noinline__ void coop_u4_sweep(GpuComplex* v, uint32_t active_k,
         uint64_t i2 = base | hi_bit;
         uint64_t i3 = base | lo_bit | hi_bit;
         GpuComplex v0 = v[i0], v1 = v[i1], v2 = v[i2], v3 = v[i3];
-        v[i0] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
-                     cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3])));
-        v[i1] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
-                     cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3])));
-        v[i2] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
-                     cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3])));
-        v[i3] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
-                     cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
+        v[i0] = cadd(cadd(cmul(v0, lm[0][0]), cmul(v1, lm[0][1])),
+                     cadd(cmul(v2, lm[0][2]), cmul(v3, lm[0][3])));
+        v[i1] = cadd(cadd(cmul(v0, lm[1][0]), cmul(v1, lm[1][1])),
+                     cadd(cmul(v2, lm[1][2]), cmul(v3, lm[1][3])));
+        v[i2] = cadd(cadd(cmul(v0, lm[2][0]), cmul(v1, lm[2][1])),
+                     cadd(cmul(v2, lm[2][2]), cmul(v3, lm[2][3])));
+        v[i3] = cadd(cadd(cmul(v0, lm[3][0]), cmul(v1, lm[3][1])),
+                     cadd(cmul(v2, lm[3][2]), cmul(v3, lm[3][3])));
     }
 }
 
