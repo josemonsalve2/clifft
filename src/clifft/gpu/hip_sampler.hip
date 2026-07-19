@@ -830,16 +830,33 @@ struct CoopShotState {
 __device__ void coop_reduce2(CoopShotState& st, double local0, double local1, double& out0,
                              double& out1) {
     uint32_t tid = threadIdx.x;
-    st.red0[tid] = local0;
-    st.red1[tid] = local1;
-    __syncthreads();
-    for (uint32_t stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
-        if (tid < stride) {
-            st.red0[tid] += st.red0[tid + stride];
-            st.red1[tid] += st.red1[tid + stride];
-        }
-        __syncthreads();
+    // Phase 1: intra-wavefront reduction via warp shuffle (AMD wavefront = 64 threads)
+    for (int offset = 32; offset > 0; offset >>= 1) {
+        local0 += __shfl_xor(local0, offset);
+        local1 += __shfl_xor(local1, offset);
     }
+    // Phase 2: inter-wavefront reduction via shared memory (4 wavefronts for blockDim=256)
+    uint32_t warp_id = tid >> 6;   // tid / 64
+    uint32_t lane = tid & 63;      // tid % 64
+    if (lane == 0) {
+        st.red0[warp_id] = local0;
+        st.red1[warp_id] = local1;
+    }
+    __syncthreads();
+    if (tid < 4) {
+        local0 = st.red0[tid];
+        local1 = st.red1[tid];
+        // reduce 4 values with shuffle
+        for (int offset = 2; offset > 0; offset >>= 1) {
+            local0 += __shfl_xor(local0, offset);
+            local1 += __shfl_xor(local1, offset);
+        }
+    }
+    if (tid == 0) {
+        st.red0[0] = local0;
+        st.red1[0] = local1;
+    }
+    __syncthreads();
     out0 = st.red0[0];
     out1 = st.red1[0];
 }
@@ -1333,6 +1350,20 @@ __device__ void coop_exec_exp_val(CoopShotState& st, const GpuProgram& program,
     __syncthreads();
 }
 
+__device__ bool is_frame_only_op(uint8_t opcode) {
+    switch (opcode) {
+        case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CNOT):
+        case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CZ):
+        case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_H):
+        case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S):
+        case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S_DAG):
+        case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_SWAP):
+            return true;
+        default:
+            return false;
+    }
+}
+
 __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotState& st) {
     for (uint32_t pc = 0; pc < program.num_instrs; ++pc) {
         const GpuInstr& instr = program.instrs[pc];
@@ -1344,7 +1375,9 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                     bit_xor(st.px, instr.axis_2, px_c);
                     bit_xor(st.pz, instr.axis_1, pz_t);
                 }
-                __syncthreads();
+                if (pc + 1 >= program.num_instrs || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
+                    __syncthreads();
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_CZ):
                 if (threadIdx.x == 0) {
@@ -1353,7 +1386,9 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                     bit_xor(st.pz, instr.axis_2, px_a);
                     bit_xor(st.pz, instr.axis_1, px_b);
                 }
-                __syncthreads();
+                if (pc + 1 >= program.num_instrs || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
+                    __syncthreads();
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_H):
                 if (threadIdx.x == 0) {
@@ -1362,7 +1397,9 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                     bit_set(st.px, instr.axis_1, pz);
                     bit_set(st.pz, instr.axis_1, px);
                 }
-                __syncthreads();
+                if (pc + 1 >= program.num_instrs || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
+                    __syncthreads();
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S):
             case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_S_DAG):
@@ -1370,14 +1407,18 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                     bool px = bit_get(st.px, instr.axis_1);
                     bit_xor(st.pz, instr.axis_1, px);
                 }
-                __syncthreads();
+                if (pc + 1 >= program.num_instrs || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
+                    __syncthreads();
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_FRAME_SWAP):
                 if (threadIdx.x == 0) {
                     bit_swap(st.px, instr.axis_1, st.px, instr.axis_2);
                     bit_swap(st.pz, instr.axis_1, st.pz, instr.axis_2);
                 }
-                __syncthreads();
+                if (pc + 1 >= program.num_instrs || !is_frame_only_op(program.instrs[pc + 1].opcode)) {
+                    __syncthreads();
+                }
                 break;
             case static_cast<uint8_t>(clifft::Opcode::OP_ARRAY_CNOT):
                 coop_array_cnot(st, instr.axis_1, instr.axis_2);
@@ -1676,8 +1717,8 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     __shared__ uint32_t next_noise_idx;
     __shared__ uint8_t discarded;
     __shared__ uint8_t branch;
-    __shared__ double red0[1024];
-    __shared__ double red1[1024];
+    __shared__ double red0[256];
+    __shared__ double red1[256];
 
     if (threadIdx.x == 0) {
         px[0] = 0;
@@ -1745,8 +1786,8 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
     __shared__ uint8_t discarded;
     __shared__ uint8_t branch;
     __shared__ uint64_t batch_shot_id;
-    __shared__ double red0[1024];
-    __shared__ double red1[1024];
+    __shared__ double red0[256];
+    __shared__ double red1[256];
 
     while (true) {
         if (threadIdx.x == 0) {
