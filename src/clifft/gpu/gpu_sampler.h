@@ -13,6 +13,7 @@ struct GpuSamplerOptions {
     uint64_t seed = 42;
     uint32_t block_size = 256;
     bool keep_records = false;
+    bool hybrid = false;  ///< Force hybrid kernel when segments are available
 };
 
 SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shots,

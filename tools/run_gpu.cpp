@@ -54,6 +54,7 @@ int main(int argc, char** argv) {
     uint64_t seed = 42;
     uint32_t block_size = 256;
     bool cpu_reference = false;
+    bool hybrid = false;
     std::string postselection_mode = "all";
 
     for (int i = 1; i < argc; ++i) {
@@ -81,6 +82,8 @@ int main(int argc, char** argv) {
             postselection_mode = "none";
         } else if (arg == "--cpu-reference") {
             cpu_reference = true;
+        } else if (arg == "--hybrid") {
+            hybrid = true;
         } else if (arg == "--diagnose") {
             std::cout << clifft::gpu::gpu_backend_info() << "\n";
             return 0;
@@ -113,11 +116,12 @@ int main(int argc, char** argv) {
         clifft::gpu::GpuSamplerOptions options;
         options.seed = seed;
         options.block_size = block_size;
+        options.hybrid = hybrid;
         auto result = clifft::gpu::gpu_sample_survivors(program, shots, options);
         passed = result.passed_shots;
         logical = result.logical_errors;
         obs = result.observable_ones;
-        backend = "hip-gpu";
+        backend = hybrid ? "hip-gpu-hybrid" : "hip-gpu";
     }
 
     double sample_seconds =
