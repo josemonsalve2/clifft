@@ -24,8 +24,8 @@ constexpr double kDustEpsilon = 1e-18;
 constexpr uint32_t kNumXCDs = 8;   // MI300X has 8 XCDs
 // kPauliWords: number of 64-bit words per Pauli frame row (x or z).
 // kMaxQubits: maximum qubit count supported by the GPU backend.
-// Set to 4 words = 256 qubits (supports surface_d9/188q, surface_d11/252q).
-constexpr uint32_t kPauliWords = 4;
+// Set to 6 words = 384 qubits (covers surface_d9/188q, surface_d11/274q, surface_d13/376q).
+constexpr uint32_t kPauliWords = 6;
 constexpr uint32_t kMaxQubits = kPauliWords * 64;
 
 struct __attribute__((aligned(8))) GpuComplex {
