@@ -12,7 +12,7 @@ quantum circuit simulator on AMD MI300X (gfx942).
 | A: Compiled Megakernel | `gpu-compiled-kernel` | HIPRTC/clang++ JIT-compiled straight-line kernel | T1 | ✓ |
 | B: Per-Op Kernels | `gpu-per-op-kernel` | One small kernel per opcode, stream dispatch | T1 | ✗ build error |
 | C: HipGraph | `gpu-hipgraph` | hipGraph_t with kernel nodes and dependency edges | T1 | ✗ build error |
-| D: Heuristic Split | `gpu-split-kernel` | Circuit split at measurement boundaries, per-segment kernels | T1 | ✗ build error |
+| D: Heuristic Split | `gpu-split-kernel` | Circuit split at measurement boundaries, per-segment kernels | T1 | ✓ |
 | E: Persistent Kernel | `gpu-persistent` | Persistent kernel with phase-sorted dispatch and work stealing | All 3 | ✓ |
 | F: Optimized SVM | `gpu-svm-optimized` | SVM with hot/cold split, frame batching, reduced ShotState | All 3 | ✓ |
 
@@ -149,7 +149,13 @@ different execution model. The structural immutability is perfect for static cir
 
 ### Approach D: Heuristic-Split Megakernels
 
-**Implementation status:** Code complete (1349 + 457 lines), build failed on compute nodes.
+**Implementation status:** Code complete (1349 + 457 lines), builds and runs on MI300X-ES.
+
+**Benchmark (MI300X-ES, same session):**
+| Circuit | peak_rank | SVM | Split | Delta |
+|---------|-----------|-----|-------|-------|
+| cultivation_d5 | 10 | 4.0M (warm) | 4.02M | SVM fallback (all segments rank>4) |
+| target_qec | 0 | 48.9M | 50.4M | **+3.0%** |
 
 **Key research finding (SPLIT_HEURISTIC.md, 570 lines):**
 QEC circuits have a periodic sawtooth active_k profile where 75-85% of instructions
