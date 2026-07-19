@@ -76,3 +76,17 @@ Clifft's `StatevectorSqueezePass` aggressively minimizes peak_rank. Synthetic
 circuits with many T-gates still compile to rank ≤ 1. Only real QEC circuits
 with genuinely entangled T-gate blocks (cultivation, distillation) achieve rank > 4.
 This means **the per-thread tier handles nearly all workloads in practice**.
+
+## Large Circuit Support (gpu-large-circuit-support branch)
+
+With kPauliWords=6 (384q) and kMaxMeas=4096, these circuits are now supported:
+
+| Circuit | Qubits | Measurements | shots/s |
+|---------|--------|-------------|---------|
+| surface_d9_r9 | 188 | 801 | 1.78M |
+| surface_d11_r11 | 274 | 1441 | 1.69M |
+| surface_d13_r13 | 376 | 2353 | 1.57M |
+
+To go beyond 384 qubits, increase kPauliWords further (e.g., 8 for 512q).
+surface_d15 has 528q → needs kPauliWords=9. Each increase adds 2 registers
+to ShotState.px/pz (negligible VGPR impact).

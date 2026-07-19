@@ -603,3 +603,29 @@ but NOT the load_complex64 or NUMA optimizations (compiled-kernel branch only).
 - compiled-kernel leads on global-coop (D7 rank=19): 145.8K — the NUMA per-XCD counters matter
 - per-op and hipgraph are competitive on per-thread circuits (D3 rank=4, QEC rank=0)
 - At rank=19, all approaches converge to 145-146K shots/s (HBM bandwidth ceiling)
+
+## Large Circuit Support — `gpu-large-circuit-support` branch
+
+Dedicated workspace for circuits beyond the original 128-qubit limit.
+
+### Limit Extensions
+| Parameter | Before | After | Enables |
+|-----------|--------|-------|---------|
+| kPauliWords | 2 (128q) | 6 (384q) | surface_d11, surface_d13 |
+| kMaxMeas | 1024 | 4096 | circuits with >1024 measurements |
+
+### New Circuits Now Supported (previously rejected with runtime_error)
+
+| Circuit | Qubits | Measurements | shots/s (per-thread tier) |
+|---------|--------|-------------|--------------------------|
+| surface_d9_r9 | **188** | 801 | **1.78M** ← NEW |
+| surface_d11_r11 | **274** | 1441 | **1.69M** ← NEW |
+| surface_d13_r13 | **376** | 2353 | **1.57M** ← NEW |
+
+All circuits compile to rank=0 (per-thread tier) after StatevectorSqueezePass
+optimization. The per-thread tier handles them efficiently.
+
+All 10 GPU correctness tests pass with the extended limits.
+
+**Tag:** `perf-384qubit-support`
+**Branch:** `gpu-large-circuit-support` (3 commits: d975865, 1b09b30, 436f83e)
