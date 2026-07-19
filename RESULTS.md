@@ -416,3 +416,48 @@ After GEAK identified warp-shuffle reduction as the primary coop-tier optimizati
 - AMD GPU optimization tools (GEAK, Apex, KernelForge, Hyperloom)
 
 14 repos cloned locally for code reference.
+
+## FINAL DEFINITIVE RESULTS (Same Node, Same Session, Warm GPU)
+
+All 6 approaches benchmarked on MI300X-ES (splinter), 5M shots, warm GPU.
+
+### Per-Thread Tier (rank=0, target_qec)
+
+| Rank | Approach | shots/s | vs SVM+GEAK |
+|------|----------|---------|-------------|
+| 1 | **SVM + GEAK warp-shuffle** | **48.3M** | baseline |
+| 2 | Persistent (E) | 48.3M | +0.0% |
+| 3 | Compiled (A) | 47.2M | -2.3% |
+| 4 | Split (D) | 46.1M | -4.6% |
+| 5 | Graph (C) | 44.9M | -7.0% |
+| 6 | PerOp (B) | 44.1M | -8.7% |
+| 7 | OptSVM (F) | 40.3M | -16.6% |
+
+### Coop Tier (rank=10, cultivation_d5)
+
+| Rank | Approach | shots/s | vs SVM+GEAK |
+|------|----------|---------|-------------|
+| 1 | **Persistent + GEAK (E)** | **5.68M** | **+1.1%** |
+| 2 | SVM + GEAK warp-shuffle | 5.62M | baseline |
+| 3 | Compiled (A, SVM fb) | 5.62M | +0.0% |
+| 4 | Graph (C, no GEAK) | 4.04M | -28.1% |
+| 5 | Split (D, no GEAK) | 4.03M | -28.3% |
+| 6 | PerOp (B, no GEAK) | 4.03M | -28.3% |
+| 7 | OptSVM (F, no GEAK) | 4.01M | -28.7% |
+
+### The Definitive Finding
+
+**GEAK's warp-shuffle reduction is the single most impactful optimization.**
+- Coop tier (rank=10): **+40%** (4.0M → 5.62M shots/s)
+- Per-thread tier (rank=0): +2% (included in baseline)
+
+No architectural change (compiled kernel, per-op dispatch, hipGraph, persistent
+kernel, circuit splitting) beats simply applying the warp-shuffle optimization
+to the existing SVM interpreter.
+
+### Updated Priority Stack
+
+1. **GEAK warp-shuffle** (already applied): +40% coop, +2% thread
+2. **Persistent kernel work-stealing** (E): +1% coop (minor, on top of GEAK)
+3. **Compiled kernel** (A): +5-18% thread (for deeper circuits with T-gates)
+4. All other approaches: negative or zero impact vs SVM+GEAK baseline
