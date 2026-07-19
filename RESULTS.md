@@ -526,3 +526,37 @@ this. The only paths forward are:
 1. NUMA-aware per-XCD amplitude pinning (estimated +8-20%)
 2. Reducing array sweep computation (FMA optimization, loop unrolling)
 3. Higher HBM bandwidth hardware (MI350X)
+
+## Final Definitive Benchmark — All Interesting Circuits
+
+**Build:** gpu-compiled-kernel with GEAK warp-shuffle + NUMA per-XCD + GpuComplex alignment + __shfl broadcast.
+**LDS tiling reverted** (caused -16% to -66% regression).
+
+| Circuit | rank | Tier | SVM+GEAK+NUMA | Compiled | Hybrid | Best |
+|---------|------|------|--------------|----------|--------|------|
+| target_qec | 0 | T1 | 44.5M | 45.2M | **45.5M** | Hybrid +2.2% |
+| circuit_d3_p0.001 | 4 | T1 | 40.3M | 41.1M | **43.5M** | Hybrid +7.9% |
+| surface_d7_r14 | 0 | T1 | 27.4M | **27.8M** | 27.7M | Compiled +1.4% |
+| color_d7 | 0 | T1 | 37.6M | 37.0M | **38.6M** | Hybrid +2.6% |
+| cultivation_d5 | 10 | T2 | 5.44M | 5.46M | **5.46M** | All ~equal |
+| circuit_d7 | 19 | T3 | **145.0K** | 140.1K | 142.0K | SVM+GEAK+NUMA |
+
+### LDS Tiling Failure (F8) — Major Regression
+
+LDS tiling was reverted after benchmarking showed:
+- D7 (rank=19): 143.9K → 120.1K shots/s (**-16.5%**)
+- D5 (rank=10): 5.59M → 1.90M shots/s (**-66.1%**)
+- Root cause: 3 new barriers per sweep where zero existed before
+
+### Optimization Impact Summary
+
+| Optimization | Coop tier (+40% warp-shuffle) | Per-thread (+5-18% compiled) | Global-coop |
+|-------------|-------------------------------|------------------------------|-------------|
+| GEAK warp-shuffle | ✅ **Major win** | ✅ Minor | ❌ Negligible |
+| NUMA per-XCD | Pending benchmark | No effect | Pending |
+| GpuComplex alignment | Pending | Pending | Pending |
+| __shfl broadcast | Pending | No effect | Pending |
+| LDS tiling | ❌ **-66% regression** | ❌ -6.6% | ❌ -16.5% |
+| Scatter LUT | ❌ -3.8% | No effect | ❌ LDS overflow |
+| Compiled megakernel | SVM fallback | ✅ +5-18% | SVM fallback |
+| Hybrid split | +0.8% | ✅ +2-8% | No effect |
