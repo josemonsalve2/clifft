@@ -1,5 +1,12 @@
 #include "clifft/gpu/gpu_sampler.h"
 #include "clifft/gpu/device_program.h"
+#include "clifft/gpu/kernel_cache.h"
+#include "clifft/gpu/kernel_codegen.h"
+#include "clifft/gpu/hsa_kernel_dispatch.h"
+#include "clifft/gpu/hsa_persistent_dispatch.h"
+#ifdef CLIFFT_ENABLE_MLIR
+#include "clifft/gpu/mlir_kernel_cache.h"
+#endif
 
 #include <hip/hip_runtime.h>
 
@@ -2058,7 +2065,11 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.block_counts),
                               static_cast<size_t>(max_blocks) * sizeof(BlockCounts)),
                    "allocate block counts");
-        if (use_global_coop_kernel) {
+        bool need_global_buffers =
+            use_global_coop_kernel ||
+            (options.hybrid && flat.peak_rank > kSharedMaxPeakRank &&
+             flat.peak_rank <= kGlobalMaxPeakRank);
+        if (need_global_buffers) {
             size_t v_count = static_cast<size_t>(global_worker_blocks) * kGlobalMaxAmplitudes;
             size_t scratch_count =
                 static_cast<size_t>(global_worker_blocks) * (kGlobalMaxAmplitudes / 2);
@@ -2122,13 +2133,119 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                 batch_blocks = global_worker_blocks;
             }
 
-            check_hip(hipEventRecord(start), "record start event");
-            if (use_shared_coop_kernel) {
+            // Compiled megakernel paths (--hybrid) — checked FIRST so they
+            // take priority over the SVM interpreter paths below.
+            // For coop/global tiers, fall back to SVM if the circuit uses
+            // operations not yet implemented in the compiled codegen path —
+            // this is detected by compile_or_load returning !valid when the
+            // generated kernel would discard every shot.
+            if (options.hybrid && flat.peak_rank <= kThreadMaxPeakRank) {
+                // Compiled megakernel via persistent HSA dispatch (register tier, rank 0-4)
+                static HsaLoadedKernel hsa_ck{};
+                static PersistentDispatcher pd_ck;
+                if (!hsa_ck.valid) {
+                    hsa_ck = compile_or_load_kernel(flat);
+                }
+                if (!hsa_ck.valid) {
+                    std::cerr << "[clifft-gpu] FATAL: compiled kernel (register tier) failed to load for rank "
+                              << flat.peak_rank << " — aborting (--hybrid requires compiled kernel)\n";
+                    std::abort();
+                }
+                if (!pd_ck.is_bound()) pd_ck.bind(hsa_ck, 0);
+                struct { uint64_t so; uint64_t bs; uint64_t sd;
+                         BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs;
+                kargs.so = shot_offset; kargs.bs = batch_shots;
+                kargs.sd = options.seed; kargs.bc = buffers.block_counts;
+                kargs.nobs = flat.num_observables; kargs.nexp = flat.num_exp_vals;
+                kernel_seconds += pd_ck.dispatch(
+                    batch_blocks * block_size, block_size,
+                    &kargs, sizeof(kargs));
+            } else if (options.hybrid && flat.peak_rank <= kSharedMaxPeakRank) {
+                // Compiled megakernel via persistent HSA dispatch (LDS/coop tier, rank 5-10)
+                static HsaLoadedKernel hsa_ck_coop{};
+                static PersistentDispatcher pd_coop;
+                if (!hsa_ck_coop.valid) {
+                    hsa_ck_coop = compile_or_load_kernel_coop(flat);
+                }
+                if (!hsa_ck_coop.valid) {
+                    std::cerr << "[clifft-gpu] FATAL: compiled kernel (coop tier) failed to load for rank "
+                              << flat.peak_rank << " — aborting (--hybrid requires compiled kernel)\n";
+                    std::abort();
+                }
+                if (!pd_coop.is_bound()) pd_coop.bind(hsa_ck_coop, 0);
+                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
+                           "clear coop compiled counts");
+                struct { uint64_t so; uint64_t bs; uint64_t sd;
+                         BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs;
+                kargs.so = shot_offset; kargs.bs = batch_shots;
+                kargs.sd = options.seed; kargs.bc = buffers.block_counts;
+                kargs.nobs = flat.num_observables; kargs.nexp = flat.num_exp_vals;
+                uint32_t coop_blocks = static_cast<uint32_t>(batch_shots);
+                kernel_seconds += pd_coop.dispatch(
+                    coop_blocks * block_size, block_size,
+                    &kargs, sizeof(kargs));
+            } else if (options.hybrid && flat.peak_rank <= kGlobalMaxPeakRank) {
+                // Compiled megakernel via persistent HSA dispatch (global-coop tier, rank 11-19)
+                static HsaLoadedKernel hsa_ck_global{};
+                static PersistentDispatcher pd_global;
+                if (!hsa_ck_global.valid) {
+                    hsa_ck_global = compile_or_load_kernel_global(flat);
+                }
+                if (!hsa_ck_global.valid) {
+                    std::cerr << "[clifft-gpu] FATAL: compiled kernel (global tier) failed to load for rank "
+                              << flat.peak_rank << " — aborting (--hybrid requires compiled kernel)\n";
+                    std::abort();
+                }
+                if (!pd_global.is_bound()) pd_global.bind(hsa_ck_global, 0);
+                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
+                           "clear global compiled counts");
+                check_hip(hipMemset(buffers.work_counter, 0, kNumXCDs * sizeof(uint64_t)),
+                           "clear per-XCD work counters compiled");
+                struct { uint64_t so; uint64_t bs; uint64_t sd;
+                         GpuComplex* gv; GpuComplex* gs; uint64_t* wc;
+                         BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs;
+                kargs.so = shot_offset; kargs.bs = batch_shots;
+                kargs.sd = options.seed;
+                kargs.gv = buffers.global_v; kargs.gs = buffers.global_scratch;
+                kargs.wc = buffers.work_counter;
+                kargs.bc = buffers.block_counts;
+                kargs.nobs = flat.num_observables; kargs.nexp = flat.num_exp_vals;
+                kernel_seconds += pd_global.dispatch(
+                    batch_blocks * block_size, block_size,
+                    &kargs, sizeof(kargs));
+            } else if (options.mlir && flat.peak_rank <= kThreadMaxPeakRank) {
+#ifdef CLIFFT_ENABLE_MLIR
+                // MLIR→LLVM-IR megakernel via HSA dispatch (register tier)
+                static HsaLoadedKernel hsa_ck_mlir{};
+                if (!hsa_ck_mlir.valid) {
+                    hsa_ck_mlir = compile_or_load_mlir_kernel(flat);
+                }
+                if (hsa_ck_mlir.valid) {
+                    struct { uint64_t so; uint64_t bs; uint64_t sd;
+                             BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs;
+                    kargs.so = shot_offset; kargs.bs = batch_shots;
+                    kargs.sd = options.seed; kargs.bc = buffers.block_counts;
+                    kargs.nobs = flat.num_observables; kargs.nexp = flat.num_exp_vals;
+                    kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir, 0,
+                        batch_blocks * block_size, block_size,
+                        &kargs, sizeof(kargs));
+                } else {
+                    std::cerr << "[clifft-gpu] FATAL: MLIR kernel failed to load — aborting\n";
+                    std::abort();
+                }
+#else
+                std::cerr << "[clifft-gpu] FATAL: MLIR NOT COMPILED IN (CLIFFT_ENABLE_MLIR=OFF)\n";
+                std::abort();
+#endif
+            // SVM interpreter paths (no --hybrid / --mlir)
+            } else if (use_shared_coop_kernel) {
+                check_hip(hipEventRecord(start), "record start event");
                 check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
                            "clear coop counts");
                 sample_kernel_coop<<<batch_blocks, block_size>>>(
                     gpu_program, shot_offset, batch_shots, options.seed, buffers.block_counts);
             } else if (use_global_coop_kernel) {
+                check_hip(hipEventRecord(start), "record start event");
                 check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
                            "clear global coop counts");
                 check_hip(hipMemset(buffers.work_counter, 0, kNumXCDs * sizeof(uint64_t)),
@@ -2137,15 +2254,23 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     gpu_program, shot_offset, batch_shots, options.seed, buffers.global_v,
                     buffers.global_scratch, buffers.work_counter, buffers.block_counts);
             } else {
+                check_hip(hipEventRecord(start), "record start event");
                 sample_kernel<<<batch_blocks, block_size, shared_bytes>>>(
                     gpu_program, shot_offset, batch_shots, options.seed, buffers.block_counts);
             }
-            check_hip(hipGetLastError(), "launch sample kernel");
-            check_hip(hipEventRecord(stop), "record stop event");
-            check_hip(hipEventSynchronize(stop), "synchronize sample kernel");
-            float ms = 0.0f;
-            check_hip(hipEventElapsedTime(&ms, start, stop), "measure kernel time");
-            kernel_seconds += static_cast<double>(ms) / 1000.0;
+
+            // Timing: HSA paths already accumulated kernel_seconds via hsa_dispatch_and_wait.
+            // SVM/fallback <<<>>> paths need HIP event timing.
+            bool used_hsa_dispatch = (options.hybrid || options.mlir) &&
+                flat.peak_rank <= kGlobalMaxPeakRank;
+            if (!used_hsa_dispatch) {
+                check_hip(hipGetLastError(), "launch sample kernel");
+                check_hip(hipEventRecord(stop), "record stop event");
+                check_hip(hipEventSynchronize(stop), "synchronize sample kernel");
+                float ms = 0.0f;
+                check_hip(hipEventElapsedTime(&ms, start, stop), "measure kernel time");
+                kernel_seconds += static_cast<double>(ms) / 1000.0;
+            }
 
             uint32_t copy_blocks = use_thread_kernel ? batch_blocks : 1u;
             check_hip(hipMemcpy(host_counts.data(), buffers.block_counts,

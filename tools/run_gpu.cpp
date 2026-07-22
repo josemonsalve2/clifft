@@ -55,6 +55,7 @@ int main(int argc, char** argv) {
     uint32_t block_size = 256;
     bool cpu_reference = false;
     bool hybrid = false;
+    bool use_mlir = false;
     std::string postselection_mode = "all";
 
     for (int i = 1; i < argc; ++i) {
@@ -84,6 +85,8 @@ int main(int argc, char** argv) {
             cpu_reference = true;
         } else if (arg == "--hybrid") {
             hybrid = true;
+        } else if (arg == "--mlir") {
+            use_mlir = true;
         } else if (arg == "--diagnose") {
             std::cout << clifft::gpu::gpu_backend_info() << "\n";
             return 0;
@@ -117,11 +120,14 @@ int main(int argc, char** argv) {
         options.seed = seed;
         options.block_size = block_size;
         options.hybrid = hybrid;
+        options.mlir = use_mlir;
         auto result = clifft::gpu::gpu_sample_survivors(program, shots, options);
         passed = result.passed_shots;
         logical = result.logical_errors;
         obs = result.observable_ones;
-        backend = hybrid ? "hip-gpu-hybrid" : "hip-gpu";
+        if (use_mlir) backend = "hip-gpu-mlir";
+        else if (hybrid) backend = "hip-gpu-hybrid";
+        else backend = "hip-gpu";
     }
 
     double sample_seconds =
