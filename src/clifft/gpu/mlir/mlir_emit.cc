@@ -794,7 +794,8 @@ void emit_meas_active_diagonal(std::ostringstream& out,
     out << "^" << p_hdr2 << "(%psum_i: i64, %psum_p0: f64, %psum_p1: f64):\n";
     std::string pcond = fresh_ssa();
     out << "  " << pcond << " = llvm.icmp \"ult\" %psum_i, " << half << " : i64\n";
-    out << "  llvm.cond_br " << pcond << ", ^" << p_body2 << ", ^" << p_done2 << "\n";
+    out << "  llvm.cond_br " << pcond << ", ^" << p_body2
+        << ", ^" << p_done2 << "(%psum_p0, %psum_p1 : f64, f64)\n";
     out << "^" << p_body2 << ":\n";
     // Load v[i] and v[i + half]
     std::string vi = emit_load_v(out, "%psum_i");
@@ -809,27 +810,27 @@ void emit_meas_active_diagonal(std::ostringstream& out,
     std::string next_i = fresh_ssa();
     out << "  " << next_i << " = llvm.add %psum_i, %c1_i64 : i64\n";
     out << "  llvm.br ^" << p_hdr2 << "(" << next_i << ", " << new_p0 << ", " << new_p1 << " : i64, f64, f64)\n";
-    out << "^" << p_done2 << ":\n";
+    out << "^" << p_done2 << "(%final_p0: f64, %final_p1: f64):\n";
 
     // sample_branch: if prob1 <= eps return 0; if prob0 <= eps return 1; else rng
     std::string total = fresh_ssa();
-    out << "  " << total << " = llvm.fadd %psum_p0, %psum_p1 : f64\n";
+    out << "  " << total << " = llvm.fadd %final_p0, %final_p1 : f64\n";
     std::string eps_k = fresh_ssa();
     out << "  " << eps_k << " = llvm.mlir.constant(1.0e-300 : f64) : f64\n";
     std::string eps = fresh_ssa();
     out << "  " << eps << " = llvm.fmul " << eps_k << ", " << total << " : f64\n";
     // Check if p1 <= eps → branch = 0
     std::string p1_small = fresh_ssa();
-    out << "  " << p1_small << " = llvm.fcmp \"ole\" %psum_p1, " << eps << " : f64\n";
+    out << "  " << p1_small << " = llvm.fcmp \"ole\" %final_p1, " << eps << " : f64\n";
     // Check if p0 <= eps → branch = 1
     std::string p0_small = fresh_ssa();
-    out << "  " << p0_small << " = llvm.fcmp \"ole\" %psum_p0, " << eps << " : f64\n";
+    out << "  " << p0_small << " = llvm.fcmp \"ole\" %final_p0, " << eps << " : f64\n";
     // RNG sample
     std::string u = emit_rng_uniform(out);
     std::string threshold = fresh_ssa();
     out << "  " << threshold << " = llvm.fmul " << u << ", " << total << " : f64\n";
     std::string rng_b = fresh_ssa();
-    out << "  " << rng_b << " = llvm.fcmp \"oge\" " << threshold << ", %psum_p0 : f64\n";
+    out << "  " << rng_b << " = llvm.fcmp \"oge\" " << threshold << ", %final_p0 : f64\n";
     // Final branch: p1_small ? 0 : (p0_small ? 1 : rng_b)
     std::string const_true = emit_const_i1(out, true);
     std::string const_false = emit_const_i1(out, false);
