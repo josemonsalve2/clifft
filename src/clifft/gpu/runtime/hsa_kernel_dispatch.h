@@ -2,7 +2,7 @@
 
 #ifdef CLIFFT_ENABLE_GPU
 
-#include "clifft/gpu/hsa_runtime.h"
+#include "clifft/gpu/runtime/hsa_runtime.h"
 
 #include <cstddef>
 #include <cstdint>

@@ -24,7 +24,7 @@
 
 #ifdef CLIFFT_ENABLE_GPU
 
-#include "clifft/gpu/hsa_persistent_dispatch.h"
+#include "clifft/gpu/runtime/hsa_persistent_dispatch.h"
 
 #include <atomic>
 #include <iostream>

@@ -14,7 +14,7 @@
 
 #ifdef CLIFFT_ENABLE_GPU
 
-#include "clifft/gpu/hsa_kernel_dispatch.h"
+#include "clifft/gpu/runtime/hsa_kernel_dispatch.h"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
