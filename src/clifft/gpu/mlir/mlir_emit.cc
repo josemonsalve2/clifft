@@ -609,23 +609,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %f_one = llvm.mlir.constant(1.0 : f32) : f32\n";
     out << "  %f_zero = llvm.mlir.constant(0.0 : f32) : f32\n";
 
-    // Compute batch_shot_id = BIDX * 256 + TIDX
-    out << "  %tidx_i32 = llvm.call @llvm.amdgcn.workitem.id.x() : () -> i32\n";
-    out << "  %bidx_i32 = llvm.call @llvm.amdgcn.workgroup.id.x() : () -> i32\n";
-    out << "  %scaled_bidx = llvm.mul %bidx_i32, %c256_i32 : i32\n";
-    out << "  %shot_idx_i32 = llvm.add %scaled_bidx, %tidx_i32 : i32\n";
-    out << "  %batch_shot_id = llvm.zext %shot_idx_i32 : i32 to i64\n";
-
-    // Guard: if batch_shot_id >= shots, early return
-    std::string lbl_run = fresh_label("run");
-    std::string lbl_exit = fresh_label("exit");
-    out << "  %oob = llvm.icmp \"uge\" %batch_shot_id, %shots : i64\n";
-    out << "  llvm.cond_br %oob, ^" << lbl_exit << ", ^" << lbl_run << "\n";
-    out << "^" << lbl_exit << ":\n";
-    out << "  llvm.return\n";
-    out << "^" << lbl_run << ":\n";
-
-    // Alloca state in private addrspace(5)
+    // Alloca state in private addrspace(5) — MUST be in entry block
     out << "  %px_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
     out << "  %px_ptr = llvm.addrspacecast %px_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
     out << "  %pz_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
@@ -649,6 +633,22 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %obs_size = llvm.mlir.constant(" << buf << " : i32) : i32\n";
     out << "  %obs_ptr_p5 = llvm.alloca %obs_size x i8 : (i32) -> !llvm.ptr<5>\n";
     out << "  %obs_ptr = llvm.addrspacecast %obs_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+
+    // Compute batch_shot_id = BIDX * 256 + TIDX
+    out << "  %tidx_i32 = llvm.call @llvm.amdgcn.workitem.id.x() : () -> i32\n";
+    out << "  %bidx_i32 = llvm.call @llvm.amdgcn.workgroup.id.x() : () -> i32\n";
+    out << "  %scaled_bidx = llvm.mul %bidx_i32, %c256_i32 : i32\n";
+    out << "  %shot_idx_i32 = llvm.add %scaled_bidx, %tidx_i32 : i32\n";
+    out << "  %batch_shot_id = llvm.zext %shot_idx_i32 : i32 to i64\n";
+
+    // Guard: if batch_shot_id >= shots, early return
+    std::string lbl_run = fresh_label("run");
+    std::string lbl_exit = fresh_label("exit");
+    out << "  %oob = llvm.icmp \"uge\" %batch_shot_id, %shots : i64\n";
+    out << "  llvm.cond_br %oob, ^" << lbl_exit << ", ^" << lbl_run << "\n";
+    out << "^" << lbl_exit << ":\n";
+    out << "  llvm.return\n";
+    out << "^" << lbl_run << ":\n";
 
     // Initialize state
     out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
