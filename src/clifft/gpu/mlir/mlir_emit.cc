@@ -1154,7 +1154,7 @@ void emit_draw_next_noise(std::ostringstream& out,
     // Binary search over noise_hazards_ptr[0..num_noise_sites)
     // upper_bound: find first i where hazards[i] > target
     std::string ns_i32 = fresh_ssa();
-    out << "  " << ns_i32 << " = llvm.zext %num_noise_sites : i32 to i64\n";
+    out << "  " << ns_i32 << " = llvm.add %num_noise_sites, %c0_i64 : i64\n";  // copy to fresh SSA
     std::string lo_var = fresh_ssa(), hi_var = fresh_ssa();
     std::string bs_hdr = fresh_label("bs_hdr"), bs_body = fresh_label("bs_body"), bs_done = fresh_label("bs_done");
     out << "  llvm.br ^" << bs_hdr << "(%c0_i64, " << ns_i32 << " : i64, i64)\n";
@@ -1296,7 +1296,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
         << "    %noise_hazards_ptr: !llvm.ptr, %noise_sites_ptr: !llvm.ptr,\n"
-        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i32,\n"
+        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i64,\n"
         << "    %num_obs: i32, %num_exp: i32) -> () {\n"
 ;
 
@@ -1612,7 +1612,7 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
         << "    %noise_hazards_ptr: !llvm.ptr, %noise_sites_ptr: !llvm.ptr,\n"
-        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i32,\n"
+        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i64,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
         << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;
@@ -1958,7 +1958,7 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
         << "    %work_counter: !llvm.ptr,\n"
         << "    %block_counts: !llvm.ptr,\n"
         << "    %noise_hazards_ptr: !llvm.ptr, %noise_sites_ptr: !llvm.ptr,\n"
-        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i32,\n"
+        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i64,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
         << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;

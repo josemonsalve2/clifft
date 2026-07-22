@@ -22,10 +22,20 @@ done
 rm -rf "$HOME/.clifft/kernel_cache/mlir" 2>/dev/null
 
 echo "=== SVM test ==="
-$BIN --circuit "$BASE/tests/fixtures/incremental/01_frame/frame_h.stim" --shots 100 --seed 42 2>&1
+$BIN --circuit "$BASE/tests/fixtures/incremental/01_frame_only/frame_h.stim" --shots 100 --seed 42 2>&1
 echo "EXIT: $?"
 
 echo ""
 echo "=== MLIR test ==="
-$BIN --circuit "$BASE/tests/fixtures/incremental/01_frame/frame_h.stim" --shots 100 --seed 42 --mlir 2>&1
+$BIN --circuit "$BASE/tests/fixtures/incremental/01_frame_only/frame_h.stim" --shots 100 --seed 42 --mlir 2>&1
+echo "EXIT: $?"
+
+echo ""
+echo "=== SVM 100k shots ==="
+$BIN --circuit "$BASE/tests/fixtures/incremental/01_frame_only/frame_h.stim" --shots 100000 --seed 42 2>&1
+echo "EXIT: $?"
+
+echo ""
+echo "=== MLIR 100k shots ==="
+$BIN --circuit "$BASE/tests/fixtures/incremental/01_frame_only/frame_h.stim" --shots 100000 --seed 42 --mlir 2>&1
 echo "EXIT: $?"

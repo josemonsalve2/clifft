@@ -55,8 +55,8 @@ perf_test() {
     timeout 30 "$BIN" --circuit "$stim" --shots 1000 --seed 42 >/dev/null 2>&1
     timeout 30 "$BIN" --circuit "$stim" --shots 1000 --seed 42 --mlir >/dev/null 2>&1
     # Measured
-    local svm_t=$(timeout 60 "$BIN" --circuit "$stim" --shots $SHOTS --seed 42 2>&1 | grep kernel_seconds | grep -oP '[0-9.]+')
-    local mlir_t=$(timeout 60 "$BIN" --circuit "$stim" --shots $SHOTS --seed 42 --mlir 2>&1 | grep kernel_seconds | grep -oP '[0-9.]+')
+    local svm_t=$(timeout 60 "$BIN" --circuit "$stim" --shots $SHOTS --seed 42 2>&1 | grep sample_seconds | grep -oP '[0-9.]+')
+    local mlir_t=$(timeout 60 "$BIN" --circuit "$stim" --shots $SHOTS --seed 42 --mlir 2>&1 | grep sample_seconds | grep -oP '[0-9.]+')
     if [ -n "$svm_t" ] && [ -n "$mlir_t" ]; then
         local ratio=$(python3 -c "print(f'{float(\"$svm_t\")/float(\"$mlir_t\"):.2f}x')" 2>/dev/null || echo "N/A")
         printf "%-30s %12s %12s %10s\n" "$name" "$svm_t" "$mlir_t" "$ratio"

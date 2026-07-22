@@ -2096,7 +2096,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         gpu_program.pauli_masks = buffers.pauli_masks;
         gpu_program.noise_sites = buffers.noise_sites;
         gpu_program.noise_channels = buffers.noise_channels;
-        gpu_program.num_noise_sites = static_cast<uint32_t>(flat.noise_sites.size());
+        gpu_program.num_noise_sites = static_cast<uint64_t>(flat.noise_sites.size());
         gpu_program.noise_hazards = buffers.noise_hazards;
         gpu_program.readout_noise = buffers.readout_noise;
         gpu_program.detector_offsets = buffers.detector_offsets;
@@ -2225,14 +2225,14 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                 if (hsa_ck_mlir.valid) {
                     struct { uint64_t so; uint64_t bs; uint64_t sd;
                              BlockCounts* bc;
-                             double* nhaz; void* nsites; void* nchans; uint32_t nsites_n;
+                             double* nhaz; void* nsites; void* nchans; uint64_t nsites_n;
                              uint32_t nobs; uint32_t nexp; } kargs;
                     kargs.so = shot_offset; kargs.bs = batch_shots;
                     kargs.sd = options.seed; kargs.bc = buffers.block_counts;
                     kargs.nhaz = buffers.noise_hazards;
                     kargs.nsites = buffers.noise_sites;
                     kargs.nchans = buffers.noise_channels;
-                    kargs.nsites_n = static_cast<uint32_t>(flat.noise_sites.size());
+                    kargs.nsites_n = static_cast<uint64_t>(flat.noise_sites.size());
                     kargs.nobs = flat.num_observables; kargs.nexp = flat.num_exp_vals;
                     kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir, 0,
                         batch_blocks * block_size, block_size,
@@ -2260,14 +2260,14 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                            "clear coop MLIR counts");
                 struct { uint64_t so; uint64_t bs; uint64_t sd;
                          BlockCounts* bc;
-                         double* nhaz; void* nsites; void* nchans; uint32_t nsites_n;
+                         double* nhaz; void* nsites; void* nchans; uint64_t nsites_n;
                          uint32_t nobs; uint32_t nexp; } kargs_coop;
                 kargs_coop.so = shot_offset; kargs_coop.bs = batch_shots;
                 kargs_coop.sd = options.seed; kargs_coop.bc = buffers.block_counts;
                 kargs_coop.nhaz = buffers.noise_hazards;
                 kargs_coop.nsites = buffers.noise_sites;
                 kargs_coop.nchans = buffers.noise_channels;
-                kargs_coop.nsites_n = static_cast<uint32_t>(flat.noise_sites.size());
+                kargs_coop.nsites_n = static_cast<uint64_t>(flat.noise_sites.size());
                 kargs_coop.nobs = flat.num_observables; kargs_coop.nexp = flat.num_exp_vals;
                 uint32_t coop_blocks = static_cast<uint32_t>(batch_shots);
                 kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir_coop, 0,
@@ -2295,7 +2295,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                 struct { uint64_t so; uint64_t bs; uint64_t sd;
                          GpuComplex* gv; GpuComplex* gs; uint64_t* wc;
                          BlockCounts* bc;
-                         double* nhaz; void* nsites; void* nchans; uint32_t nsites_n;
+                         double* nhaz; void* nsites; void* nchans; uint64_t nsites_n;
                          uint32_t nobs; uint32_t nexp; } kargs_global;
                 kargs_global.so = shot_offset; kargs_global.bs = batch_shots;
                 kargs_global.sd = options.seed;
@@ -2305,7 +2305,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                 kargs_global.nhaz = buffers.noise_hazards;
                 kargs_global.nsites = buffers.noise_sites;
                 kargs_global.nchans = buffers.noise_channels;
-                kargs_global.nsites_n = static_cast<uint32_t>(flat.noise_sites.size());
+                kargs_global.nsites_n = static_cast<uint64_t>(flat.noise_sites.size());
                 kargs_global.nobs = flat.num_observables; kargs_global.nexp = flat.num_exp_vals;
                 kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir_global, 0,
                     batch_blocks * block_size, block_size,
