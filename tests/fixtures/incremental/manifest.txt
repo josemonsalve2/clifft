@@ -1,0 +1,22 @@
+# Incremental single-gate circuits for performance evaluation
+# level/circuit_file  description
+01_frame_only/frame_cnot.stim
+01_frame_only/frame_cz.stim
+01_frame_only/frame_h.stim
+01_frame_only/frame_h_x10.stim
+01_frame_only/frame_s.stim
+01_frame_only/frame_swap.stim
+02_single_expand/four_t.stim
+02_single_expand/one_t.stim
+02_single_expand/two_t.stim
+03_single_array/array_cnot_r2.stim
+03_single_array/array_h_r1.stim
+03_single_array/array_s_r1.stim
+04_measure/active_diagonal.stim
+04_measure/dormant_static.stim
+04_measure/noise_measure.stim
+05_combinations/cnot_h_r2.stim
+05_combinations/h_then_t.stim
+05_combinations/t_measure_cycle.stim
+06_small_circuits/rank4_mixed.stim
+06_small_circuits/rep_d3.stim
