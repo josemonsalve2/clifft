@@ -32,7 +32,7 @@ mkdir -p "$BUILD" && cd "$BUILD"
 cmake "$BASE" -DCLIFFT_ENABLE_HIP=ON -DCLIFFT_ENABLE_MLIR=ON \
     -DCMAKE_HIP_ARCHITECTURES=$GPU_ARCH \
     -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3
-make -j$(nproc) run_gpu 2>&1 | tail -3
+make -j$(nproc) run_gpu 2>&1 | tail -20
 cd "$BASE"
 rm -rf "$HOME/.clifft/kernel_cache/mlir" 2>/dev/null
 if [ ! -x "$BIN" ]; then
