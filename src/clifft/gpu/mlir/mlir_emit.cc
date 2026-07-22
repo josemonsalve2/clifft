@@ -73,6 +73,7 @@ namespace {
 static int label_counter = 0;
 static int ssa_counter = 100;
 static bool cooperative_mode = false;
+static bool lds_amplitudes = false;
 
 std::string fresh_label(const std::string& prefix = "bb") {
     return prefix + std::to_string(label_counter++);
@@ -207,20 +208,23 @@ std::string emit_scatter_bits_1(std::ostringstream& out,
 
 std::string emit_load_v(std::ostringstream& out, const std::string& idx_i64) {
     std::string vp = fresh_ssa();
+    // In coop mode, v_ptr is LDS ptr<3> — use native addrspace for ds_read_b64
+    const char* pt = lds_amplitudes ? "!llvm.ptr<3>" : "!llvm.ptr";
     out << "  " << vp << " = llvm.getelementptr inbounds %v_ptr[" << idx_i64
-        << "] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+        << "] : (" << pt << ", i64) -> " << pt << ", !llvm.struct<(f32, f32)>\n";
     std::string vc = fresh_ssa();
-    out << "  " << vc << " = llvm.load " << vp << " : !llvm.ptr -> !llvm.struct<(f32, f32)>\n";
+    out << "  " << vc << " = llvm.load " << vp << " : " << pt << " -> !llvm.struct<(f32, f32)>\n";
     return vc;
 }
 
 void emit_store_v(std::ostringstream& out,
                    const std::string& idx_i64, const std::string& val) {
     std::string vp = fresh_ssa();
+    const char* pt = lds_amplitudes ? "!llvm.ptr<3>" : "!llvm.ptr";
     out << "  " << vp << " = llvm.getelementptr inbounds %v_ptr[" << idx_i64
-        << "] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+        << "] : (" << pt << ", i64) -> " << pt << ", !llvm.struct<(f32, f32)>\n";
     out << "  llvm.store " << val << ", " << vp
-        << " : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+        << " : !llvm.struct<(f32, f32)>, " << pt << "\n";
 }
 
 // -----------------------------------------------------------------------
@@ -1376,6 +1380,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     label_counter = 0;
     ssa_counter = 100;
     cooperative_mode = false;
+    lds_amplitudes = false;
     UsedFunctions uf = analyze_used_functions(flat);
 
     std::ostringstream out;
@@ -1818,6 +1823,7 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     label_counter = 0;
     ssa_counter = 100;
     cooperative_mode = true;
+    lds_amplitudes = true;
 
     std::ostringstream out;
     uint32_t num_amps = 1u << flat.peak_rank;
@@ -1888,8 +1894,7 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     out << "^" << lbl_run << ":\n";
 
     // Get LDS pointers (addrspacecast from ptr<3> to generic)
-    out << "  %lds_v_as3 = llvm.mlir.addressof @lds_v : !llvm.ptr<3>\n";
-    out << "  %v_ptr = llvm.addrspacecast %lds_v_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %v_ptr = llvm.mlir.addressof @lds_v : !llvm.ptr<3>\n";
     out << "  %lds_px_as3 = llvm.mlir.addressof @lds_px : !llvm.ptr<3>\n";
     out << "  %px_ptr = llvm.addrspacecast %lds_px_as3 : !llvm.ptr<3> to !llvm.ptr\n";
     out << "  %lds_pz_as3 = llvm.mlir.addressof @lds_pz : !llvm.ptr<3>\n";
@@ -1923,8 +1928,8 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     out << "  %zero_c1 = llvm.insertvalue %f_zero, %zero_c[0] : !llvm.struct<(f32, f32)>\n";
     out << "  %zero_c2 = llvm.insertvalue %f_zero, %zero_c1[1] : !llvm.struct<(f32, f32)>\n";
     std::string vp_init = fresh_ssa();
-    out << "  " << vp_init << " = llvm.getelementptr inbounds %v_ptr[%init_i] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
-    out << "  llvm.store %zero_c2, " << vp_init << " : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+    out << "  " << vp_init << " = llvm.getelementptr inbounds %v_ptr[%init_i] : (!llvm.ptr<3>, i64) -> !llvm.ptr<3>, !llvm.struct<(f32, f32)>\n";
+    out << "  llvm.store %zero_c2, " << vp_init << " : !llvm.struct<(f32, f32)>, !llvm.ptr<3>\n";
     std::string init_next = fresh_ssa();
     out << "  " << init_next << " = llvm.add %init_i, %c256_i64 : i64\n";
     out << "  llvm.br ^" << init_hdr << "(" << init_next << " : i64)\n";
@@ -1944,11 +1949,11 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     out << "  llvm.store %c0_i64, %pz1_ptr : i64, !llvm.ptr\n";
     out << "  llvm.store %c0_i32, %active_k_ptr : i32, !llvm.ptr\n";
     out << "  llvm.store %c0_i8, %discarded_ptr : i8, !llvm.ptr\n";
-    out << "  %v0_ptr_coop = llvm.getelementptr inbounds %v_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+    out << "  %v0_ptr_coop = llvm.getelementptr inbounds %v_ptr[%c0_i64] : (!llvm.ptr<3>, i64) -> !llvm.ptr<3>, !llvm.struct<(f32, f32)>\n";
     out << "  %init_one = llvm.mlir.undef : !llvm.struct<(f32, f32)>\n";
     out << "  %init_one1 = llvm.insertvalue %f_one, %init_one[0] : !llvm.struct<(f32, f32)>\n";
     out << "  %init_one2 = llvm.insertvalue %f_zero, %init_one1[1] : !llvm.struct<(f32, f32)>\n";
-    out << "  llvm.store %init_one2, %v0_ptr_coop : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+    out << "  llvm.store %init_one2, %v0_ptr_coop : !llvm.struct<(f32, f32)>, !llvm.ptr<3>\n";
     out << "  llvm.br ^" << t0_done << "\n";
     out << "^" << t0_done << ":\n";
     emit_barrier(out);
@@ -2166,6 +2171,7 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     label_counter = 0;
     ssa_counter = 100;
     cooperative_mode = true;
+    lds_amplitudes = false;
 
     std::ostringstream out;
 
