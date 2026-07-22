@@ -309,6 +309,11 @@ std::string emit_cmul_const(std::ostringstream& out,
     return res;
 }
 
+// Forward declarations for functions defined later but called here
+void emit_barrier(std::ostringstream& out);
+std::string emit_tid0_guard_begin(std::ostringstream& out);
+void emit_tid0_guard_end(std::ostringstream& out, const std::string& lbl_done);
+
 // -----------------------------------------------------------------------
 // Gate-level emitters (used by ops/*.inc)
 // -----------------------------------------------------------------------
