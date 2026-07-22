@@ -42,8 +42,15 @@ gpu/
 │       └── reduction_ops.inc    Warp-shuffle reductions, coop state
 │
 └── mlir/                MLIR→LLVM-IR alternative codegen (experimental)
-    ├── mlir_codegen      Textual MLIR emission (LLVM dialect)
-    └── mlir_kernel_cache llc/lld compilation + disk cache
+    ├── mlir_codegen.h    Public API: generate_mlir_kernel_llvmir()
+    ├── mlir_codegen.cc   Pipeline orchestration (mlir-opt, mlir-translate subprocesses)
+    ├── mlir_emit.h       Internal: emit_mlir_text(), tool finders, subprocess helpers
+    ├── mlir_emit.cc      Textual MLIR emission (LLVM dialect) + SSA/complex helpers
+    ├── mlir_kernel_cache.h/.cc  llc/lld compilation + disk cache
+    └── ops/              Per-category gate emission (.inc files)
+        ├── mlir_frame_ops.inc       Pauli frame tracking (H, S, CNOT, CZ)
+        ├── mlir_array_ops.inc       Amplitude sweeps (H, S, T, CNOT + static emitters)
+        └── mlir_measurement_ops.inc Measurements, observables, detectors
 ```
 
 ## Two Execution Paths
@@ -57,6 +64,20 @@ The `--hybrid` path. `kernel_codegen.cc` walks the flattened bytecode and emits 
 - **LDS/Coop tier** (rank 5-10): amplitudes in LDS, 256 threads cooperate per shot
 - **Global/HBM tier** (rank 11-19): amplitudes in HBM, per-XCD work stealing
 
+### MLIR Codegen (`mlir/`)
+An experimental alternative to the HIP text-emission path.  Instead of generating HIP C++ source, this backend emits textual MLIR (LLVM dialect), then invokes `mlir-opt` and `mlir-translate` as subprocesses to produce LLVM-IR, which is compiled by `llc` + `lld` into a `.hsaco`.  No MLIR C++ library linkage is needed — only the command-line tools.
+
+The file organization follows patterns from IREE's `HAL/Target/` and LLVM MLIR's `Target/LLVMIR/Dialect/` structure:
+
+- **`mlir_codegen.cc`** — Pipeline orchestration only (subprocess management, temp file handling). Calls `emit_mlir_text()` for IR generation.
+- **`mlir_emit.cc`** — The IR generation engine: kernel preamble, per-thread state allocation, SSA helpers (bit manipulation, complex arithmetic, amplitude load/store), and the instruction dispatch switch. Gate cases are included from `ops/*.inc` files.
+- **`ops/*.inc`** — Per-category switch cases, included inside `mlir_emit.cc`'s instruction loop. Same pattern as `codegen/ops/` but for MLIR LLVM dialect text.
+- **`mlir_kernel_cache.cc`** — Compilation (`llc` → `lld`) and disk caching of `.hsaco` files.
+
+Currently covers register-tier ops (peak_rank ≤ 4): frame gates, array H/S/T/CNOT, dormant measurements, and observables.  Unsupported ops set a discard flag in the generated IR.
+
+Requires: `CLIFFT_ENABLE_MLIR=ON` and LLVM tools in `PATH` or `LLVM_PREFIX`.
+
 ## Adding a New Operation
 
 1. Add the `__device__` function to `sampler/hip_sampler.hip` (interpreter path)
@@ -64,6 +85,7 @@ The `--hybrid` path. `kernel_codegen.cc` walks the flattened bytecode and emits 
 3. Add emission logic to `codegen/emit_preamble.cc` (conditional include) and `codegen/emit_instructions.cc` (instruction emission for both register and coop paths)
 4. If the operation needs new constant pool data, extend `emit_constant_pool()` in `emit_preamble.cc`
 5. Update `UsedFunctions` in `kernel_codegen.h` and `compute_derived()` in `kernel_codegen.cc`
+6. (Optional) For MLIR path: add a `case` block to the appropriate `mlir/ops/*.inc` file and add any needed emission helpers to `mlir_emit.cc`
 
 ## Build Flags
 
