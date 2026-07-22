@@ -732,6 +732,507 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     return out.str();
 }
 
+// -----------------------------------------------------------------------
+// emit_mlir_text_coop: cooperative (LDS) tier kernel emission
+// -----------------------------------------------------------------------
+std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
+    label_counter = 0;
+    ssa_counter = 100;
+
+    std::ostringstream out;
+    uint32_t num_amps = 1u << flat.peak_rank;
+
+    // Module header + intrinsic declarations
+    out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
+    emit_gpu_intrinsic_decls(out);
+
+    // LDS globals (address space 3)
+    emit_lds_global(out, "lds_v", "!llvm.struct<(f32, f32)>", num_amps);
+    emit_lds_global(out, "lds_px", "i64", 2);
+    emit_lds_global(out, "lds_pz", "i64", 2);
+    emit_lds_global(out, "lds_active_k", "i32", 1);
+    emit_lds_global(out, "lds_discarded", "i8", 1);
+    emit_lds_global(out, "lds_meas", "i8", kMaxMeas);
+    emit_lds_global(out, "lds_obs", "i8", kMaxObs);
+    out << "\n";
+
+    // Kernel function
+    out << "llvm.func @compiled_mlir_kernel_coop(\n"
+        << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
+        << "    %block_counts: !llvm.ptr,\n"
+        << "    %num_obs: i32, %num_exp: i32) -> ()\n"
+        << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
+        << "  ^entry:\n";
+
+    // Constants
+    out << "  %c0_i32 = llvm.mlir.constant(0 : i32) : i32\n";
+    out << "  %c1_i32 = llvm.mlir.constant(1 : i32) : i32\n";
+    out << "  %c2_i32 = llvm.mlir.constant(2 : i32) : i32\n";
+    out << "  %c0_i64 = llvm.mlir.constant(0 : i64) : i64\n";
+    out << "  %c1_i64 = llvm.mlir.constant(1 : i64) : i64\n";
+    out << "  %c6_i64 = llvm.mlir.constant(6 : i64) : i64\n";
+    out << "  %c63_i64 = llvm.mlir.constant(63 : i64) : i64\n";
+    out << "  %cminus1_i64 = llvm.mlir.constant(-1 : i64) : i64\n";
+    out << "  %c0_i8 = llvm.mlir.constant(0 : i8) : i8\n";
+    out << "  %c1_i8 = llvm.mlir.constant(1 : i8) : i8\n";
+    out << "  %c256_i64 = llvm.mlir.constant(256 : i64) : i64\n";
+    out << "  %f_one = llvm.mlir.constant(1.0 : f32) : f32\n";
+    out << "  %f_zero = llvm.mlir.constant(0.0 : f32) : f32\n";
+
+    // Get TIDX, BIDX
+    out << "  %tidx_i32 = llvm.call @llvm.amdgcn.workitem.id.x() : () -> i32\n";
+    out << "  %tidx = llvm.zext %tidx_i32 : i32 to i64\n";
+    out << "  %bidx_i32 = llvm.call @llvm.amdgcn.workgroup.id.x() : () -> i32\n";
+    out << "  %bidx = llvm.zext %bidx_i32 : i32 to i64\n";
+
+    // Early exit if batch_shot_id >= shots
+    std::string early_cmp = fresh_ssa();
+    std::string lbl_run = fresh_label("run");
+    std::string lbl_exit = fresh_label("exit");
+    out << "  " << early_cmp << " = llvm.icmp \"uge\" %bidx, %shots : i64\n";
+    out << "  llvm.cond_br " << early_cmp << ", ^" << lbl_exit << ", ^" << lbl_run << "\n";
+    out << "^" << lbl_exit << ":\n";
+    out << "  llvm.return\n";
+    out << "^" << lbl_run << ":\n";
+
+    // Get LDS pointers (addrspacecast from ptr<3> to generic)
+    out << "  %lds_v_as3 = llvm.mlir.addressof @lds_v : !llvm.ptr<3>\n";
+    out << "  %v_ptr = llvm.addrspacecast %lds_v_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_px_as3 = llvm.mlir.addressof @lds_px : !llvm.ptr<3>\n";
+    out << "  %px_ptr = llvm.addrspacecast %lds_px_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_pz_as3 = llvm.mlir.addressof @lds_pz : !llvm.ptr<3>\n";
+    out << "  %pz_ptr = llvm.addrspacecast %lds_pz_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_ak_as3 = llvm.mlir.addressof @lds_active_k : !llvm.ptr<3>\n";
+    out << "  %active_k_ptr = llvm.addrspacecast %lds_ak_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_disc_as3 = llvm.mlir.addressof @lds_discarded : !llvm.ptr<3>\n";
+    out << "  %discarded_ptr = llvm.addrspacecast %lds_disc_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_meas_as3 = llvm.mlir.addressof @lds_meas : !llvm.ptr<3>\n";
+    out << "  %meas_ptr = llvm.addrspacecast %lds_meas_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_obs_as3 = llvm.mlir.addressof @lds_obs : !llvm.ptr<3>\n";
+    out << "  %obs_ptr = llvm.addrspacecast %lds_obs_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  %px1_ptr = llvm.getelementptr inbounds %px_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  %pz0_ptr = llvm.getelementptr inbounds %pz_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  %pz1_ptr = llvm.getelementptr inbounds %pz_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+
+    // Cooperative init: zero v[] across all threads
+    char ampbuf[32]; snprintf(ampbuf, sizeof(ampbuf), "%u", num_amps);
+    out << "  %num_amps = llvm.mlir.constant(" << ampbuf << " : i64) : i64\n";
+    std::string init_hdr = fresh_label("init_hdr");
+    std::string init_body = fresh_label("init_body");
+    std::string init_done = fresh_label("init_done");
+    out << "  llvm.br ^" << init_hdr << "(%tidx : i64)\n";
+    out << "^" << init_hdr << "(%init_i: i64):\n";
+    std::string init_cond = fresh_ssa();
+    out << "  " << init_cond << " = llvm.icmp \"ult\" %init_i, %num_amps : i64\n";
+    out << "  llvm.cond_br " << init_cond << ", ^" << init_body << ", ^" << init_done << "\n";
+    out << "^" << init_body << ":\n";
+    out << "  %zero_c = llvm.mlir.undef : !llvm.struct<(f32, f32)>\n";
+    out << "  %zero_c1 = llvm.insertvalue %f_zero, %zero_c[0] : !llvm.struct<(f32, f32)>\n";
+    out << "  %zero_c2 = llvm.insertvalue %f_zero, %zero_c1[1] : !llvm.struct<(f32, f32)>\n";
+    std::string vp_init = fresh_ssa();
+    out << "  " << vp_init << " = llvm.getelementptr inbounds %v_ptr[%init_i] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+    out << "  llvm.store %zero_c2, " << vp_init << " : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+    std::string init_next = fresh_ssa();
+    out << "  " << init_next << " = llvm.add %init_i, %c256_i64 : i64\n";
+    out << "  llvm.br ^" << init_hdr << "(" << init_next << " : i64)\n";
+    out << "^" << init_done << ":\n";
+    emit_barrier(out);
+
+    // Thread-0 init: px=0, pz=0, active_k=0, discarded=0, v[0]={1,0}
+    std::string is_t0 = fresh_ssa();
+    std::string t0_init = fresh_label("t0_init");
+    std::string t0_done = fresh_label("t0_done");
+    out << "  " << is_t0 << " = llvm.icmp \"eq\" %tidx_i32, %c0_i32 : i32\n";
+    out << "  llvm.cond_br " << is_t0 << ", ^" << t0_init << ", ^" << t0_done << "\n";
+    out << "^" << t0_init << ":\n";
+    out << "  llvm.store %c0_i64, %px0_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i64, %px1_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i64, %pz0_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i64, %pz1_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i32, %active_k_ptr : i32, !llvm.ptr\n";
+    out << "  llvm.store %c0_i8, %discarded_ptr : i8, !llvm.ptr\n";
+    out << "  %v0_ptr_coop = llvm.getelementptr inbounds %v_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+    out << "  %init_one = llvm.mlir.undef : !llvm.struct<(f32, f32)>\n";
+    out << "  %init_one1 = llvm.insertvalue %f_one, %init_one[0] : !llvm.struct<(f32, f32)>\n";
+    out << "  %init_one2 = llvm.insertvalue %f_zero, %init_one1[1] : !llvm.struct<(f32, f32)>\n";
+    out << "  llvm.store %init_one2, %v0_ptr_coop : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+    out << "  llvm.br ^" << t0_done << "\n";
+    out << "^" << t0_done << ":\n";
+    emit_barrier(out);
+
+    // Instruction dispatch — coop pattern:
+    //   Frame ops: if (TIDX==0) { ... } barrier()
+    //   Array ops: cooperative loop with barrier (reuse register-tier .inc files)
+    //   For now, reuse same .inc dispatch (register-tier patterns work for single-thread-per-shot)
+    //   TODO: convert array ops to cooperative loops for true multi-thread cooperation
+
+    // Bind lambdas (same as register tier — the .inc files use these)
+    auto emit_bit_get = [&](const std::string& words_ptr,
+                             const std::string& idx_i32) -> std::string {
+        return mlir_emit::emit_bit_get(out, words_ptr, idx_i32);
+    };
+    auto emit_bit_xor = [&](const std::string& words_ptr,
+                              const std::string& idx_i32,
+                              const std::string& val_i1) {
+        mlir_emit::emit_bit_xor(out, words_ptr, idx_i32, val_i1);
+    };
+    auto emit_bit_set = [&](const std::string& words_ptr,
+                              const std::string& idx_i32,
+                              const std::string& val_i1) {
+        mlir_emit::emit_bit_set(out, words_ptr, idx_i32, val_i1);
+    };
+    auto emit_scatter_bits_1 = [&](const std::string& val_i64,
+                                    const std::string& pos_i64) -> std::string {
+        return mlir_emit::emit_scatter_bits_1(out, val_i64, pos_i64);
+    };
+    auto emit_scatter_bits_2 = [&](const std::string& val_i64,
+                                    const std::string& pos1_i64,
+                                    const std::string& pos2_i64) -> std::string {
+        return mlir_emit::emit_scatter_bits_2(out, val_i64, pos1_i64, pos2_i64);
+    };
+    auto emit_load_v = [&](const std::string& idx_i64) -> std::string {
+        return mlir_emit::emit_load_v(out, idx_i64);
+    };
+    auto emit_store_v = [&](const std::string& idx_i64, const std::string& val) {
+        mlir_emit::emit_store_v(out, idx_i64, val);
+    };
+    auto emit_cadd = [&](const std::string& a, const std::string& b_val) -> std::string {
+        return mlir_emit::emit_cadd(out, a, b_val);
+    };
+    auto emit_csub = [&](const std::string& a, const std::string& b_val) -> std::string {
+        return mlir_emit::emit_csub(out, a, b_val);
+    };
+    auto emit_cscale_f64 = [&](const std::string& a, double scale) -> std::string {
+        return mlir_emit::emit_cscale_f64(out, a, scale);
+    };
+    auto emit_cmul_const = [&](const std::string& a,
+                                double phase_re, double phase_im) -> std::string {
+        return mlir_emit::emit_cmul_const(out, a, phase_re, phase_im);
+    };
+    auto emit_array_h_static = [&](uint32_t axis) {
+        mlir_emit::emit_array_h_static(out, axis);
+    };
+    auto emit_array_cnot_static = [&](uint32_t ctrl, uint32_t tgt) {
+        mlir_emit::emit_array_cnot_static(out, ctrl, tgt);
+    };
+    auto emit_apply_phase_static = [&](uint32_t axis, double phs_re, double phs_im) {
+        mlir_emit::emit_apply_phase_static(out, axis, phs_re, phs_im);
+    };
+    auto emit_cnorm = [&](const std::string& c) -> std::string {
+        return mlir_emit::emit_cnorm(out, c);
+    };
+
+    using Opcode = clifft::Opcode;
+    out << "  // --- Coop instruction sequence (" << flat.instrs.size() << " ops) ---\n";
+
+    for (size_t pc = 0; pc < flat.instrs.size(); ++pc) {
+        const GpuInstr& ins = flat.instrs[pc];
+        bool sign = (ins.flags & kFlagSign) != 0;
+        bool identity = (ins.flags & kFlagIdentity) != 0;
+        auto op = static_cast<Opcode>(ins.opcode);
+
+        out << "  // op[" << pc << "] opcode=" << (unsigned)ins.opcode << "\n";
+
+        switch (op) {
+#include "ops/mlir_frame_ops.inc"
+#include "ops/mlir_array_ops.inc"
+#include "ops/mlir_measurement_ops.inc"
+#include "ops/mlir_expand_ops.inc"
+#include "ops/mlir_noise_ops.inc"
+#include "ops/mlir_exp_val_ops.inc"
+            default:
+                out << "  // Unsupported op " << (unsigned)ins.opcode << " — mark discarded\n";
+                out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
+                break;
+        }
+    }
+
+    out << "  // --- End coop instruction sequence ---\n";
+    out << "  llvm.return\n";
+    out << "}\n\n";
+    out << "} // end module\n";
+
+    return out.str();
+}
+
+// -----------------------------------------------------------------------
+// emit_mlir_text_global: global (HBM) tier kernel emission
+// -----------------------------------------------------------------------
+std::string emit_mlir_text_global(const FlattenedProgram& flat) {
+    label_counter = 0;
+    ssa_counter = 100;
+
+    std::ostringstream out;
+
+    // Module header + intrinsic declarations
+    out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
+    emit_gpu_intrinsic_decls(out);
+
+    // LDS globals for frame/classical state (amplitudes are in HBM)
+    emit_lds_global(out, "lds_px", "i64", 2);
+    emit_lds_global(out, "lds_pz", "i64", 2);
+    emit_lds_global(out, "lds_active_k", "i32", 1);
+    emit_lds_global(out, "lds_discarded", "i8", 1);
+    emit_lds_global(out, "lds_meas", "i8", kMaxMeas);
+    emit_lds_global(out, "lds_obs", "i8", kMaxObs);
+    emit_lds_global(out, "lds_batch_shot_id", "i64", 1);
+    out << "\n";
+
+    // Global kernel with HBM pointers
+    out << "llvm.func @compiled_mlir_kernel_global(\n"
+        << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
+        << "    %global_v: !llvm.ptr, %global_scratch: !llvm.ptr,\n"
+        << "    %work_counter: !llvm.ptr,\n"
+        << "    %block_counts: !llvm.ptr,\n"
+        << "    %num_obs: i32, %num_exp: i32) -> ()\n"
+        << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
+        << "  ^entry:\n";
+
+    // Constants
+    out << "  %c0_i32 = llvm.mlir.constant(0 : i32) : i32\n";
+    out << "  %c1_i32 = llvm.mlir.constant(1 : i32) : i32\n";
+    out << "  %c2_i32 = llvm.mlir.constant(2 : i32) : i32\n";
+    out << "  %c0_i64 = llvm.mlir.constant(0 : i64) : i64\n";
+    out << "  %c1_i64 = llvm.mlir.constant(1 : i64) : i64\n";
+    out << "  %c6_i64 = llvm.mlir.constant(6 : i64) : i64\n";
+    out << "  %c63_i64 = llvm.mlir.constant(63 : i64) : i64\n";
+    out << "  %cminus1_i64 = llvm.mlir.constant(-1 : i64) : i64\n";
+    out << "  %c0_i8 = llvm.mlir.constant(0 : i8) : i8\n";
+    out << "  %c1_i8 = llvm.mlir.constant(1 : i8) : i8\n";
+    out << "  %c8_i64 = llvm.mlir.constant(8 : i64) : i64\n";
+    out << "  %c256_i64 = llvm.mlir.constant(256 : i64) : i64\n";
+    out << "  %f_one = llvm.mlir.constant(1.0 : f32) : f32\n";
+    out << "  %f_zero = llvm.mlir.constant(0.0 : f32) : f32\n";
+
+    // kGlobalMaxPeakRank stride for HBM slot addressing
+    char stridebuf[32];
+    snprintf(stridebuf, sizeof(stridebuf), "%u", 1u << kGlobalMaxPeakRank);
+    out << "  %hbm_stride = llvm.mlir.constant(" << stridebuf << " : i64) : i64\n";
+
+    // Get TIDX, BIDX
+    out << "  %tidx_i32 = llvm.call @llvm.amdgcn.workitem.id.x() : () -> i32\n";
+    out << "  %tidx = llvm.zext %tidx_i32 : i32 to i64\n";
+    out << "  %bidx_i32 = llvm.call @llvm.amdgcn.workgroup.id.x() : () -> i32\n";
+    out << "  %bidx = llvm.zext %bidx_i32 : i32 to i64\n";
+
+    // Compute v_ptr = global_v + BIDX * hbm_stride
+    std::string v_off = fresh_ssa();
+    out << "  " << v_off << " = llvm.mul %bidx, %hbm_stride : i64\n";
+    out << "  %v_ptr = llvm.getelementptr inbounds %global_v[" << v_off
+        << "] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+
+    // XCD work-stealing: get XCD ID, compute my_counter pointer
+    std::string xcd_raw = fresh_ssa();
+    out << "  " << xcd_raw << " = llvm.inline_asm "
+        << "\"s_getreg_b32 $0, hwreg(HW_REG_XCC_ID)\", \"=s\" "
+        << ": () -> i32\n";
+    std::string xcd_mod = fresh_ssa();
+    out << "  " << xcd_mod << " = llvm.urem " << xcd_raw << ", llvm.mlir.constant(8 : i32) : i32\n";
+    std::string xcd_i64 = fresh_ssa();
+    out << "  " << xcd_i64 << " = llvm.zext " << xcd_mod << " : i32 to i64\n";
+    std::string my_counter = fresh_ssa();
+    out << "  " << my_counter << " = llvm.getelementptr inbounds %work_counter["
+        << xcd_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+
+    // LDS pointers for frame/classical state
+    out << "  %lds_px_as3 = llvm.mlir.addressof @lds_px : !llvm.ptr<3>\n";
+    out << "  %px_ptr = llvm.addrspacecast %lds_px_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_pz_as3 = llvm.mlir.addressof @lds_pz : !llvm.ptr<3>\n";
+    out << "  %pz_ptr = llvm.addrspacecast %lds_pz_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_ak_as3 = llvm.mlir.addressof @lds_active_k : !llvm.ptr<3>\n";
+    out << "  %active_k_ptr = llvm.addrspacecast %lds_ak_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_disc_as3 = llvm.mlir.addressof @lds_discarded : !llvm.ptr<3>\n";
+    out << "  %discarded_ptr = llvm.addrspacecast %lds_disc_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_meas_as3 = llvm.mlir.addressof @lds_meas : !llvm.ptr<3>\n";
+    out << "  %meas_ptr = llvm.addrspacecast %lds_meas_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_obs_as3 = llvm.mlir.addressof @lds_obs : !llvm.ptr<3>\n";
+    out << "  %obs_ptr = llvm.addrspacecast %lds_obs_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_bsi_as3 = llvm.mlir.addressof @lds_batch_shot_id : !llvm.ptr<3>\n";
+    out << "  %batch_shot_id_ptr = llvm.addrspacecast %lds_bsi_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  %px1_ptr = llvm.getelementptr inbounds %px_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  %pz0_ptr = llvm.getelementptr inbounds %pz_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  %pz1_ptr = llvm.getelementptr inbounds %pz_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+
+    // Number of amplitudes for this circuit (may be < kGlobalMaxPeakRank)
+    char global_ampbuf[32];
+    snprintf(global_ampbuf, sizeof(global_ampbuf), "%u", 1u << flat.peak_rank);
+    out << "  %num_amps = llvm.mlir.constant(" << global_ampbuf << " : i64) : i64\n";
+
+    // Work-stealing loop
+    std::string work_hdr = fresh_label("work_hdr");
+    std::string work_body = fresh_label("work_body");
+    std::string work_exit = fresh_label("work_exit");
+    out << "  llvm.br ^" << work_hdr << "\n";
+    out << "^" << work_hdr << ":\n";
+
+    // Thread-0: atomic increment work counter, compute batch_shot_id
+    std::string is_t0_wk = fresh_ssa();
+    std::string t0_wk = fresh_label("t0_wk");
+    std::string t0_wk_done = fresh_label("t0_wk_done");
+    out << "  " << is_t0_wk << " = llvm.icmp \"eq\" %tidx_i32, %c0_i32 : i32\n";
+    out << "  llvm.cond_br " << is_t0_wk << ", ^" << t0_wk << ", ^" << t0_wk_done << "\n";
+    out << "^" << t0_wk << ":\n";
+    std::string slot = fresh_ssa();
+    out << "  " << slot << " = llvm.atomicrmw add " << my_counter
+        << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
+    std::string scaled = fresh_ssa();
+    out << "  " << scaled << " = llvm.mul " << slot << ", %c8_i64 : i64\n";
+    std::string bsi = fresh_ssa();
+    out << "  " << bsi << " = llvm.add " << scaled << ", " << xcd_i64 << " : i64\n";
+    out << "  llvm.store " << bsi << ", %batch_shot_id_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.br ^" << t0_wk_done << "\n";
+    out << "^" << t0_wk_done << ":\n";
+    emit_barrier(out);
+
+    // All threads: load batch_shot_id, check if done
+    std::string my_shot = fresh_ssa();
+    out << "  " << my_shot << " = llvm.load %batch_shot_id_ptr : !llvm.ptr -> i64\n";
+    std::string done_cmp = fresh_ssa();
+    out << "  " << done_cmp << " = llvm.icmp \"uge\" " << my_shot << ", %shots : i64\n";
+    out << "  llvm.cond_br " << done_cmp << ", ^" << work_exit << ", ^" << work_body << "\n";
+    out << "^" << work_body << ":\n";
+
+    // Init v[] in HBM cooperatively
+    std::string ginit_hdr = fresh_label("ginit_hdr");
+    std::string ginit_body = fresh_label("ginit_body");
+    std::string ginit_done = fresh_label("ginit_done");
+    out << "  llvm.br ^" << ginit_hdr << "(%tidx : i64)\n";
+    out << "^" << ginit_hdr << "(%ginit_i: i64):\n";
+    std::string ginit_cond = fresh_ssa();
+    out << "  " << ginit_cond << " = llvm.icmp \"ult\" %ginit_i, %num_amps : i64\n";
+    out << "  llvm.cond_br " << ginit_cond << ", ^" << ginit_body << ", ^" << ginit_done << "\n";
+    out << "^" << ginit_body << ":\n";
+    out << "  %gzero_c = llvm.mlir.undef : !llvm.struct<(f32, f32)>\n";
+    out << "  %gzero_c1 = llvm.insertvalue %f_zero, %gzero_c[0] : !llvm.struct<(f32, f32)>\n";
+    out << "  %gzero_c2 = llvm.insertvalue %f_zero, %gzero_c1[1] : !llvm.struct<(f32, f32)>\n";
+    std::string gvp = fresh_ssa();
+    out << "  " << gvp << " = llvm.getelementptr inbounds %v_ptr[%ginit_i] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+    out << "  llvm.store %gzero_c2, " << gvp << " : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+    std::string ginit_next = fresh_ssa();
+    out << "  " << ginit_next << " = llvm.add %ginit_i, %c256_i64 : i64\n";
+    out << "  llvm.br ^" << ginit_hdr << "(" << ginit_next << " : i64)\n";
+    out << "^" << ginit_done << ":\n";
+    emit_barrier(out);
+
+    // Thread-0 init classical state
+    std::string is_t0_g = fresh_ssa();
+    std::string t0_ginit = fresh_label("t0_ginit");
+    std::string t0_ginit_done = fresh_label("t0_ginit_done");
+    out << "  " << is_t0_g << " = llvm.icmp \"eq\" %tidx_i32, %c0_i32 : i32\n";
+    out << "  llvm.cond_br " << is_t0_g << ", ^" << t0_ginit << ", ^" << t0_ginit_done << "\n";
+    out << "^" << t0_ginit << ":\n";
+    out << "  llvm.store %c0_i64, %px0_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i64, %px1_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i64, %pz0_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i64, %pz1_ptr : i64, !llvm.ptr\n";
+    out << "  llvm.store %c0_i32, %active_k_ptr : i32, !llvm.ptr\n";
+    out << "  llvm.store %c0_i8, %discarded_ptr : i8, !llvm.ptr\n";
+    out << "  %gv0_ptr = llvm.getelementptr inbounds %v_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+    out << "  %ginit_one = llvm.mlir.undef : !llvm.struct<(f32, f32)>\n";
+    out << "  %ginit_one1 = llvm.insertvalue %f_one, %ginit_one[0] : !llvm.struct<(f32, f32)>\n";
+    out << "  %ginit_one2 = llvm.insertvalue %f_zero, %ginit_one1[1] : !llvm.struct<(f32, f32)>\n";
+    out << "  llvm.store %ginit_one2, %gv0_ptr : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+    out << "  llvm.br ^" << t0_ginit_done << "\n";
+    out << "^" << t0_ginit_done << ":\n";
+    emit_barrier(out);
+
+    // Instruction dispatch (same .inc files as register/coop tier)
+    auto emit_bit_get = [&](const std::string& words_ptr,
+                             const std::string& idx_i32) -> std::string {
+        return mlir_emit::emit_bit_get(out, words_ptr, idx_i32);
+    };
+    auto emit_bit_xor = [&](const std::string& words_ptr,
+                              const std::string& idx_i32,
+                              const std::string& val_i1) {
+        mlir_emit::emit_bit_xor(out, words_ptr, idx_i32, val_i1);
+    };
+    auto emit_bit_set = [&](const std::string& words_ptr,
+                              const std::string& idx_i32,
+                              const std::string& val_i1) {
+        mlir_emit::emit_bit_set(out, words_ptr, idx_i32, val_i1);
+    };
+    auto emit_scatter_bits_1 = [&](const std::string& val_i64,
+                                    const std::string& pos_i64) -> std::string {
+        return mlir_emit::emit_scatter_bits_1(out, val_i64, pos_i64);
+    };
+    auto emit_scatter_bits_2 = [&](const std::string& val_i64,
+                                    const std::string& pos1_i64,
+                                    const std::string& pos2_i64) -> std::string {
+        return mlir_emit::emit_scatter_bits_2(out, val_i64, pos1_i64, pos2_i64);
+    };
+    auto emit_load_v = [&](const std::string& idx_i64) -> std::string {
+        return mlir_emit::emit_load_v(out, idx_i64);
+    };
+    auto emit_store_v = [&](const std::string& idx_i64, const std::string& val) {
+        mlir_emit::emit_store_v(out, idx_i64, val);
+    };
+    auto emit_cadd = [&](const std::string& a, const std::string& b_val) -> std::string {
+        return mlir_emit::emit_cadd(out, a, b_val);
+    };
+    auto emit_csub = [&](const std::string& a, const std::string& b_val) -> std::string {
+        return mlir_emit::emit_csub(out, a, b_val);
+    };
+    auto emit_cscale_f64 = [&](const std::string& a, double scale) -> std::string {
+        return mlir_emit::emit_cscale_f64(out, a, scale);
+    };
+    auto emit_cmul_const = [&](const std::string& a,
+                                double phase_re, double phase_im) -> std::string {
+        return mlir_emit::emit_cmul_const(out, a, phase_re, phase_im);
+    };
+    auto emit_array_h_static = [&](uint32_t axis) {
+        mlir_emit::emit_array_h_static(out, axis);
+    };
+    auto emit_array_cnot_static = [&](uint32_t ctrl, uint32_t tgt) {
+        mlir_emit::emit_array_cnot_static(out, ctrl, tgt);
+    };
+    auto emit_apply_phase_static = [&](uint32_t axis, double phs_re, double phs_im) {
+        mlir_emit::emit_apply_phase_static(out, axis, phs_re, phs_im);
+    };
+    auto emit_cnorm = [&](const std::string& c) -> std::string {
+        return mlir_emit::emit_cnorm(out, c);
+    };
+
+    using Opcode = clifft::Opcode;
+    out << "  // --- Global instruction sequence (" << flat.instrs.size() << " ops) ---\n";
+
+    for (size_t pc = 0; pc < flat.instrs.size(); ++pc) {
+        const GpuInstr& ins = flat.instrs[pc];
+        bool sign = (ins.flags & kFlagSign) != 0;
+        bool identity = (ins.flags & kFlagIdentity) != 0;
+        auto op = static_cast<Opcode>(ins.opcode);
+
+        out << "  // op[" << pc << "] opcode=" << (unsigned)ins.opcode << "\n";
+
+        switch (op) {
+#include "ops/mlir_frame_ops.inc"
+#include "ops/mlir_array_ops.inc"
+#include "ops/mlir_measurement_ops.inc"
+#include "ops/mlir_expand_ops.inc"
+#include "ops/mlir_noise_ops.inc"
+#include "ops/mlir_exp_val_ops.inc"
+            default:
+                out << "  // Unsupported op " << (unsigned)ins.opcode << " — mark discarded\n";
+                out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
+                break;
+        }
+    }
+
+    out << "  // --- End global instruction sequence ---\n";
+
+    // Loop back for next shot
+    out << "  llvm.br ^" << work_hdr << "\n";
+
+    // Exit
+    out << "^" << work_exit << ":\n";
+    out << "  llvm.return\n";
+    out << "}\n\n";
+    out << "} // end module\n";
+
+    return out.str();
+}
+
 }  // namespace mlir_emit
 }  // namespace gpu
 }  // namespace clifft
