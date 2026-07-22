@@ -90,16 +90,21 @@ if(CLIFFT_ENABLE_HIP)
         set(CMAKE_HIP_ARCHITECTURES gfx942)
     endif()
     target_sources(clifft_core PRIVATE
-        gpu/hip_sampler.hip
+        gpu/sampler/hip_sampler.hip
         gpu/device_program.cc
-        gpu/kernel_codegen.cc
-        gpu/kernel_cache.cc
-        gpu/hsa_runtime.cc
-        gpu/hsa_kernel_dispatch.cc
-        gpu/hsa_persistent_dispatch.cc
+        gpu/codegen/kernel_codegen.cc
+        gpu/codegen/emit_preamble.cc
+        gpu/codegen/emit_instructions.cc
+        gpu/codegen/emit_register_kernel.cc
+        gpu/codegen/emit_coop_kernel.cc
+        gpu/codegen/emit_global_kernel.cc
+        gpu/codegen/kernel_cache.cc
+        gpu/runtime/hsa_runtime.cc
+        gpu/runtime/hsa_kernel_dispatch.cc
+        gpu/runtime/hsa_persistent_dispatch.cc
     )
-    set_source_files_properties(gpu/hip_sampler.hip PROPERTIES LANGUAGE HIP)
-    set_source_files_properties(gpu/hip_sampler.hip
+    set_source_files_properties(gpu/sampler/hip_sampler.hip PROPERTIES LANGUAGE HIP)
+    set_source_files_properties(gpu/sampler/hip_sampler.hip
         PROPERTIES COMPILE_OPTIONS "-ffp-contract=off"
     )
     find_package(hip REQUIRED)
@@ -114,12 +119,21 @@ if(CLIFFT_ENABLE_HIP)
     # Enable with: cmake -DCLIFFT_ENABLE_MLIR=ON
     option(CLIFFT_ENABLE_MLIR "Build MLIR→LLVM-IR megakernel codegen (uses mlir-opt/mlir-translate subprocesses)" OFF)
     if(CLIFFT_ENABLE_MLIR)
-        target_sources(clifft_core PRIVATE gpu/mlir_codegen.cc gpu/mlir_kernel_cache.cc)
+        target_sources(clifft_core PRIVATE gpu/mlir/mlir_codegen.cc gpu/mlir/mlir_kernel_cache.cc)
         target_compile_definitions(clifft_core PRIVATE CLIFFT_ENABLE_MLIR)
         message(STATUS "CLIFFT_ENABLE_MLIR=ON: mlir-opt/mlir-translate must be in PATH or LLVM_PREFIX/bin")
     endif()
 else()
-    target_sources(clifft_core PRIVATE gpu/hip_sampler_stub.cc gpu/device_program.cc gpu/kernel_codegen.cc)
+    target_sources(clifft_core PRIVATE
+        gpu/sampler/hip_sampler_stub.cc
+        gpu/device_program.cc
+        gpu/codegen/kernel_codegen.cc
+        gpu/codegen/emit_preamble.cc
+        gpu/codegen/emit_instructions.cc
+        gpu/codegen/emit_register_kernel.cc
+        gpu/codegen/emit_coop_kernel.cc
+        gpu/codegen/emit_global_kernel.cc
+    )
 endif()
 
 # Code coverage instrumentation (only for Clifft code, not dependencies)
