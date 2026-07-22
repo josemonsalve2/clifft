@@ -248,8 +248,10 @@ std::string emit_cscale_f64(std::ostringstream& out,
                              const std::string& a, double scale) {
     char sbuf[64];
     snprintf(sbuf, sizeof(sbuf), "%.17e", scale);
+    std::string sf64 = fresh_ssa();
+    out << "  " << sf64 << " = llvm.mlir.constant(" << sbuf << " : f64) : f64\n";
     std::string sf32 = fresh_ssa();
-    out << "  " << sf32 << " = llvm.fptrunc llvm.mlir.constant(" << sbuf << " : f64) : f64 to f32\n";
+    out << "  " << sf32 << " = llvm.fptrunc " << sf64 << " : f64 to f32\n";
     std::string are = fresh_ssa(), aim = fresh_ssa();
     out << "  " << are << " = llvm.extractvalue " << a << "[0] : !llvm.struct<(f32, f32)>\n";
     out << "  " << aim << " = llvm.extractvalue " << a << "[1] : !llvm.struct<(f32, f32)>\n";
@@ -603,22 +605,29 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %c0_i8 = llvm.mlir.constant(0 : i8) : i8\n";
     out << "  %c1_i8 = llvm.mlir.constant(1 : i8) : i8\n";
 
-    out << "  %px_ptr = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr\n";
-    out << "  %pz_ptr = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr\n";
-    out << "  %active_k_ptr = llvm.alloca %c1_i32 x i32 : (i32) -> !llvm.ptr\n";
-    out << "  %discarded_ptr = llvm.alloca %c1_i32 x i8 : (i32) -> !llvm.ptr\n";
+    out << "  %px_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %px_ptr = llvm.addrspacecast %px_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+    out << "  %pz_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %pz_ptr = llvm.addrspacecast %pz_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+    out << "  %active_k_ptr_p5 = llvm.alloca %c1_i32 x i32 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %active_k_ptr = llvm.addrspacecast %active_k_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+    out << "  %discarded_ptr_p5 = llvm.alloca %c1_i32 x i8 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %discarded_ptr = llvm.addrspacecast %discarded_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
 
     char buf[64];
     snprintf(buf, sizeof(buf), "%u", kMaxAmplitudes);
     out << "  %v_size = llvm.mlir.constant(" << buf << " : i32) : i32\n";
-    out << "  %v_ptr = llvm.alloca %v_size x !llvm.struct<(f32, f32)> : (i32) -> !llvm.ptr\n";
+    out << "  %v_ptr_p5 = llvm.alloca %v_size x !llvm.struct<(f32, f32)> : (i32) -> !llvm.ptr<5>\n";
+    out << "  %v_ptr = llvm.addrspacecast %v_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
 
     snprintf(buf, sizeof(buf), "%u", kMaxMeas);
     out << "  %meas_size = llvm.mlir.constant(" << buf << " : i32) : i32\n";
-    out << "  %meas_ptr = llvm.alloca %meas_size x i8 : (i32) -> !llvm.ptr\n";
+    out << "  %meas_ptr_p5 = llvm.alloca %meas_size x i8 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %meas_ptr = llvm.addrspacecast %meas_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
     snprintf(buf, sizeof(buf), "%u", kMaxObs);
     out << "  %obs_size = llvm.mlir.constant(" << buf << " : i32) : i32\n";
-    out << "  %obs_ptr = llvm.alloca %obs_size x i8 : (i32) -> !llvm.ptr\n";
+    out << "  %obs_ptr_p5 = llvm.alloca %obs_size x i8 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %obs_ptr = llvm.addrspacecast %obs_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
 
     out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
     out << "  %px1_ptr = llvm.getelementptr inbounds %px_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
