@@ -1,112 +1,154 @@
 // mlir_noise_ops.inc — MLIR emission for noise/error operations
 //
-// Noise sites and channels are inlined as constants at emit time.
-// Each OP_NOISE unconditionally processes its site (no scheduling).
+// Noise data is loaded from kernel pointer arguments at runtime.
+// Layout: noise_sites_ptr → GpuNoiseSite[n] (16 bytes each: u32 offset, u32 count, f64 prob_sum)
+//         noise_channels_ptr → GpuChannel[m] (40 bytes each: u64 x[2], u64 z[2], f64 prob)
 
 case Opcode::OP_NOISE: {
     uint32_t site_idx = ins.a;
-    if (site_idx < flat.noise_sites.size()) {
-        const auto& site = flat.noise_sites[site_idx];
-        out << "  // noise site " << site_idx << " (scheduled)\n";
-        // Check if next_noise_idx == site_idx
-        std::string nni_cur = fresh_ssa();
-        out << "  " << nni_cur << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
-        std::string site_val = emit_const_i32(out, site_idx);
-        std::string nni_match = fresh_ssa();
-        out << "  " << nni_match << " = llvm.icmp \"eq\" " << nni_cur << ", " << site_val << " : i32\n";
-        std::string lbl_do_noise = fresh_label("do_noise");
-        std::string lbl_skip_noise = fresh_label("skip_noise");
-        out << "  llvm.cond_br " << nni_match << ", ^" << lbl_do_noise << ", ^" << lbl_skip_noise << "\n";
-        out << "^" << lbl_do_noise << ":\n";
-        // Roll RNG
-        std::string u = emit_rng_uniform(out);
-        std::string prob_sum_val = fresh_ssa();
-        char psbuf[64]; snprintf(psbuf, sizeof(psbuf), "%.17e", site.prob_sum);
-        out << "  " << prob_sum_val << " = llvm.mlir.constant(" << psbuf << " : f64) : f64\n";
-        std::string roll = fresh_ssa();
-        out << "  " << roll << " = llvm.fmul " << u << ", " << prob_sum_val << " : f64\n";
-        // Check each channel: accumulate probability, apply Pauli when roll < cumulative
-        std::string cumulative = fresh_ssa();
-        out << "  " << cumulative << " = llvm.mlir.constant(0.0 : f64) : f64\n";
-        for (uint32_t k = 0; k < site.count; ++k) {
-            uint32_t ch_idx = site.offset + k;
-            if (ch_idx >= flat.noise_channels.size()) break;
-            const auto& ch = flat.noise_channels[ch_idx];
-            // Add channel probability to cumulative
-            std::string ch_prob = fresh_ssa();
-            char cpbuf[64]; snprintf(cpbuf, sizeof(cpbuf), "%.17e", ch.prob);
-            out << "  " << ch_prob << " = llvm.mlir.constant(" << cpbuf << " : f64) : f64\n";
-            std::string new_cum = fresh_ssa();
-            out << "  " << new_cum << " = llvm.fadd " << cumulative << ", " << ch_prob << " : f64\n";
-            // Check if roll < new_cumulative (and roll >= old cumulative)
-            std::string hit = fresh_ssa();
-            out << "  " << hit << " = llvm.fcmp \"olt\" " << roll << ", " << new_cum << " : f64\n";
-            std::string not_yet = fresh_ssa();
-            out << "  " << not_yet << " = llvm.fcmp \"oge\" " << roll << ", " << cumulative << " : f64\n";
-            std::string apply = fresh_ssa();
-            out << "  " << apply << " = llvm.and " << hit << ", " << not_yet << " : i1\n";
-            // If apply: XOR ch.x into px, ch.z into pz (apply_pauli_to_frame)
-            std::string lbl_apply = fresh_label("nch_apply");
-            std::string lbl_skip = fresh_label("nch_skip");
-            out << "  llvm.cond_br " << apply << ", ^" << lbl_apply << ", ^" << lbl_skip << "\n";
-            out << "^" << lbl_apply << ":\n";
-            // XOR ch.x[0] into px[0], ch.x[1] into px[1]
-            for (int w = 0; w < 2; ++w) {
-                if (ch.x[w] != 0) {
-                    char xbuf[32]; snprintf(xbuf, sizeof(xbuf), "%llu", (unsigned long long)ch.x[w]);
-                    std::string xval = fresh_ssa();
-                    out << "  " << xval << " = llvm.mlir.constant(" << xbuf << " : i64) : i64\n";
-                    std::string pw = fresh_ssa();
-                    std::string widx = fresh_ssa();
-                    out << "  " << widx << " = llvm.mlir.constant(" << w << " : i64) : i64\n";
-                    out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
-                        << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-                    std::string old_val = fresh_ssa();
-                    out << "  " << old_val << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-                    std::string new_val = fresh_ssa();
-                    out << "  " << new_val << " = llvm.xor " << old_val << ", " << xval << " : i64\n";
-                    out << "  llvm.store " << new_val << ", " << pw << " : i64, !llvm.ptr\n";
-                }
-            }
-            // XOR ch.z[0] into pz[0], ch.z[1] into pz[1]
-            for (int w = 0; w < 2; ++w) {
-                if (ch.z[w] != 0) {
-                    char zbuf[32]; snprintf(zbuf, sizeof(zbuf), "%llu", (unsigned long long)ch.z[w]);
-                    std::string zval = fresh_ssa();
-                    out << "  " << zval << " = llvm.mlir.constant(" << zbuf << " : i64) : i64\n";
-                    std::string pw = fresh_ssa();
-                    std::string widx = fresh_ssa();
-                    out << "  " << widx << " = llvm.mlir.constant(" << w << " : i64) : i64\n";
-                    out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
-                        << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-                    std::string old_val = fresh_ssa();
-                    out << "  " << old_val << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-                    std::string new_val = fresh_ssa();
-                    out << "  " << new_val << " = llvm.xor " << old_val << ", " << zval << " : i64\n";
-                    out << "  llvm.store " << new_val << ", " << pw << " : i64, !llvm.ptr\n";
-                }
-            }
-            out << "  llvm.br ^" << lbl_skip << "\n";
-            out << "^" << lbl_skip << ":\n";
-            cumulative = new_cum;
-        }
-        // Update next_noise_idx and draw next
-        std::string next_si = emit_const_i32(out, site_idx + 1);
-        out << "  llvm.store " << next_si << ", %nni_ptr : i32, !llvm.ptr\n";
-        emit_draw_next_noise(out, flat);
-        out << "  llvm.br ^" << lbl_skip_noise << "\n";
-        out << "^" << lbl_skip_noise << ":\n";
+    out << "  // noise site " << site_idx << " (runtime data)\n";
+    // Check if next_noise_idx == site_idx
+    std::string nni_cur = fresh_ssa();
+    out << "  " << nni_cur << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
+    std::string site_val = emit_const_i32(out, site_idx);
+    std::string nni_match = fresh_ssa();
+    out << "  " << nni_match << " = llvm.icmp \"eq\" " << nni_cur << ", " << site_val << " : i32\n";
+    std::string lbl_do_noise = fresh_label("do_noise");
+    std::string lbl_skip_noise = fresh_label("skip_noise");
+    out << "  llvm.cond_br " << nni_match << ", ^" << lbl_do_noise << ", ^" << lbl_skip_noise << "\n";
+    out << "^" << lbl_do_noise << ":\n";
+    // Load site metadata from noise_sites_ptr (GpuNoiseSite = 16 bytes)
+    // byte offset = site_idx * 16; fields: offset@0, count@4, prob_sum@8
+    std::string site_byte_off = emit_const_i64(out, (uint64_t)site_idx * 16);
+    std::string site_base = fresh_ssa();
+    out << "  " << site_base << " = llvm.getelementptr %noise_sites_ptr["
+        << site_byte_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    // Load offset (u32 at byte 0)
+    std::string ch_offset = fresh_ssa();
+    out << "  " << ch_offset << " = llvm.load " << site_base << " : !llvm.ptr -> i32\n";
+    // Load count (u32 at byte 4)
+    std::string count_off = emit_const_i64(out, 4);
+    std::string count_ptr = fresh_ssa();
+    out << "  " << count_ptr << " = llvm.getelementptr " << site_base << "["
+        << count_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    std::string ch_count = fresh_ssa();
+    out << "  " << ch_count << " = llvm.load " << count_ptr << " : !llvm.ptr -> i32\n";
+    // Load prob_sum (f64 at byte 8)
+    std::string ps_off = emit_const_i64(out, 8);
+    std::string ps_ptr = fresh_ssa();
+    out << "  " << ps_ptr << " = llvm.getelementptr " << site_base << "["
+        << ps_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    std::string prob_sum_val = fresh_ssa();
+    out << "  " << prob_sum_val << " = llvm.load " << ps_ptr << " : !llvm.ptr -> f64\n";
+    // Roll RNG
+    std::string u = emit_rng_uniform(out);
+    std::string roll = fresh_ssa();
+    out << "  " << roll << " = llvm.fmul " << u << ", " << prob_sum_val << " : f64\n";
+    // Channel loop: iterate [0, ch_count), accumulate probability, apply Pauli
+    std::string ch_count_64 = fresh_ssa();
+    out << "  " << ch_count_64 << " = llvm.zext " << ch_count << " : i32 to i64\n";
+    std::string ch_offset_64 = fresh_ssa();
+    out << "  " << ch_offset_64 << " = llvm.zext " << ch_offset << " : i32 to i64\n";
+    std::string fzero = fresh_ssa();
+    out << "  " << fzero << " = llvm.mlir.constant(0.0 : f64) : f64\n";
+    std::string nch_var = fresh_ssa(), nch_cum_var = fresh_ssa();
+    std::string nch_hdr = fresh_label("nch_hdr"), nch_body = fresh_label("nch_body"), nch_done = fresh_label("nch_done");
+    out << "  llvm.br ^" << nch_hdr << "(%c0_i64, " << fzero << " : i64, f64)\n";
+    out << "^" << nch_hdr << "(" << nch_var << ": i64, " << nch_cum_var << ": f64):\n";
+    std::string nch_cond = fresh_ssa();
+    out << "  " << nch_cond << " = llvm.icmp \"ult\" " << nch_var << ", " << ch_count_64 << " : i64\n";
+    out << "  llvm.cond_br " << nch_cond << ", ^" << nch_body << ", ^" << nch_done << "\n";
+    out << "^" << nch_body << ":\n";
+    // Channel address: noise_channels_ptr + (ch_offset + k) * 40
+    std::string global_ch_idx = fresh_ssa();
+    out << "  " << global_ch_idx << " = llvm.add " << ch_offset_64 << ", " << nch_var << " : i64\n";
+    std::string ch_stride = emit_const_i64(out, 40);
+    std::string ch_byte_off = fresh_ssa();
+    out << "  " << ch_byte_off << " = llvm.mul " << global_ch_idx << ", " << ch_stride << " : i64\n";
+    std::string ch_base = fresh_ssa();
+    out << "  " << ch_base << " = llvm.getelementptr %noise_channels_ptr["
+        << ch_byte_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    // Load ch.prob (f64 at byte 32 in GpuChannel: x[2]=16, z[2]=16, prob=8 → offset 32)
+    std::string prob_off = emit_const_i64(out, 32);
+    std::string prob_ptr = fresh_ssa();
+    out << "  " << prob_ptr << " = llvm.getelementptr " << ch_base << "["
+        << prob_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    std::string ch_prob = fresh_ssa();
+    out << "  " << ch_prob << " = llvm.load " << prob_ptr << " : !llvm.ptr -> f64\n";
+    std::string new_cum = fresh_ssa();
+    out << "  " << new_cum << " = llvm.fadd " << nch_cum_var << ", " << ch_prob << " : f64\n";
+    std::string hit = fresh_ssa();
+    out << "  " << hit << " = llvm.fcmp \"olt\" " << roll << ", " << new_cum << " : f64\n";
+    std::string not_yet = fresh_ssa();
+    out << "  " << not_yet << " = llvm.fcmp \"oge\" " << roll << ", " << nch_cum_var << " : f64\n";
+    std::string apply = fresh_ssa();
+    out << "  " << apply << " = llvm.and " << hit << ", " << not_yet << " : i1\n";
+    std::string lbl_apply = fresh_label("nch_apply");
+    std::string lbl_skip = fresh_label("nch_skip");
+    out << "  llvm.cond_br " << apply << ", ^" << lbl_apply << ", ^" << lbl_skip << "\n";
+    out << "^" << lbl_apply << ":\n";
+    // Load and XOR x[0..1] into px, z[0..1] into pz
+    for (int w = 0; w < 2; ++w) {
+        std::string x_off = emit_const_i64(out, w * 8);
+        std::string x_ptr = fresh_ssa();
+        out << "  " << x_ptr << " = llvm.getelementptr " << ch_base << "["
+            << x_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string xval = fresh_ssa();
+        out << "  " << xval << " = llvm.load " << x_ptr << " : !llvm.ptr -> i64\n";
+        std::string widx = emit_const_i64(out, w);
+        std::string pw = fresh_ssa();
+        out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
+            << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        std::string ov = fresh_ssa();
+        out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+        std::string nv = fresh_ssa();
+        out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
+        out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
     }
+    for (int w = 0; w < 2; ++w) {
+        std::string z_off = emit_const_i64(out, 16 + w * 8);
+        std::string z_ptr = fresh_ssa();
+        out << "  " << z_ptr << " = llvm.getelementptr " << ch_base << "["
+            << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string zval = fresh_ssa();
+        out << "  " << zval << " = llvm.load " << z_ptr << " : !llvm.ptr -> i64\n";
+        std::string widx = emit_const_i64(out, w);
+        std::string pw = fresh_ssa();
+        out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
+            << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        std::string ov = fresh_ssa();
+        out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+        std::string nv = fresh_ssa();
+        out << "  " << nv << " = llvm.xor " << ov << ", " << zval << " : i64\n";
+        out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+    }
+    out << "  llvm.br ^" << lbl_skip << "\n";
+    out << "^" << lbl_skip << ":\n";
+    // Continue channel loop
+    std::string nch_next = fresh_ssa();
+    out << "  " << nch_next << " = llvm.add " << nch_var << ", %c1_i64 : i64\n";
+    out << "  llvm.br ^" << nch_hdr << "(" << nch_next << ", " << new_cum << " : i64, f64)\n";
+    out << "^" << nch_done << ":\n";
+    // Advance nni and draw next
+    std::string next_si = emit_const_i32(out, site_idx + 1);
+    out << "  llvm.store " << next_si << ", %nni_ptr : i32, !llvm.ptr\n";
+    emit_draw_next_noise(out, flat);
+    out << "  llvm.br ^" << lbl_skip_noise << "\n";
+    out << "^" << lbl_skip_noise << ":\n";
     break;
 }
 case Opcode::OP_NOISE_BLOCK: {
     // Process noise sites in [ins.a, ins.a + ins.b) with scheduling
+    // Emit a loop over the range instead of unrolling
     uint32_t start = ins.a;
-    uint32_t end = start + ins.b;
-    for (uint32_t si = start; si < end && si < flat.noise_sites.size(); ++si) {
-        const auto& site = flat.noise_sites[si];
-        out << "  // noise_block site " << si << " (scheduled)\n";
-        // Check scheduling
+    uint32_t end_val = start + ins.b;
+    out << "  // noise_block [" << start << ", " << end_val << ") (runtime data)\n";
+    std::string nb_start = emit_const_i32(out, start);
+    std::string nb_end = emit_const_i32(out, end_val);
+    // For each site in the block, check scheduling and apply noise
+    // We still unroll the SITES (since there may be few per block), but channels are runtime-looped
+    for (uint32_t si = start; si < end_val && si < flat.noise_sites.size(); ++si) {
+        out << "  // noise_block site " << si << "\n";
         std::string nni_cur = fresh_ssa();
         out << "  " << nni_cur << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
         std::string site_val = emit_const_i32(out, si);
@@ -116,68 +158,111 @@ case Opcode::OP_NOISE_BLOCK: {
         std::string lbl_end = fresh_label("nb_end");
         out << "  llvm.cond_br " << nni_match << ", ^" << lbl_do << ", ^" << lbl_end << "\n";
         out << "^" << lbl_do << ":\n";
-        std::string u = emit_rng_uniform(out);
-        std::string prob_sum_val = fresh_ssa();
-        char psbuf[64]; snprintf(psbuf, sizeof(psbuf), "%.17e", site.prob_sum);
-        out << "  " << prob_sum_val << " = llvm.mlir.constant(" << psbuf << " : f64) : f64\n";
-        std::string roll = fresh_ssa();
-        out << "  " << roll << " = llvm.fmul " << u << ", " << prob_sum_val << " : f64\n";
-        std::string cumulative = fresh_ssa();
-        out << "  " << cumulative << " = llvm.mlir.constant(0.0 : f64) : f64\n";
-        for (uint32_t k = 0; k < site.count; ++k) {
-            uint32_t ch_idx = site.offset + k;
-            if (ch_idx >= flat.noise_channels.size()) break;
-            const auto& ch = flat.noise_channels[ch_idx];
-            std::string ch_prob = fresh_ssa();
-            char cpbuf[64]; snprintf(cpbuf, sizeof(cpbuf), "%.17e", ch.prob);
-            out << "  " << ch_prob << " = llvm.mlir.constant(" << cpbuf << " : f64) : f64\n";
-            std::string new_cum = fresh_ssa();
-            out << "  " << new_cum << " = llvm.fadd " << cumulative << ", " << ch_prob << " : f64\n";
-            std::string hit = fresh_ssa();
-            out << "  " << hit << " = llvm.fcmp \"olt\" " << roll << ", " << new_cum << " : f64\n";
-            std::string not_yet = fresh_ssa();
-            out << "  " << not_yet << " = llvm.fcmp \"oge\" " << roll << ", " << cumulative << " : f64\n";
-            std::string apply = fresh_ssa();
-            out << "  " << apply << " = llvm.and " << hit << ", " << not_yet << " : i1\n";
-            std::string lbl_apply = fresh_label("nb_apply");
-            std::string lbl_skip = fresh_label("nb_skip");
-            out << "  llvm.cond_br " << apply << ", ^" << lbl_apply << ", ^" << lbl_skip << "\n";
-            out << "^" << lbl_apply << ":\n";
-            for (int w = 0; w < 2; ++w) {
-                if (ch.x[w] != 0) {
-                    std::string xval = emit_const_i64(out, ch.x[w]);
-                    std::string widx = emit_const_i64(out, w);
-                    std::string pw = fresh_ssa();
-                    out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
-                        << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-                    std::string ov = fresh_ssa();
-                    out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-                    std::string nv = fresh_ssa();
-                    out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
-                    out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
-                }
-            }
-            for (int w = 0; w < 2; ++w) {
-                if (ch.z[w] != 0) {
-                    std::string zval = emit_const_i64(out, ch.z[w]);
-                    std::string widx = emit_const_i64(out, w);
-                    std::string pw = fresh_ssa();
-                    out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
-                        << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-                    std::string ov = fresh_ssa();
-                    out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-                    std::string nv = fresh_ssa();
-                    out << "  " << nv << " = llvm.xor " << ov << ", " << zval << " : i64\n";
-                    out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
-                }
-            }
-            out << "  llvm.br ^" << lbl_skip << "\n";
-            out << "^" << lbl_skip << ":\n";
-            cumulative = new_cum;
+        // Load site metadata
+        std::string sb_off = emit_const_i64(out, (uint64_t)si * 16);
+        std::string sb_base = fresh_ssa();
+        out << "  " << sb_base << " = llvm.getelementptr %noise_sites_ptr["
+            << sb_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string nb_ch_offset = fresh_ssa();
+        out << "  " << nb_ch_offset << " = llvm.load " << sb_base << " : !llvm.ptr -> i32\n";
+        std::string nb_count_off = emit_const_i64(out, 4);
+        std::string nb_count_ptr = fresh_ssa();
+        out << "  " << nb_count_ptr << " = llvm.getelementptr " << sb_base << "["
+            << nb_count_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string nb_ch_count = fresh_ssa();
+        out << "  " << nb_ch_count << " = llvm.load " << nb_count_ptr << " : !llvm.ptr -> i32\n";
+        std::string nb_ps_off = emit_const_i64(out, 8);
+        std::string nb_ps_ptr = fresh_ssa();
+        out << "  " << nb_ps_ptr << " = llvm.getelementptr " << sb_base << "["
+            << nb_ps_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string nb_prob_sum = fresh_ssa();
+        out << "  " << nb_prob_sum << " = llvm.load " << nb_ps_ptr << " : !llvm.ptr -> f64\n";
+        std::string nb_u = emit_rng_uniform(out);
+        std::string nb_roll = fresh_ssa();
+        out << "  " << nb_roll << " = llvm.fmul " << nb_u << ", " << nb_prob_sum << " : f64\n";
+        // Channel loop (same as OP_NOISE)
+        std::string nb_ch_count_64 = fresh_ssa();
+        out << "  " << nb_ch_count_64 << " = llvm.zext " << nb_ch_count << " : i32 to i64\n";
+        std::string nb_ch_off_64 = fresh_ssa();
+        out << "  " << nb_ch_off_64 << " = llvm.zext " << nb_ch_offset << " : i32 to i64\n";
+        std::string nb_fzero = fresh_ssa();
+        out << "  " << nb_fzero << " = llvm.mlir.constant(0.0 : f64) : f64\n";
+        std::string nbch_var = fresh_ssa(), nbch_cum_var = fresh_ssa();
+        std::string nbch_hdr = fresh_label("nbch_hdr"), nbch_body = fresh_label("nbch_body"), nbch_done = fresh_label("nbch_done");
+        out << "  llvm.br ^" << nbch_hdr << "(%c0_i64, " << nb_fzero << " : i64, f64)\n";
+        out << "^" << nbch_hdr << "(" << nbch_var << ": i64, " << nbch_cum_var << ": f64):\n";
+        std::string nbch_cond = fresh_ssa();
+        out << "  " << nbch_cond << " = llvm.icmp \"ult\" " << nbch_var << ", " << nb_ch_count_64 << " : i64\n";
+        out << "  llvm.cond_br " << nbch_cond << ", ^" << nbch_body << ", ^" << nbch_done << "\n";
+        out << "^" << nbch_body << ":\n";
+        std::string nb_gci = fresh_ssa();
+        out << "  " << nb_gci << " = llvm.add " << nb_ch_off_64 << ", " << nbch_var << " : i64\n";
+        std::string nb_ch_stride = emit_const_i64(out, 40);
+        std::string nb_ch_boff = fresh_ssa();
+        out << "  " << nb_ch_boff << " = llvm.mul " << nb_gci << ", " << nb_ch_stride << " : i64\n";
+        std::string nb_ch_base = fresh_ssa();
+        out << "  " << nb_ch_base << " = llvm.getelementptr %noise_channels_ptr["
+            << nb_ch_boff << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string nb_prob_off = emit_const_i64(out, 32);
+        std::string nb_prob_ptr = fresh_ssa();
+        out << "  " << nb_prob_ptr << " = llvm.getelementptr " << nb_ch_base << "["
+            << nb_prob_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string nb_ch_prob = fresh_ssa();
+        out << "  " << nb_ch_prob << " = llvm.load " << nb_prob_ptr << " : !llvm.ptr -> f64\n";
+        std::string nb_new_cum = fresh_ssa();
+        out << "  " << nb_new_cum << " = llvm.fadd " << nbch_cum_var << ", " << nb_ch_prob << " : f64\n";
+        std::string nb_hit = fresh_ssa();
+        out << "  " << nb_hit << " = llvm.fcmp \"olt\" " << nb_roll << ", " << nb_new_cum << " : f64\n";
+        std::string nb_not_yet = fresh_ssa();
+        out << "  " << nb_not_yet << " = llvm.fcmp \"oge\" " << nb_roll << ", " << nbch_cum_var << " : f64\n";
+        std::string nb_apply = fresh_ssa();
+        out << "  " << nb_apply << " = llvm.and " << nb_hit << ", " << nb_not_yet << " : i1\n";
+        std::string nb_lbl_apply = fresh_label("nbch_apply");
+        std::string nb_lbl_skip = fresh_label("nbch_skip");
+        out << "  llvm.cond_br " << nb_apply << ", ^" << nb_lbl_apply << ", ^" << nb_lbl_skip << "\n";
+        out << "^" << nb_lbl_apply << ":\n";
+        for (int w = 0; w < 2; ++w) {
+            std::string x_off = emit_const_i64(out, w * 8);
+            std::string x_ptr = fresh_ssa();
+            out << "  " << x_ptr << " = llvm.getelementptr " << nb_ch_base << "["
+                << x_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+            std::string xval = fresh_ssa();
+            out << "  " << xval << " = llvm.load " << x_ptr << " : !llvm.ptr -> i64\n";
+            std::string widx = emit_const_i64(out, w);
+            std::string pw = fresh_ssa();
+            out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
+                << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+            std::string ov = fresh_ssa();
+            out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+            std::string nv = fresh_ssa();
+            out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
+            out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
         }
-        // Advance next_noise_idx and draw
-        std::string next_si = emit_const_i32(out, si + 1);
-        out << "  llvm.store " << next_si << ", %nni_ptr : i32, !llvm.ptr\n";
+        for (int w = 0; w < 2; ++w) {
+            std::string z_off = emit_const_i64(out, 16 + w * 8);
+            std::string z_ptr = fresh_ssa();
+            out << "  " << z_ptr << " = llvm.getelementptr " << nb_ch_base << "["
+                << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+            std::string zval = fresh_ssa();
+            out << "  " << zval << " = llvm.load " << z_ptr << " : !llvm.ptr -> i64\n";
+            std::string widx = emit_const_i64(out, w);
+            std::string pw = fresh_ssa();
+            out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
+                << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+            std::string ov = fresh_ssa();
+            out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+            std::string nv = fresh_ssa();
+            out << "  " << nv << " = llvm.xor " << ov << ", " << zval << " : i64\n";
+            out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+        }
+        out << "  llvm.br ^" << nb_lbl_skip << "\n";
+        out << "^" << nb_lbl_skip << ":\n";
+        std::string nbch_next = fresh_ssa();
+        out << "  " << nbch_next << " = llvm.add " << nbch_var << ", %c1_i64 : i64\n";
+        out << "  llvm.br ^" << nbch_hdr << "(" << nbch_next << ", " << nb_new_cum << " : i64, f64)\n";
+        out << "^" << nbch_done << ":\n";
+        std::string nb_next_si = emit_const_i32(out, si + 1);
+        out << "  llvm.store " << nb_next_si << ", %nni_ptr : i32, !llvm.ptr\n";
         emit_draw_next_noise(out, flat);
         out << "  llvm.br ^" << lbl_end << "\n";
         out << "^" << lbl_end << ":\n";

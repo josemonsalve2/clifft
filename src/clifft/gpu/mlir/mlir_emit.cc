@@ -1043,54 +1043,10 @@ void emit_meas_active_interfere(std::ostringstream& out,
     emit_bit_set(out, "%pz_ptr", axis_i32, false_val2);
 }
 
-void emit_draw_next_noise(std::ostringstream& out,
-                           const FlattenedProgram& flat) {
-    uint32_t n = flat.noise_sites.size();
-    if (n == 0) {
-        std::string sentinel = emit_const_i64(out, 0xffffffffu);
-        std::string nni32 = fresh_ssa();
-        out << "  " << nni32 << " = llvm.trunc " << sentinel << " : i64 to i32\n";
-        out << "  llvm.store " << nni32 << ", %nni_ptr : i32, !llvm.ptr\n";
-        return;
-    }
-
-    // current_hazard = (nni == 0) ? 0.0 : hazards[nni - 1]
-    std::string nni = fresh_ssa();
-    out << "  " << nni << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
-    std::string nni_is_0 = fresh_ssa();
-    out << "  " << nni_is_0 << " = llvm.icmp \"eq\" " << nni << ", %c0_i32 : i32\n";
-
-    std::string ch_zero = fresh_ssa();
-    out << "  " << ch_zero << " = llvm.mlir.constant(0.0 : f64) : f64\n";
-
-    // Build current_hazard via select chain: hazards[nni-1] for each possible nni value
-    std::string current_hazard = ch_zero;
-    for (uint32_t i = 0; i < n; ++i) {
-        char hbuf[64]; snprintf(hbuf, sizeof(hbuf), "%.17e", flat.noise_hazards[i]);
-        std::string hval = fresh_ssa();
-        out << "  " << hval << " = llvm.mlir.constant(" << hbuf << " : f64) : f64\n";
-        std::string idx_val = emit_const_i32(out, i + 1);
-        std::string is_match = fresh_ssa();
-        out << "  " << is_match << " = llvm.icmp \"eq\" " << nni << ", " << idx_val << " : i32\n";
-        std::string selected = fresh_ssa();
-        out << "  " << selected << " = llvm.select " << is_match << ", " << hval << ", " << current_hazard << " : i1, f64\n";
-        current_hazard = selected;
-    }
-
-    // u = rng.uniform()
-    std::string u = emit_rng_uniform(out);
-    // gap = -log(1-u): compute 1-u, then use log polynomial
-    std::string f64_one = fresh_ssa();
-    out << "  " << f64_one << " = llvm.mlir.constant(1.0 : f64) : f64\n";
-    std::string one_minus_u = fresh_ssa();
-    out << "  " << one_minus_u << " = llvm.fsub " << f64_one << ", " << u << " : f64\n";
-
-    // Inline log(x) via IEEE 754 decomposition + atanh series.
-    // For x = 2^e * m where m ∈ [1,2): log(x) = e*ln(2) + log(m)
-    // Let g = (m-1)/(m+1), then log(m) = 2*atanh(g) = 2*(g + g^3/3 + g^5/5 + ... + g^13/13)
-    // Since g < 1/3 for m ∈ [1,2), g^13 < 6e-8, giving ~1e-15 relative accuracy.
+void emit_inline_log(std::ostringstream& out, const std::string& x, std::string& result) {
+    // log(x) via IEEE 754 decomposition + atanh series (7 terms, ~1e-15 accuracy)
     std::string x_bits = fresh_ssa();
-    out << "  " << x_bits << " = llvm.bitcast " << one_minus_u << " : f64 to i64\n";
+    out << "  " << x_bits << " = llvm.bitcast " << x << " : f64 to i64\n";
     std::string c52 = emit_const_i64(out, 52);
     std::string exp_raw = fresh_ssa();
     out << "  " << exp_raw << " = llvm.lshr " << x_bits << ", " << c52 << " : i64\n";
@@ -1103,114 +1059,141 @@ void emit_draw_next_noise(std::ostringstream& out,
     out << "  " << ln2 << " = llvm.mlir.constant(0.6931471805599453 : f64) : f64\n";
     std::string exp_part = fresh_ssa();
     out << "  " << exp_part << " = llvm.fmul " << exp_f64 << ", " << ln2 << " : f64\n";
-    // Reconstruct m = 1.0 + mantissa_fraction by replacing exponent with 1023
-    std::string exp_mask = emit_const_i64(out, 0x7FF0000000000000ULL);
-    std::string exp_1023 = emit_const_i64(out, 0x3FF0000000000000ULL);
+    std::string exp_1023_bits = emit_const_i64(out, 0x3FF0000000000000ULL);
+    std::string not_exp_mask = emit_const_i64(out, ~0x7FF0000000000000ULL);
     std::string bits_no_exp = fresh_ssa();
-    out << "  " << bits_no_exp << " = llvm.and " << x_bits << ", "
-        << emit_const_i64(out, ~0x7FF0000000000000ULL) << " : i64\n";
+    out << "  " << bits_no_exp << " = llvm.and " << x_bits << ", " << not_exp_mask << " : i64\n";
     std::string bits_m = fresh_ssa();
-    out << "  " << bits_m << " = llvm.or " << bits_no_exp << ", " << exp_1023 << " : i64\n";
+    out << "  " << bits_m << " = llvm.or " << bits_no_exp << ", " << exp_1023_bits << " : i64\n";
     std::string m_val = fresh_ssa();
     out << "  " << m_val << " = llvm.bitcast " << bits_m << " : i64 to f64\n";
-    // g = (m - 1) / (m + 1)
-    std::string f64_one_lg = fresh_ssa();
-    out << "  " << f64_one_lg << " = llvm.mlir.constant(1.0 : f64) : f64\n";
-    std::string m_minus_1 = fresh_ssa();
-    out << "  " << m_minus_1 << " = llvm.fsub " << m_val << ", " << f64_one_lg << " : f64\n";
-    std::string m_plus_1 = fresh_ssa();
-    out << "  " << m_plus_1 << " = llvm.fadd " << m_val << ", " << f64_one_lg << " : f64\n";
+    std::string one_lg = fresh_ssa();
+    out << "  " << one_lg << " = llvm.mlir.constant(1.0 : f64) : f64\n";
+    std::string m_m1 = fresh_ssa();
+    out << "  " << m_m1 << " = llvm.fsub " << m_val << ", " << one_lg << " : f64\n";
+    std::string m_p1 = fresh_ssa();
+    out << "  " << m_p1 << " = llvm.fadd " << m_val << ", " << one_lg << " : f64\n";
     std::string g = fresh_ssa();
-    out << "  " << g << " = llvm.fdiv " << m_minus_1 << ", " << m_plus_1 << " : f64\n";
-    // g^2
+    out << "  " << g << " = llvm.fdiv " << m_m1 << ", " << m_p1 << " : f64\n";
     std::string g2 = fresh_ssa();
     out << "  " << g2 << " = llvm.fmul " << g << ", " << g << " : f64\n";
-    // Horner form: atanh(g)/g = 1 + g^2*(1/3 + g^2*(1/5 + g^2*(1/7 + g^2*(1/9 + g^2*(1/11 + g^2/13)))))
-    // Evaluate inner to outer
-    std::string c13 = fresh_ssa();
-    out << "  " << c13 << " = llvm.mlir.constant(0.07692307692307693 : f64) : f64\n";   // 1/13
-    std::string c11 = fresh_ssa();
-    out << "  " << c11 << " = llvm.mlir.constant(0.09090909090909091 : f64) : f64\n";   // 1/11
-    std::string t5 = fresh_ssa();
-    out << "  " << t5 << " = llvm.fmul " << g2 << ", " << c13 << " : f64\n";
-    std::string t4 = fresh_ssa();
-    out << "  " << t4 << " = llvm.fadd " << t5 << ", " << c11 << " : f64\n";
-    std::string c9 = fresh_ssa();
-    out << "  " << c9 << " = llvm.mlir.constant(0.11111111111111111 : f64) : f64\n";    // 1/9
-    std::string t3 = fresh_ssa();
-    out << "  " << t3 << " = llvm.fmul " << g2 << ", " << t4 << " : f64\n";
-    std::string t2 = fresh_ssa();
-    out << "  " << t2 << " = llvm.fadd " << t3 << ", " << c9 << " : f64\n";
-    std::string c7 = fresh_ssa();
-    out << "  " << c7 << " = llvm.mlir.constant(0.14285714285714285 : f64) : f64\n";    // 1/7
-    std::string t1 = fresh_ssa();
-    out << "  " << t1 << " = llvm.fmul " << g2 << ", " << t2 << " : f64\n";
-    std::string t0 = fresh_ssa();
-    out << "  " << t0 << " = llvm.fadd " << t1 << ", " << c7 << " : f64\n";
-    std::string c5 = fresh_ssa();
-    out << "  " << c5 << " = llvm.mlir.constant(0.2 : f64) : f64\n";                    // 1/5
-    std::string s1 = fresh_ssa();
-    out << "  " << s1 << " = llvm.fmul " << g2 << ", " << t0 << " : f64\n";
-    std::string s0 = fresh_ssa();
-    out << "  " << s0 << " = llvm.fadd " << s1 << ", " << c5 << " : f64\n";
-    std::string c3 = fresh_ssa();
-    out << "  " << c3 << " = llvm.mlir.constant(0.33333333333333333 : f64) : f64\n";    // 1/3
-    std::string r1 = fresh_ssa();
-    out << "  " << r1 << " = llvm.fmul " << g2 << ", " << s0 << " : f64\n";
-    std::string r0 = fresh_ssa();
-    out << "  " << r0 << " = llvm.fadd " << r1 << ", " << c3 << " : f64\n";
-    // atanh(g)/g = 1 + g^2 * r0
+    // Horner: 1/13, 1/11, 1/9, 1/7, 1/5, 1/3
+    auto horner_step = [&](const std::string& acc, double coeff) -> std::string {
+        std::string cv = fresh_ssa();
+        char buf[64]; snprintf(buf, sizeof(buf), "%.17e", coeff);
+        out << "  " << cv << " = llvm.mlir.constant(" << buf << " : f64) : f64\n";
+        std::string mul = fresh_ssa();
+        out << "  " << mul << " = llvm.fmul " << g2 << ", " << acc << " : f64\n";
+        std::string add = fresh_ssa();
+        out << "  " << add << " = llvm.fadd " << mul << ", " << cv << " : f64\n";
+        return add;
+    };
+    std::string h0 = fresh_ssa();
+    out << "  " << h0 << " = llvm.mlir.constant(0.07692307692307693 : f64) : f64\n";  // 1/13
+    std::string h1 = horner_step(h0, 1.0/11);
+    std::string h2 = horner_step(h1, 1.0/9);
+    std::string h3 = horner_step(h2, 1.0/7);
+    std::string h4 = horner_step(h3, 1.0/5);
+    std::string h5 = horner_step(h4, 1.0/3);
     std::string inner = fresh_ssa();
-    out << "  " << inner << " = llvm.fmul " << g2 << ", " << r0 << " : f64\n";
-    std::string atanh_over_g = fresh_ssa();
-    out << "  " << atanh_over_g << " = llvm.fadd " << inner << ", " << f64_one_lg << " : f64\n";
-    // log(m) = 2 * g * atanh_over_g
-    std::string two = fresh_ssa();
-    out << "  " << two << " = llvm.mlir.constant(2.0 : f64) : f64\n";
+    out << "  " << inner << " = llvm.fmul " << g2 << ", " << h5 << " : f64\n";
+    std::string atanh_g = fresh_ssa();
+    out << "  " << atanh_g << " = llvm.fadd " << inner << ", " << one_lg << " : f64\n";
+    std::string two_v = fresh_ssa();
+    out << "  " << two_v << " = llvm.mlir.constant(2.0 : f64) : f64\n";
     std::string two_g = fresh_ssa();
-    out << "  " << two_g << " = llvm.fmul " << two << ", " << g << " : f64\n";
+    out << "  " << two_g << " = llvm.fmul " << two_v << ", " << g << " : f64\n";
     std::string mant_part = fresh_ssa();
-    out << "  " << mant_part << " = llvm.fmul " << two_g << ", " << atanh_over_g << " : f64\n";
-    std::string log_val = fresh_ssa();
-    out << "  " << log_val << " = llvm.fadd " << exp_part << ", " << mant_part << " : f64\n";
+    out << "  " << mant_part << " = llvm.fmul " << two_g << ", " << atanh_g << " : f64\n";
+    result = fresh_ssa();
+    out << "  " << result << " = llvm.fadd " << exp_part << ", " << mant_part << " : f64\n";
+}
+
+void emit_draw_next_noise(std::ostringstream& out,
+                           const FlattenedProgram& flat) {
+    uint32_t n = flat.noise_sites.size();
+    if (n == 0) {
+        std::string sentinel = emit_const_i32(out, 0xFFFFFFFFu);
+        out << "  llvm.store " << sentinel << ", %nni_ptr : i32, !llvm.ptr\n";
+        return;
+    }
+
+    // current_hazard = (nni == 0) ? 0.0 : hazards[nni - 1]
+    std::string nni = fresh_ssa();
+    out << "  " << nni << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
+    std::string nni64 = fresh_ssa();
+    out << "  " << nni64 << " = llvm.zext " << nni << " : i32 to i64\n";
+    std::string nni_is_0 = fresh_ssa();
+    out << "  " << nni_is_0 << " = llvm.icmp \"eq\" " << nni << ", %c0_i32 : i32\n";
+    std::string ch_zero = fresh_ssa();
+    out << "  " << ch_zero << " = llvm.mlir.constant(0.0 : f64) : f64\n";
+    // Load hazards[nni-1] from pointer
+    std::string nni_m1 = fresh_ssa();
+    out << "  " << nni_m1 << " = llvm.sub " << nni64 << ", %c1_i64 : i64\n";
+    std::string haz_ptr = fresh_ssa();
+    out << "  " << haz_ptr << " = llvm.getelementptr inbounds %noise_hazards_ptr["
+        << nni_m1 << "] : (!llvm.ptr, i64) -> !llvm.ptr, f64\n";
+    std::string haz_val = fresh_ssa();
+    out << "  " << haz_val << " = llvm.load " << haz_ptr << " : !llvm.ptr -> f64\n";
+    std::string current_hazard = fresh_ssa();
+    out << "  " << current_hazard << " = llvm.select " << nni_is_0 << ", " << ch_zero << ", " << haz_val << " : i1, f64\n";
+
+    // gap = -log(1-u)
+    std::string u = emit_rng_uniform(out);
+    std::string f64_one = fresh_ssa();
+    out << "  " << f64_one << " = llvm.mlir.constant(1.0 : f64) : f64\n";
+    std::string one_minus_u = fresh_ssa();
+    out << "  " << one_minus_u << " = llvm.fsub " << f64_one << ", " << u << " : f64\n";
+    std::string log_val;
+    emit_inline_log(out, one_minus_u, log_val);
     std::string gap = fresh_ssa();
     out << "  " << gap << " = llvm.fneg " << log_val << " : f64\n";
-    // target = current_hazard + gap (matching SVM algorithm exactly)
     std::string target = fresh_ssa();
     out << "  " << target << " = llvm.fadd " << current_hazard << ", " << gap << " : f64\n";
 
-    // Binary search over inlined hazard values
-    // For simplicity, use linear scan for small arrays, which is correct
-    std::string result = fresh_ssa();
-    out << "  " << result << " = llvm.mlir.constant(" << n << " : i32) : i32\n";
-    // Linear scan: for each hazard value, check if target < hazards[i]
-    std::string found_idx = result; // default: n (sentinel)
-    for (uint32_t i = 0; i < n; ++i) {
-        double haz = flat.noise_hazards[i];
-        char hbuf[64]; snprintf(hbuf, sizeof(hbuf), "%.17e", haz);
-        std::string hval = fresh_ssa();
-        out << "  " << hval << " = llvm.mlir.constant(" << hbuf << " : f64) : f64\n";
-        std::string cmp = fresh_ssa();
-        out << "  " << cmp << " = llvm.fcmp \"ogt\" " << hval << ", " << target << " : f64\n";
-        std::string idx_val = emit_const_i32(out, i);
-        std::string new_found = fresh_ssa();
-        // Only update if this is the first hit (found_idx still == n)
-        std::string is_first = fresh_ssa();
-        std::string n_val = emit_const_i32(out, n);
-        out << "  " << is_first << " = llvm.icmp \"eq\" " << found_idx << ", " << n_val << " : i32\n";
-        std::string take = fresh_ssa();
-        out << "  " << take << " = llvm.and " << cmp << ", " << is_first << " : i1\n";
-        out << "  " << new_found << " = llvm.select " << take << ", " << idx_val << ", " << found_idx << " : i1, i32\n";
-        found_idx = new_found;
-    }
-
-    // If found_idx >= n, set to sentinel 0xFFFFFFFF
-    std::string n_i32 = emit_const_i32(out, n);
-    std::string overflow = fresh_ssa();
-    out << "  " << overflow << " = llvm.icmp \"uge\" " << found_idx << ", " << n_i32 << " : i32\n";
+    // Binary search over noise_hazards_ptr[0..num_noise_sites)
+    // upper_bound: find first i where hazards[i] > target
+    std::string ns_i32 = fresh_ssa();
+    out << "  " << ns_i32 << " = llvm.zext %num_noise_sites : i32 to i64\n";
+    std::string lo_var = fresh_ssa(), hi_var = fresh_ssa();
+    std::string bs_hdr = fresh_label("bs_hdr"), bs_body = fresh_label("bs_body"), bs_done = fresh_label("bs_done");
+    out << "  llvm.br ^" << bs_hdr << "(%c0_i64, " << ns_i32 << " : i64, i64)\n";
+    out << "^" << bs_hdr << "(" << lo_var << ": i64, " << hi_var << ": i64):\n";
+    std::string bs_cond = fresh_ssa();
+    out << "  " << bs_cond << " = llvm.icmp \"ult\" " << lo_var << ", " << hi_var << " : i64\n";
+    out << "  llvm.cond_br " << bs_cond << ", ^" << bs_body << ", ^" << bs_done << "(" << lo_var << " : i64)\n";
+    out << "^" << bs_body << ":\n";
+    std::string diff = fresh_ssa();
+    out << "  " << diff << " = llvm.sub " << hi_var << ", " << lo_var << " : i64\n";
+    std::string half = fresh_ssa();
+    out << "  " << half << " = llvm.lshr " << diff << ", %c1_i64 : i64\n";
+    std::string mid = fresh_ssa();
+    out << "  " << mid << " = llvm.add " << lo_var << ", " << half << " : i64\n";
+    std::string mid_ptr = fresh_ssa();
+    out << "  " << mid_ptr << " = llvm.getelementptr inbounds %noise_hazards_ptr["
+        << mid << "] : (!llvm.ptr, i64) -> !llvm.ptr, f64\n";
+    std::string mid_val = fresh_ssa();
+    out << "  " << mid_val << " = llvm.load " << mid_ptr << " : !llvm.ptr -> f64\n";
+    std::string go_right = fresh_ssa();
+    out << "  " << go_right << " = llvm.fcmp \"ole\" " << mid_val << ", " << target << " : f64\n";
+    // if hazards[mid] <= target: lo = mid + 1, else: hi = mid
+    std::string mid_p1 = fresh_ssa();
+    out << "  " << mid_p1 << " = llvm.add " << mid << ", %c1_i64 : i64\n";
+    std::string new_lo = fresh_ssa();
+    out << "  " << new_lo << " = llvm.select " << go_right << ", " << mid_p1 << ", " << lo_var << " : i1, i64\n";
+    std::string new_hi = fresh_ssa();
+    out << "  " << new_hi << " = llvm.select " << go_right << ", " << hi_var << ", " << mid << " : i1, i64\n";
+    out << "  llvm.br ^" << bs_hdr << "(" << new_lo << ", " << new_hi << " : i64, i64)\n";
+    std::string bs_result_var = fresh_ssa();
+    out << "^" << bs_done << "(" << bs_result_var << ": i64):\n";
+    // If result >= num_noise_sites, set to sentinel 0xFFFFFFFF
+    std::string bs_ge = fresh_ssa();
+    out << "  " << bs_ge << " = llvm.icmp \"uge\" " << bs_result_var << ", " << ns_i32 << " : i64\n";
     std::string sentinel = emit_const_i32(out, 0xFFFFFFFFu);
+    std::string result_i32 = fresh_ssa();
+    out << "  " << result_i32 << " = llvm.trunc " << bs_result_var << " : i64 to i32\n";
     std::string final_nni = fresh_ssa();
-    out << "  " << final_nni << " = llvm.select " << overflow << ", " << sentinel << ", " << found_idx << " : i1, i32\n";
+    out << "  " << final_nni << " = llvm.select " << bs_ge << ", " << sentinel << ", " << result_i32 << " : i1, i32\n";
     out << "  llvm.store " << final_nni << ", %nni_ptr : i32, !llvm.ptr\n";
 }
 
@@ -1312,6 +1295,8 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "llvm.func amdgpu_kernelcc @compiled_mlir_kernel(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
+        << "    %noise_hazards_ptr: !llvm.ptr, %noise_sites_ptr: !llvm.ptr,\n"
+        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i32,\n"
         << "    %num_obs: i32, %num_exp: i32) -> () {\n"
 ;
 
@@ -1626,6 +1611,8 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     out << "llvm.func amdgpu_kernelcc @compiled_mlir_kernel_coop(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
+        << "    %noise_hazards_ptr: !llvm.ptr, %noise_sites_ptr: !llvm.ptr,\n"
+        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i32,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
         << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;
@@ -1970,6 +1957,8 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
         << "    %global_v: !llvm.ptr, %global_scratch: !llvm.ptr,\n"
         << "    %work_counter: !llvm.ptr,\n"
         << "    %block_counts: !llvm.ptr,\n"
+        << "    %noise_hazards_ptr: !llvm.ptr, %noise_sites_ptr: !llvm.ptr,\n"
+        << "    %noise_channels_ptr: !llvm.ptr, %num_noise_sites: i32,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
         << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;
