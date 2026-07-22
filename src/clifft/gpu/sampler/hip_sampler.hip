@@ -1,11 +1,11 @@
 #include "clifft/gpu/gpu_sampler.h"
 #include "clifft/gpu/device_program.h"
-#include "clifft/gpu/kernel_cache.h"
-#include "clifft/gpu/kernel_codegen.h"
-#include "clifft/gpu/hsa_kernel_dispatch.h"
-#include "clifft/gpu/hsa_persistent_dispatch.h"
+#include "clifft/gpu/codegen/kernel_cache.h"
+#include "clifft/gpu/codegen/kernel_codegen.h"
+#include "clifft/gpu/runtime/hsa_kernel_dispatch.h"
+#include "clifft/gpu/runtime/hsa_persistent_dispatch.h"
 #ifdef CLIFFT_ENABLE_MLIR
-#include "clifft/gpu/mlir_kernel_cache.h"
+#include "clifft/gpu/mlir/mlir_kernel_cache.h"
 #endif
 
 #include <hip/hip_runtime.h>
