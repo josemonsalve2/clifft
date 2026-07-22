@@ -7,8 +7,17 @@ case Opcode::OP_NOISE: {
     uint32_t site_idx = ins.a;
     if (site_idx < flat.noise_sites.size()) {
         const auto& site = flat.noise_sites[site_idx];
-        out << "  // noise site " << site_idx << " (offset=" << site.offset
-            << " count=" << site.count << " prob_sum=" << site.prob_sum << ")\n";
+        out << "  // noise site " << site_idx << " (scheduled)\n";
+        // Check if next_noise_idx == site_idx
+        std::string nni_cur = fresh_ssa();
+        out << "  " << nni_cur << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
+        std::string site_val = emit_const_i32(out, site_idx);
+        std::string nni_match = fresh_ssa();
+        out << "  " << nni_match << " = llvm.icmp \"eq\" " << nni_cur << ", " << site_val << " : i32\n";
+        std::string lbl_do_noise = fresh_label("do_noise");
+        std::string lbl_skip_noise = fresh_label("skip_noise");
+        out << "  llvm.cond_br " << nni_match << ", ^" << lbl_do_noise << ", ^" << lbl_skip_noise << "\n";
+        out << "^" << lbl_do_noise << ":\n";
         // Roll RNG
         std::string u = emit_rng_uniform(out);
         std::string prob_sum_val = fresh_ssa();
@@ -81,16 +90,32 @@ case Opcode::OP_NOISE: {
             out << "^" << lbl_skip << ":\n";
             cumulative = new_cum;
         }
+        // Update next_noise_idx and draw next
+        std::string next_si = emit_const_i32(out, site_idx + 1);
+        out << "  llvm.store " << next_si << ", %nni_ptr : i32, !llvm.ptr\n";
+        emit_draw_next_noise(out, flat);
+        out << "  llvm.br ^" << lbl_skip_noise << "\n";
+        out << "^" << lbl_skip_noise << ":\n";
     }
     break;
 }
 case Opcode::OP_NOISE_BLOCK: {
-    // Process all noise sites in [ins.a, ins.a + ins.b) unconditionally
+    // Process noise sites in [ins.a, ins.a + ins.b) with scheduling
     uint32_t start = ins.a;
     uint32_t end = start + ins.b;
     for (uint32_t si = start; si < end && si < flat.noise_sites.size(); ++si) {
         const auto& site = flat.noise_sites[si];
-        out << "  // noise_block site " << si << "\n";
+        out << "  // noise_block site " << si << " (scheduled)\n";
+        // Check scheduling
+        std::string nni_cur = fresh_ssa();
+        out << "  " << nni_cur << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
+        std::string site_val = emit_const_i32(out, si);
+        std::string nni_match = fresh_ssa();
+        out << "  " << nni_match << " = llvm.icmp \"eq\" " << nni_cur << ", " << site_val << " : i32\n";
+        std::string lbl_do = fresh_label("nb_do");
+        std::string lbl_end = fresh_label("nb_end");
+        out << "  llvm.cond_br " << nni_match << ", ^" << lbl_do << ", ^" << lbl_end << "\n";
+        out << "^" << lbl_do << ":\n";
         std::string u = emit_rng_uniform(out);
         std::string prob_sum_val = fresh_ssa();
         char psbuf[64]; snprintf(psbuf, sizeof(psbuf), "%.17e", site.prob_sum);
@@ -150,6 +175,12 @@ case Opcode::OP_NOISE_BLOCK: {
             out << "^" << lbl_skip << ":\n";
             cumulative = new_cum;
         }
+        // Advance next_noise_idx and draw
+        std::string next_si = emit_const_i32(out, si + 1);
+        out << "  llvm.store " << next_si << ", %nni_ptr : i32, !llvm.ptr\n";
+        emit_draw_next_noise(out, flat);
+        out << "  llvm.br ^" << lbl_end << "\n";
+        out << "^" << lbl_end << ":\n";
     }
     break;
 }
