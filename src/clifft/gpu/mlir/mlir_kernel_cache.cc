@@ -120,12 +120,27 @@ HsaLoadedKernel compile_or_load_mlir_kernel(const FlattenedProgram& flat) {
 
         auto t0 = std::chrono::steady_clock::now();
 
+        // Run LLVM opt -O3 on the IR before llc
+        {
+            std::string opt_bin = find_llc();
+            // opt is in the same directory as llc
+            size_t pos = opt_bin.rfind("llc");
+            if (pos != std::string::npos) opt_bin.replace(pos, 3, "opt");
+            std::string tmp_opt = tmp_ll + ".opt.ll";
+            std::ostringstream cmd_opt;
+            cmd_opt << "\"" << opt_bin << "\" -O3 -S -o \"" << tmp_opt << "\" \"" << tmp_ll << "\"";
+            std::string opt_out;
+            if (run_cmd(cmd_opt.str(), opt_out) == 0 && std::filesystem::exists(tmp_opt)) {
+                std::filesystem::rename(tmp_opt, tmp_ll);
+            }
+        }
+
         // Try llc → lld pipeline first
         std::string llc = find_llc();
         std::ostringstream cmd_llc;
         cmd_llc << "\"" << llc << "\""
                 << " --march=amdgcn --mcpu=" << gpu_arch
-                << " -mattr=+wavefrontsize64 -filetype=obj"
+                << " -mattr=+wavefrontsize64 -O3 -filetype=obj"
                 << " -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
 
         std::string out_llc;
@@ -201,7 +216,7 @@ HsaLoadedKernel compile_or_load_mlir_kernel_coop(const FlattenedProgram& flat) {
         std::string llc = find_llc();
         std::ostringstream cmd_llc;
         cmd_llc << "\"" << llc << "\" --march=amdgcn --mcpu=" << gpu_arch
-                << " -mattr=+wavefrontsize64 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
+                << " -mattr=+wavefrontsize64 -O3 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
         std::string out_llc;
         int rc_llc = run_cmd(cmd_llc.str(), out_llc);
 
@@ -258,7 +273,7 @@ HsaLoadedKernel compile_or_load_mlir_kernel_global(const FlattenedProgram& flat)
         std::string llc = find_llc();
         std::ostringstream cmd_llc;
         cmd_llc << "\"" << llc << "\" --march=amdgcn --mcpu=" << gpu_arch
-                << " -mattr=+wavefrontsize64 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
+                << " -mattr=+wavefrontsize64 -O3 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
         std::string out_llc;
         int rc_llc = run_cmd(cmd_llc.str(), out_llc);
 
