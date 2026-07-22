@@ -591,7 +591,8 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "llvm.func @compiled_mlir_kernel(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
-        << "    %num_obs: i32, %num_exp: i32) -> () {\n"
+        << "    %num_obs: i32, %num_exp: i32) -> ()\n"
+        << "  attributes {CConv = #llvm.cconv<amdgpu_kernel>} {\n"
 ;
 
     out << "  %c0_i32 = llvm.mlir.constant(0 : i32) : i32\n";
@@ -770,7 +771,7 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
-        << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
+        << "  attributes {CConv = #llvm.cconv<amdgpu_kernel>, \"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;
 
     // Constants
@@ -995,7 +996,7 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
         << "    %work_counter: !llvm.ptr,\n"
         << "    %block_counts: !llvm.ptr,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
-        << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
+        << "  attributes {CConv = #llvm.cconv<amdgpu_kernel>, \"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;
 
     // Constants
