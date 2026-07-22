@@ -783,19 +783,7 @@ void emit_meas_active_diagonal(std::ostringstream& out,
     out << "  " << axis_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
     std::string px_bit = emit_bit_get(out, "%px_ptr", axis_i32);
 
-    // Sum probabilities: p0 = sum cnorm(v[i]) for i in [0,half), p1 for [half,2*half)
-    std::string p_hdr = fresh_label("p_hdr"), p_body = fresh_label("p_body"), p_done = fresh_label("p_done");
-    out << "  llvm.br ^" << p_hdr << "(%c0_i64, %c0_i64, %c0_i64 : i64, i64, i64)\n";
-    // Hack: use i64 to carry f64 via bitcast since MLIR block args need consistent types
-    // Actually just use f64 directly
-    // Re-do: block args can be f64
-    // Let me use a simpler approach — accumulate via alloca
-    // Use p0_ptr and p1_ptr allocas
-    std::string p0_ptr = fresh_ssa(), p1_ptr = fresh_ssa();
-    // Can't alloca here (not in entry block). Use a different approach:
-    // Compute the sum in a loop with block arguments carrying f64 accumulators
-
-    // Restart: proper loop with f64 block arguments
+    // Sum probabilities with f64 block argument accumulators
     std::string p_hdr2 = fresh_label("psum_hdr");
     std::string p_body2 = fresh_label("psum_body");
     std::string p_done2 = fresh_label("psum_done");
