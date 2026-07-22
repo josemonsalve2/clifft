@@ -642,9 +642,7 @@ void emit_rng_seed(std::ostringstream& out,
     out << "  " << mult << " = llvm.mul " << shot_p1 << ", " << k_seed << " : i64\n";
     std::string z_init = fresh_ssa();
     out << "  " << z_init << " = llvm.xor " << seed_val << ", " << mult << " : i64\n";
-    // Use a temp alloca for splitmix state
-    out << "  %sm_tmp_p5 = llvm.alloca %c1_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
-    out << "  %sm_tmp = llvm.addrspacecast %sm_tmp_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+    // sm_tmp already allocated in entry block
     out << "  llvm.store " << z_init << ", %sm_tmp : i64, !llvm.ptr\n";
     // Generate 4 state words
     for (int i = 0; i < 4; ++i) {
