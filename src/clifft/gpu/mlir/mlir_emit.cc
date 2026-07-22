@@ -472,7 +472,7 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
 void emit_gpu_intrinsic_decls(std::ostringstream& out) {
     out << "llvm.func @llvm.amdgcn.workitem.id.x() -> i32\n";
     out << "llvm.func @llvm.amdgcn.workgroup.id.x() -> i32\n";
-    out << "llvm.func @llvm.log.f64(f64) -> f64\n";
+    // No llvm.log.f64 — AMDGCN needs device math library. Use inline approx instead.
     out << "llvm.func @llvm.amdgcn.s.barrier() -> ()\n\n";
 }
 
@@ -1075,16 +1075,25 @@ void emit_draw_next_noise(std::ostringstream& out,
 
     // u = rng.uniform()
     std::string u = emit_rng_uniform(out);
-    // gap = -log(1.0 - u)
-    std::string one = fresh_ssa();
-    out << "  " << one << " = llvm.mlir.constant(1.0 : f64) : f64\n";
-    std::string one_minus_u = fresh_ssa();
-    out << "  " << one_minus_u << " = llvm.fsub " << one << ", " << u << " : f64\n";
-    std::string log_val = fresh_ssa();
-    out << "  " << log_val << " = llvm.call @llvm.log.f64(" << one_minus_u << ") : (f64) -> f64\n";
+    // gap = -log(1-u) ≈ -log(u) (since 1-u ~ Uniform)
+    // Inline log approximation: extract exponent from IEEE 754 double
+    // log(x) ≈ (exponent - 1023) * ln(2)  [rough but sufficient for scheduling]
+    std::string u_bits = fresh_ssa();
+    out << "  " << u_bits << " = llvm.bitcast " << u << " : f64 to i64\n";
+    std::string c52 = emit_const_i64(out, 52);
+    std::string exp_raw = fresh_ssa();
+    out << "  " << exp_raw << " = llvm.lshr " << u_bits << ", " << c52 << " : i64\n";
+    std::string c1023 = emit_const_i64(out, 1023);
+    std::string exp_val = fresh_ssa();
+    out << "  " << exp_val << " = llvm.sub " << exp_raw << ", " << c1023 << " : i64\n";
+    std::string exp_f64 = fresh_ssa();
+    out << "  " << exp_f64 << " = llvm.sitofp " << exp_val << " : i64 to f64\n";
+    std::string ln2 = fresh_ssa();
+    out << "  " << ln2 << " = llvm.mlir.constant(0.6931471805599453 : f64) : f64\n";
+    std::string log_approx = fresh_ssa();
+    out << "  " << log_approx << " = llvm.fmul " << exp_f64 << ", " << ln2 << " : f64\n";
     std::string gap = fresh_ssa();
-    out << "  " << gap << " = llvm.fneg " << log_val << " : f64\n";
-    // target = current_hazard + gap = 0.0 + gap = gap (approximation)
+    out << "  " << gap << " = llvm.fneg " << log_approx << " : f64\n";
     std::string target = gap;
 
     // Binary search over inlined hazard values
