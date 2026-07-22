@@ -429,6 +429,148 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
     out << "^" << exit_lbl << ":\n";
 }
 
+// -----------------------------------------------------------------------
+// GPU intrinsic helpers for coop/global kernels
+// -----------------------------------------------------------------------
+
+void emit_gpu_intrinsic_decls(std::ostringstream& out) {
+    out << "llvm.func @llvm.amdgcn.workitem.id.x() -> i32\n";
+    out << "llvm.func @llvm.amdgcn.workgroup.id.x() -> i32\n";
+    out << "llvm.func @llvm.amdgcn.s.barrier() -> ()\n\n";
+}
+
+std::string emit_tidx(std::ostringstream& out) {
+    std::string r = fresh_ssa();
+    out << "  " << r << " = llvm.call @llvm.amdgcn.workitem.id.x() : () -> i32\n";
+    return r;
+}
+
+std::string emit_bidx(std::ostringstream& out) {
+    std::string r = fresh_ssa();
+    out << "  " << r << " = llvm.call @llvm.amdgcn.workgroup.id.x() : () -> i32\n";
+    return r;
+}
+
+void emit_barrier(std::ostringstream& out) {
+    out << "  llvm.call @llvm.amdgcn.s.barrier() : () -> ()\n";
+}
+
+void emit_lds_global(std::ostringstream& out,
+                     const std::string& name,
+                     const std::string& elem_type,
+                     uint32_t count) {
+    out << "llvm.mlir.global external @" << name
+        << "() {addr_space = 3 : i32} : !llvm.array<"
+        << count << " x " << elem_type << ">\n";
+}
+
+std::string emit_lds_base_ptr(std::ostringstream& out,
+                               const std::string& name,
+                               const std::string& elem_type,
+                               uint32_t count) {
+    std::string ptr = fresh_ssa();
+    out << "  " << ptr << " = llvm.mlir.addressof @" << name
+        << " : !llvm.ptr<3>\n";
+    std::string generic = fresh_ssa();
+    out << "  " << generic << " = llvm.addrspacecast " << ptr
+        << " : !llvm.ptr<3> to !llvm.ptr\n";
+    return generic;
+}
+
+std::string emit_atomic_add_i64(std::ostringstream& out,
+                                 const std::string& ptr,
+                                 const std::string& val) {
+    std::string old = fresh_ssa();
+    out << "  " << old << " = llvm.atomicrmw add " << ptr << ", " << val
+        << " monotonic : !llvm.ptr, i64\n";
+    return old;
+}
+
+std::string emit_atomic_cmpxchg_i64(std::ostringstream& out,
+                                     const std::string& ptr,
+                                     const std::string& cmp,
+                                     const std::string& new_val) {
+    std::string res = fresh_ssa();
+    out << "  " << res << " = llvm.cmpxchg " << ptr << ", " << cmp
+        << ", " << new_val
+        << " monotonic monotonic : !llvm.ptr, i64\n";
+    std::string old_val = fresh_ssa();
+    out << "  " << old_val << " = llvm.extractvalue " << res
+        << "[0] : !llvm.struct<(i64, i1)>\n";
+    std::string success = fresh_ssa();
+    out << "  " << success << " = llvm.extractvalue " << res
+        << "[1] : !llvm.struct<(i64, i1)>\n";
+    return old_val;
+}
+
+std::string emit_xcd_id(std::ostringstream& out) {
+    std::string raw = fresh_ssa();
+    out << "  " << raw << " = llvm.inline_asm "
+        << "\"s_getreg_b32 $0, hwreg(HW_REG_XCC_ID)\", \"=s\" "
+        << ": () -> i32\n";
+    std::string kNumXCDs = fresh_ssa();
+    out << "  " << kNumXCDs << " = llvm.mlir.constant(8 : i32) : i32\n";
+    std::string id = fresh_ssa();
+    out << "  " << id << " = llvm.urem " << raw << ", " << kNumXCDs << " : i32\n";
+    return id;
+}
+
+void emit_store_complex64_packed(std::ostringstream& out,
+                                  const std::string& v_ptr,
+                                  const std::string& idx_i64,
+                                  const std::string& complex_val) {
+    std::string vp = fresh_ssa();
+    out << "  " << vp << " = llvm.getelementptr inbounds " << v_ptr << "["
+        << idx_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
+    std::string re = fresh_ssa(), im = fresh_ssa();
+    out << "  " << re << " = llvm.extractvalue " << complex_val
+        << "[0] : !llvm.struct<(f32, f32)>\n";
+    out << "  " << im << " = llvm.extractvalue " << complex_val
+        << "[1] : !llvm.struct<(f32, f32)>\n";
+    std::string re_i32 = fresh_ssa(), im_i32 = fresh_ssa();
+    out << "  " << re_i32 << " = llvm.bitcast " << re << " : f32 to i32\n";
+    out << "  " << im_i32 << " = llvm.bitcast " << im << " : f32 to i32\n";
+    std::string re_i64 = fresh_ssa(), im_i64 = fresh_ssa();
+    out << "  " << re_i64 << " = llvm.zext " << re_i32 << " : i32 to i64\n";
+    out << "  " << im_i64 << " = llvm.zext " << im_i32 << " : i32 to i64\n";
+    std::string im_sh = fresh_ssa();
+    out << "  " << im_sh << " = llvm.shl " << im_i64
+        << ", llvm.mlir.constant(32 : i64) : i64\n";
+    std::string packed = fresh_ssa();
+    out << "  " << packed << " = llvm.or " << re_i64 << ", " << im_sh << " : i64\n";
+    std::string cast_ptr = fresh_ssa();
+    out << "  " << cast_ptr << " = llvm.bitcast " << vp << " : !llvm.ptr to !llvm.ptr\n";
+    out << "  llvm.store " << packed << ", " << cast_ptr << " : i64, !llvm.ptr\n";
+}
+
+std::string emit_cnorm(std::ostringstream& out, const std::string& c) {
+    std::string re = fresh_ssa(), im = fresh_ssa();
+    out << "  " << re << " = llvm.extractvalue " << c << "[0] : !llvm.struct<(f32, f32)>\n";
+    out << "  " << im << " = llvm.extractvalue " << c << "[1] : !llvm.struct<(f32, f32)>\n";
+    std::string re2 = fresh_ssa(), im2 = fresh_ssa();
+    out << "  " << re2 << " = llvm.fmul " << re << ", " << re << " : f32\n";
+    out << "  " << im2 << " = llvm.fmul " << im << ", " << im << " : f32\n";
+    std::string norm_f32 = fresh_ssa();
+    out << "  " << norm_f32 << " = llvm.fadd " << re2 << ", " << im2 << " : f32\n";
+    std::string norm_f64 = fresh_ssa();
+    out << "  " << norm_f64 << " = llvm.fpext " << norm_f32 << " : f32 to f64\n";
+    return norm_f64;
+}
+
+std::string emit_scatter_bits_2(std::ostringstream& out,
+                                 const std::string& val_i64,
+                                 const std::string& pos1_i64,
+                                 const std::string& pos2_i64) {
+    std::string lo = fresh_ssa(), hi = fresh_ssa();
+    std::string cmp = fresh_ssa();
+    out << "  " << cmp << " = llvm.icmp \"ult\" " << pos1_i64 << ", " << pos2_i64 << " : i64\n";
+    out << "  " << lo << " = llvm.select " << cmp << ", " << pos1_i64 << ", " << pos2_i64 << " : i1, i64\n";
+    out << "  " << hi << " = llvm.select " << cmp << ", " << pos2_i64 << ", " << pos1_i64 << " : i1, i64\n";
+    std::string s1 = emit_scatter_bits_1(out, val_i64, lo);
+    std::string s2 = emit_scatter_bits_1(out, s1, hi);
+    return s2;
+}
+
 }  // anonymous namespace
 
 // -----------------------------------------------------------------------

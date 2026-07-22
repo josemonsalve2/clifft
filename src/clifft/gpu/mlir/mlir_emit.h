@@ -12,6 +12,8 @@ namespace gpu {
 namespace mlir_emit {
 
 std::string emit_mlir_text(const FlattenedProgram& flat);
+std::string emit_mlir_text_coop(const FlattenedProgram& flat);
+std::string emit_mlir_text_global(const FlattenedProgram& flat);
 
 std::string find_mlir_opt();
 std::string find_mlir_translate();
