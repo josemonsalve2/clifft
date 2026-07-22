@@ -687,6 +687,14 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     auto emit_apply_phase_static = [&](uint32_t axis, double phs_re, double phs_im) {
         mlir_emit::emit_apply_phase_static(out, axis, phs_re, phs_im);
     };
+    auto emit_scatter_bits_2 = [&](const std::string& val_i64,
+                                    const std::string& pos1_i64,
+                                    const std::string& pos2_i64) -> std::string {
+        return mlir_emit::emit_scatter_bits_2(out, val_i64, pos1_i64, pos2_i64);
+    };
+    auto emit_cnorm = [&](const std::string& c) -> std::string {
+        return mlir_emit::emit_cnorm(out, c);
+    };
 
     // -----------------------------------------------------------------------
     // Instruction dispatch — per-category ops included from ops/*.inc
@@ -706,6 +714,9 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
 #include "ops/mlir_frame_ops.inc"
 #include "ops/mlir_array_ops.inc"
 #include "ops/mlir_measurement_ops.inc"
+#include "ops/mlir_expand_ops.inc"
+#include "ops/mlir_noise_ops.inc"
+#include "ops/mlir_exp_val_ops.inc"
             default:
                 out << "  // Unsupported op " << (unsigned)ins.opcode << " — mark discarded\n";
                 out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";

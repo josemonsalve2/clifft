@@ -66,3 +66,22 @@ case Opcode::OP_OBSERVABLE: {
 }
 case Opcode::OP_DETECTOR:
     break;
+case Opcode::OP_MEAS_DORMANT_RANDOM:
+case Opcode::OP_MEAS_ACTIVE_DIAGONAL:
+case Opcode::OP_MEAS_ACTIVE_INTERFERE:
+case Opcode::OP_SWAP_MEAS_INTERFERE: {
+    out << "  // measurement op " << (unsigned)ins.opcode
+        << " requires RNG — discard\n";
+    out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
+    break;
+}
+case Opcode::OP_MEAS_DORMANT_STATIC_FORCED:
+case Opcode::OP_MEAS_DORMANT_RANDOM_FORCED:
+case Opcode::OP_MEAS_ACTIVE_DIAGONAL_FORCED:
+case Opcode::OP_MEAS_ACTIVE_INTERFERE_FORCED:
+case Opcode::OP_SWAP_MEAS_INTERFERE_FORCED: {
+    out << "  // forced measurement op " << (unsigned)ins.opcode
+        << " — discard\n";
+    out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
+    break;
+}
