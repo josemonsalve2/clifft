@@ -1088,6 +1088,25 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
         out << "  llvm.store %c0_i8, " << ptr << " : i8, !llvm.ptr\n";
     }
 
+    // Initialize meas[] to zero (loop for all meas slots)
+    if (flat.total_meas_slots > 0) {
+        std::string meas_count = emit_const_i64(out, flat.total_meas_slots);
+        std::string mz_hdr = fresh_label("mz_hdr"), mz_body = fresh_label("mz_body"), mz_done = fresh_label("mz_done");
+        out << "  llvm.br ^" << mz_hdr << "(%c0_i64 : i64)\n";
+        out << "^" << mz_hdr << "(%mz_i: i64):\n";
+        std::string mz_cond = fresh_ssa();
+        out << "  " << mz_cond << " = llvm.icmp \"ult\" %mz_i, " << meas_count << " : i64\n";
+        out << "  llvm.cond_br " << mz_cond << ", ^" << mz_body << ", ^" << mz_done << "\n";
+        out << "^" << mz_body << ":\n";
+        std::string mz_ptr = fresh_ssa();
+        out << "  " << mz_ptr << " = llvm.getelementptr inbounds %meas_ptr[%mz_i] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        out << "  llvm.store %c0_i8, " << mz_ptr << " : i8, !llvm.ptr\n";
+        std::string mz_next = fresh_ssa();
+        out << "  " << mz_next << " = llvm.add %mz_i, %c1_i64 : i64\n";
+        out << "  llvm.br ^" << mz_hdr << "(" << mz_next << " : i64)\n";
+        out << "^" << mz_done << ":\n";
+    }
+
     // Seed RNG: shot_id = shot_offset + batch_shot_id
     std::string shot_id = fresh_ssa();
     out << "  " << shot_id << " = llvm.add %shot_offset, %batch_shot_id : i64\n";
