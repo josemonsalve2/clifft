@@ -19,7 +19,7 @@ PLOTDIR="${OUTDIR}/plots"
 SHOTS=1000000
 
 # GPU partitions to sweep
-PARTITIONS=(mi300x mi300x-es mi325x mi350x-es)
+PARTITIONS=(mi300x mi300x mi325x mi350x)
 
 # Approaches (from args, or default to svm + compiled)
 if [ $# -gt 0 ]; then

@@ -88,9 +88,9 @@ SWEEP_META = {
 # Distinct colours and markers for GPUs
 GPU_STYLES = {
     "mi300x":    {"color": "#1f77b4", "marker": "o"},
-    "mi300x-es": {"color": "#ff7f0e", "marker": "s"},
+    "mi300x": {"color": "#ff7f0e", "marker": "s"},
     "mi325x":    {"color": "#2ca02c", "marker": "^"},
-    "mi350x-es": {"color": "#d62728", "marker": "D"},
+    "mi350x": {"color": "#d62728", "marker": "D"},
 }
 
 # Line-styles for approaches

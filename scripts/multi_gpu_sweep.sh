@@ -4,7 +4,7 @@
 # Usage:
 #   ./scripts/multi_gpu_sweep.sh <partition> <approach> [shots]
 #
-# Partition: mi300x, mi300x-es, mi325x, mi350x-es
+# Partition: mi300x, mi300x, mi325x, mi350x
 # Approach:  svm, compiled, per-op, graph, split, persistent, svm-opt
 #
 # Produces three CSV files in results/multi_gpu/:
@@ -41,9 +41,9 @@ esac
 
 # ---------- partition -> GPU arch ----------
 case "$PARTITION" in
-    mi300x|mi300x-es) ARCH="gfx942" ;;
+    mi300x|mi300x) ARCH="gfx942" ;;
     mi325x)           ARCH="gfx942" ;;  # same ISA as MI300X
-    mi350x-es)        ARCH="gfx950" ;;
+    mi350x)        ARCH="gfx950" ;;
     *)                echo "Unknown partition: $PARTITION"; exit 1 ;;
 esac
 

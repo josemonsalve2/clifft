@@ -33,7 +33,7 @@ esac
 case "$PARTITION" in
     mi300x|mi300x) ARCH="gfx942" ;;
     mi325x)           ARCH="gfx942" ;;
-    mi350x-es)        ARCH="gfx950" ;;
+    mi350x)        ARCH="gfx950" ;;
     *)                ARCH="gfx942" ;;
 esac
 
