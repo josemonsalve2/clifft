@@ -1085,10 +1085,10 @@ void emit_draw_next_noise(std::ostringstream& out,
     std::string one_minus_u = fresh_ssa();
     out << "  " << one_minus_u << " = llvm.fsub " << f64_one << ", " << u << " : f64\n";
 
-    // Inline log(x) via exponent + mantissa correction for IEEE 754 double:
-    // log(x) = (biased_exp - 1023) * ln(2) + log(1 + mantissa_fraction)
-    // where mantissa_fraction ∈ [0,1), approximated by (m - 1) via (bits & mantissa_mask) / 2^52 trick
-    // Improved: log(1+f) ≈ f - f^2/2 + f^3/3 (3-term Taylor, ~0.05% accuracy for f∈[0,1))
+    // Inline log(x) via IEEE 754 decomposition + atanh series.
+    // For x = 2^e * m where m ∈ [1,2): log(x) = e*ln(2) + log(m)
+    // Let g = (m-1)/(m+1), then log(m) = 2*atanh(g) = 2*(g + g^3/3 + g^5/5 + ... + g^13/13)
+    // Since g < 1/3 for m ∈ [1,2), g^13 < 6e-8, giving ~1e-15 relative accuracy.
     std::string x_bits = fresh_ssa();
     out << "  " << x_bits << " = llvm.bitcast " << one_minus_u << " : f64 to i64\n";
     std::string c52 = emit_const_i64(out, 52);
@@ -1103,33 +1103,74 @@ void emit_draw_next_noise(std::ostringstream& out,
     out << "  " << ln2 << " = llvm.mlir.constant(0.6931471805599453 : f64) : f64\n";
     std::string exp_part = fresh_ssa();
     out << "  " << exp_part << " = llvm.fmul " << exp_f64 << ", " << ln2 << " : f64\n";
-    // Extract mantissa fraction: f = (bits & 0xFFFFFFFFFFFFF) / 2^52
-    std::string mant_mask = emit_const_i64(out, 0xFFFFFFFFFFFFFULL);
-    std::string mant_bits = fresh_ssa();
-    out << "  " << mant_bits << " = llvm.and " << x_bits << ", " << mant_mask << " : i64\n";
-    std::string mant_f64 = fresh_ssa();
-    out << "  " << mant_f64 << " = llvm.uitofp " << mant_bits << " : i64 to f64\n";
-    std::string inv_2_52 = fresh_ssa();
-    out << "  " << inv_2_52 << " = llvm.mlir.constant(2.220446049250313e-16 : f64) : f64\n";
-    std::string f_val = fresh_ssa();
-    out << "  " << f_val << " = llvm.fmul " << mant_f64 << ", " << inv_2_52 << " : f64\n";
-    // log(1+f) ≈ f - f^2/2 + f^3/3
-    std::string f2 = fresh_ssa();
-    out << "  " << f2 << " = llvm.fmul " << f_val << ", " << f_val << " : f64\n";
-    std::string half = fresh_ssa();
-    out << "  " << half << " = llvm.mlir.constant(0.5 : f64) : f64\n";
-    std::string f2h = fresh_ssa();
-    out << "  " << f2h << " = llvm.fmul " << f2 << ", " << half << " : f64\n";
-    std::string f3 = fresh_ssa();
-    out << "  " << f3 << " = llvm.fmul " << f2 << ", " << f_val << " : f64\n";
-    std::string third = fresh_ssa();
-    out << "  " << third << " = llvm.mlir.constant(0.33333333333333333 : f64) : f64\n";
-    std::string f3t = fresh_ssa();
-    out << "  " << f3t << " = llvm.fmul " << f3 << ", " << third << " : f64\n";
-    std::string mant_corr = fresh_ssa();
-    out << "  " << mant_corr << " = llvm.fsub " << f_val << ", " << f2h << " : f64\n";
+    // Reconstruct m = 1.0 + mantissa_fraction by replacing exponent with 1023
+    std::string exp_mask = emit_const_i64(out, 0x7FF0000000000000ULL);
+    std::string exp_1023 = emit_const_i64(out, 0x3FF0000000000000ULL);
+    std::string bits_no_exp = fresh_ssa();
+    out << "  " << bits_no_exp << " = llvm.and " << x_bits << ", "
+        << emit_const_i64(out, ~0x7FF0000000000000ULL) << " : i64\n";
+    std::string bits_m = fresh_ssa();
+    out << "  " << bits_m << " = llvm.or " << bits_no_exp << ", " << exp_1023 << " : i64\n";
+    std::string m_val = fresh_ssa();
+    out << "  " << m_val << " = llvm.bitcast " << bits_m << " : i64 to f64\n";
+    // g = (m - 1) / (m + 1)
+    std::string f64_one_lg = fresh_ssa();
+    out << "  " << f64_one_lg << " = llvm.mlir.constant(1.0 : f64) : f64\n";
+    std::string m_minus_1 = fresh_ssa();
+    out << "  " << m_minus_1 << " = llvm.fsub " << m_val << ", " << f64_one_lg << " : f64\n";
+    std::string m_plus_1 = fresh_ssa();
+    out << "  " << m_plus_1 << " = llvm.fadd " << m_val << ", " << f64_one_lg << " : f64\n";
+    std::string g = fresh_ssa();
+    out << "  " << g << " = llvm.fdiv " << m_minus_1 << ", " << m_plus_1 << " : f64\n";
+    // g^2
+    std::string g2 = fresh_ssa();
+    out << "  " << g2 << " = llvm.fmul " << g << ", " << g << " : f64\n";
+    // Horner form: atanh(g)/g = 1 + g^2*(1/3 + g^2*(1/5 + g^2*(1/7 + g^2*(1/9 + g^2*(1/11 + g^2/13)))))
+    // Evaluate inner to outer
+    std::string c13 = fresh_ssa();
+    out << "  " << c13 << " = llvm.mlir.constant(0.07692307692307693 : f64) : f64\n";   // 1/13
+    std::string c11 = fresh_ssa();
+    out << "  " << c11 << " = llvm.mlir.constant(0.09090909090909091 : f64) : f64\n";   // 1/11
+    std::string t5 = fresh_ssa();
+    out << "  " << t5 << " = llvm.fmul " << g2 << ", " << c13 << " : f64\n";
+    std::string t4 = fresh_ssa();
+    out << "  " << t4 << " = llvm.fadd " << t5 << ", " << c11 << " : f64\n";
+    std::string c9 = fresh_ssa();
+    out << "  " << c9 << " = llvm.mlir.constant(0.11111111111111111 : f64) : f64\n";    // 1/9
+    std::string t3 = fresh_ssa();
+    out << "  " << t3 << " = llvm.fmul " << g2 << ", " << t4 << " : f64\n";
+    std::string t2 = fresh_ssa();
+    out << "  " << t2 << " = llvm.fadd " << t3 << ", " << c9 << " : f64\n";
+    std::string c7 = fresh_ssa();
+    out << "  " << c7 << " = llvm.mlir.constant(0.14285714285714285 : f64) : f64\n";    // 1/7
+    std::string t1 = fresh_ssa();
+    out << "  " << t1 << " = llvm.fmul " << g2 << ", " << t2 << " : f64\n";
+    std::string t0 = fresh_ssa();
+    out << "  " << t0 << " = llvm.fadd " << t1 << ", " << c7 << " : f64\n";
+    std::string c5 = fresh_ssa();
+    out << "  " << c5 << " = llvm.mlir.constant(0.2 : f64) : f64\n";                    // 1/5
+    std::string s1 = fresh_ssa();
+    out << "  " << s1 << " = llvm.fmul " << g2 << ", " << t0 << " : f64\n";
+    std::string s0 = fresh_ssa();
+    out << "  " << s0 << " = llvm.fadd " << s1 << ", " << c5 << " : f64\n";
+    std::string c3 = fresh_ssa();
+    out << "  " << c3 << " = llvm.mlir.constant(0.33333333333333333 : f64) : f64\n";    // 1/3
+    std::string r1 = fresh_ssa();
+    out << "  " << r1 << " = llvm.fmul " << g2 << ", " << s0 << " : f64\n";
+    std::string r0 = fresh_ssa();
+    out << "  " << r0 << " = llvm.fadd " << r1 << ", " << c3 << " : f64\n";
+    // atanh(g)/g = 1 + g^2 * r0
+    std::string inner = fresh_ssa();
+    out << "  " << inner << " = llvm.fmul " << g2 << ", " << r0 << " : f64\n";
+    std::string atanh_over_g = fresh_ssa();
+    out << "  " << atanh_over_g << " = llvm.fadd " << inner << ", " << f64_one_lg << " : f64\n";
+    // log(m) = 2 * g * atanh_over_g
+    std::string two = fresh_ssa();
+    out << "  " << two << " = llvm.mlir.constant(2.0 : f64) : f64\n";
+    std::string two_g = fresh_ssa();
+    out << "  " << two_g << " = llvm.fmul " << two << ", " << g << " : f64\n";
     std::string mant_part = fresh_ssa();
-    out << "  " << mant_part << " = llvm.fadd " << mant_corr << ", " << f3t << " : f64\n";
+    out << "  " << mant_part << " = llvm.fmul " << two_g << ", " << atanh_over_g << " : f64\n";
     std::string log_val = fresh_ssa();
     out << "  " << log_val << " = llvm.fadd " << exp_part << ", " << mant_part << " : f64\n";
     std::string gap = fresh_ssa();
