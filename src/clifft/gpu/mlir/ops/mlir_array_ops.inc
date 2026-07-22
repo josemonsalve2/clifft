@@ -68,9 +68,9 @@ case Opcode::OP_ARRAY_T: {
     out << "  " << cond << " = llvm.icmp \"ult\" %t_i, " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
+    std::string scat_t = emit_scatter_bits_1("%t_i", axis64);
     std::string idx = fresh_ssa();
-    out << "  " << idx << " = llvm.or "
-        << emit_scatter_bits_1("%t_i", axis64) << ", " << axis_bit << " : i64\n";
+    out << "  " << idx << " = llvm.or " << scat_t << ", " << axis_bit << " : i64\n";
     std::string vc = emit_load_v(idx);
     std::string vc_re = fresh_ssa(), vc_im = fresh_ssa();
     out << "  " << vc_re << " = llvm.extractvalue " << vc << "[0] : !llvm.struct<(f32, f32)>\n";
@@ -126,7 +126,8 @@ case Opcode::OP_ARRAY_T_DAG: {
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
     std::string idx = fresh_ssa();
-    out << "  " << idx << " = llvm.or " << emit_scatter_bits_1("%td_i", axis64) << ", " << axis_bit << " : i64\n";
+    std::string scat_td = emit_scatter_bits_1("%td_i", axis64);
+    out << "  " << idx << " = llvm.or " << scat_td << ", " << axis_bit << " : i64\n";
     std::string vc = emit_load_v(idx);
     std::string vc_re = fresh_ssa(), vc_im = fresh_ssa(), t0 = fresh_ssa(), t1 = fresh_ssa(), re_out = fresh_ssa(), t2 = fresh_ssa(), t3 = fresh_ssa(), im_out = fresh_ssa();
     out << "  " << vc_re << " = llvm.extractvalue " << vc << "[0] : !llvm.struct<(f32, f32)>\n";
@@ -310,7 +311,8 @@ case Opcode::OP_ARRAY_ROT: {
     out << "  llvm.cond_br " << cond << ", ^" << body_lbl << ", ^" << exit_lbl << "\n";
     out << "^" << body_lbl << ":\n";
     std::string idx = fresh_ssa();
-    out << "  " << idx << " = llvm.or " << emit_scatter_bits_1("%rot_i", axis64) << ", " << axis_bit << " : i64\n";
+    std::string scat_rot = emit_scatter_bits_1("%rot_i", axis64);
+    out << "  " << idx << " = llvm.or " << scat_rot << ", " << axis_bit << " : i64\n";
     std::string vc = emit_load_v(idx);
     // cmul: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
     std::string vc_re = fresh_ssa(), vc_im = fresh_ssa();
