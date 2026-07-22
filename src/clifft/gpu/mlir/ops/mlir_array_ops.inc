@@ -122,13 +122,13 @@ case Opcode::OP_ARRAY_T_DAG: {
     std::string lv_td = fresh_ssa();
     std::string hdr = fresh_label("td_hdr"), body = fresh_label("td_body"), exit_lbl = fresh_label("td_exit");
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%td_i: i64):\n";
+    out << "^" << hdr << "(" << lv_td << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %td_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv_td << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
     std::string idx = fresh_ssa();
-    std::string scat_td = emit_scatter_bits_1(" << lv_td << ", axis64);
+    std::string scat_td = emit_scatter_bits_1(lv_td, axis64);
     out << "  " << idx << " = llvm.or " << scat_td << ", " << axis_bit << " : i64\n";
     std::string vc = emit_load_v(idx);
     std::string vc_re = fresh_ssa(), vc_im = fresh_ssa(), t0 = fresh_ssa(), t1 = fresh_ssa(), re_out = fresh_ssa(), t2 = fresh_ssa(), t3 = fresh_ssa(), im_out = fresh_ssa();
@@ -146,7 +146,7 @@ case Opcode::OP_ARRAY_T_DAG: {
     out << "  " << res << " = llvm.insertvalue " << im_out << ", " << r1 << "[1] : !llvm.struct<(f32, f32)>\n";
     emit_store_v(idx, res);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %td_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_td << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     break;
@@ -188,13 +188,13 @@ case Opcode::OP_ARRAY_CZ: {
     std::string lv_cz = fresh_ssa();
     std::string hdr = fresh_label("cz_hdr"), body = fresh_label("cz_body"), exit_lbl = fresh_label("cz_exit");
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%cz_i: i64):\n";
+    out << "^" << hdr << "(" << lv_cz << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %cz_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv_cz << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
     // scatter_bits_2 to skip both control and target positions
-    std::string base = emit_scatter_bits_2(" << lv_cz << ", c64, t64);
+    std::string base = emit_scatter_bits_2(lv_cz, c64, t64);
     std::string idx = fresh_ssa();
     out << "  " << idx << " = llvm.or " << base << ", " << ct_bit << " : i64\n";
     // Negate v[idx]: multiply by -1
@@ -211,7 +211,7 @@ case Opcode::OP_ARRAY_CZ: {
     out << "  " << res << " = llvm.insertvalue " << neg_im << ", " << r1 << "[1] : !llvm.struct<(f32, f32)>\n";
     emit_store_v(idx, res);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %cz_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_cz << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame update: pz[axis_1] ^= px[axis_2]; pz[axis_2] ^= px[axis_1]
@@ -246,12 +246,12 @@ case Opcode::OP_ARRAY_SWAP: {
     std::string lv_sw = fresh_ssa();
     std::string hdr = fresh_label("sw_hdr"), body = fresh_label("sw_body"), exit_lbl = fresh_label("sw_exit");
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%sw_i: i64):\n";
+    out << "^" << hdr << "(" << lv_sw << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %sw_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv_sw << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
-    std::string base = emit_scatter_bits_2(" << lv_sw << ", a64, b64);
+    std::string base = emit_scatter_bits_2(lv_sw, a64, b64);
     std::string idx_a = fresh_ssa(), idx_b = fresh_ssa();
     out << "  " << idx_a << " = llvm.or " << base << ", " << a_bit << " : i64\n";
     out << "  " << idx_b << " = llvm.or " << base << ", " << b_bit << " : i64\n";
@@ -260,7 +260,7 @@ case Opcode::OP_ARRAY_SWAP: {
     emit_store_v(idx_a, vb);
     emit_store_v(idx_b, va);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %sw_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_sw << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame: swap px bits, swap pz bits
@@ -310,13 +310,13 @@ case Opcode::OP_ARRAY_ROT: {
     std::string lv_rot = fresh_ssa();
     std::string hdr = fresh_label("rot_hdr"), body_lbl = fresh_label("rot_body"), exit_lbl = fresh_label("rot_exit");
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%rot_i: i64):\n";
+    out << "^" << hdr << "(" << lv_rot << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %rot_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv_rot << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body_lbl << ", ^" << exit_lbl << "\n";
     out << "^" << body_lbl << ":\n";
     std::string idx = fresh_ssa();
-    std::string scat_rot = emit_scatter_bits_1(" << lv_rot << ", axis64);
+    std::string scat_rot = emit_scatter_bits_1(lv_rot, axis64);
     out << "  " << idx << " = llvm.or " << scat_rot << ", " << axis_bit << " : i64\n";
     std::string vc = emit_load_v(idx);
     // cmul: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
@@ -337,7 +337,7 @@ case Opcode::OP_ARRAY_ROT: {
     out << "  " << res << " = llvm.insertvalue " << im_out << ", " << r1 << "[1] : !llvm.struct<(f32, f32)>\n";
     emit_store_v(idx, res);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %rot_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_rot << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     break;
@@ -363,12 +363,12 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
     std::string lv_mcn = fresh_ssa();
     std::string hdr = fresh_label("mcn_hdr"), body_lbl = fresh_label("mcn_body"), exit_lbl = fresh_label("mcn_exit");
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%mcn_i: i64):\n";
+    out << "^" << hdr << "(" << lv_mcn << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %mcn_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv_mcn << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body_lbl << ", ^" << exit_lbl << "\n";
     out << "^" << body_lbl << ":\n";
-    std::string scat = emit_scatter_bits_1(" << lv_mcn << ", axis64);
+    std::string scat = emit_scatter_bits_1(lv_mcn, axis64);
     std::string base = fresh_ssa();
     out << "  " << base << " = llvm.or " << scat << ", " << axis_bit << " : i64\n";
     // popcount(base & mask)
@@ -399,7 +399,7 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
     out << "  llvm.br ^" << merge_lbl << "\n";
     out << "^" << merge_lbl << ":\n";
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %mcn_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_mcn << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame update: for each bit j in mask, pz[j] ^= px[axis_1]
@@ -459,12 +459,12 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
     std::string lv_mcz = fresh_ssa();
     std::string hdr = fresh_label("mcz_hdr"), body_lbl = fresh_label("mcz_body"), exit_lbl = fresh_label("mcz_exit");
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%mcz_i: i64):\n";
+    out << "^" << hdr << "(" << lv_mcz << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %mcz_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv_mcz << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body_lbl << ", ^" << exit_lbl << "\n";
     out << "^" << body_lbl << ":\n";
-    std::string scat = emit_scatter_bits_1(" << lv_mcz << ", axis64);
+    std::string scat = emit_scatter_bits_1(lv_mcz, axis64);
     std::string base = fresh_ssa();
     out << "  " << base << " = llvm.or " << scat << ", " << axis_bit << " : i64\n";
     // popcount(base & mask)
@@ -494,7 +494,7 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
     out << "  llvm.br ^" << merge_lbl << "\n";
     out << "^" << merge_lbl << ":\n";
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %mcz_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_mcz << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame update: for each bit j in mask, pz[j] ^= px[axis_1]; pz[axis_1] ^= px[j]
