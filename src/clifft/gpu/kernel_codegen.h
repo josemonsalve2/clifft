@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace clifft {
 namespace gpu {
@@ -71,12 +72,21 @@ struct UsedFunctions {
 /// Analyze a flattened program and determine which device functions are used.
 UsedFunctions analyze_used_functions(const FlattenedProgram& flat);
 
+/// Describes a pair of consecutive instructions that are independent (their
+/// amplitude index sets are disjoint) and can be double-buffered.
+struct PipelineOp {
+    size_t first_pc;   ///< Index of the first instruction in flat.instrs
+    size_t second_pc;  ///< Index of the immediately following instruction
+};
+
+/// Analyze a flattened program for pipeline/double-buffer opportunities.
+/// Returns pairs of consecutive instructions that operate on disjoint amplitude
+/// index sets (no data dependency between them).  Used by LDS- and global-tier
+/// compiled kernels to decide whether to emit double-buffered code.
+std::vector<PipelineOp> analyze_pipeline_opportunities(const FlattenedProgram& flat);
+
 /// Generate a complete, self-contained HIP kernel source string for the given
-/// program.  The generated kernel includes:
-///   - Only the type definitions and device functions the circuit needs
-///   - Straight-line instruction sequence (no interpreter switch)
-///   - Warp-shuffle BlockCounts reduction (GEAK OPT-1)
-///   - Constant pool arrays baked into device memory
+/// program — register tier (peak_rank <= kThreadMaxPeakRank=4).
 ///
 /// The kernel function is named "compiled_sample_kernel" and has the signature:
 ///   __global__ void compiled_sample_kernel(
@@ -84,6 +94,24 @@ UsedFunctions analyze_used_functions(const FlattenedProgram& flat);
 ///       BlockCounts* block_counts,
 ///       uint32_t num_observables, uint32_t num_exp_vals);
 std::string generate_compiled_kernel(const FlattenedProgram& flat);
+
+/// Generate a cooperative (LDS-tier) HIP kernel source string for the given
+/// program — shared-memory tier (peak_rank 5–10).
+/// One block = one shot; amplitude array lives in __shared__ GpuComplex v[N].
+/// The kernel function is named "compiled_sample_kernel_coop" and has the same
+/// parameter signature as compiled_sample_kernel.
+std::string generate_compiled_kernel_coop(const FlattenedProgram& flat);
+
+/// Generate a global-coop HIP kernel source string for the given program —
+/// global-memory tier (peak_rank 11–19).
+/// Amplitude array lives in HBM global_v; uses per-XCD work stealing.
+/// The kernel function is named "compiled_sample_kernel_global" with signature:
+///   __global__ void compiled_sample_kernel_global(
+///       uint64_t shot_offset, uint64_t shots, uint64_t seed,
+///       GpuComplex* global_v, GpuComplex* global_scratch,
+///       uint64_t* work_counter, BlockCounts* block_counts,
+///       uint32_t num_observables, uint32_t num_exp_vals);
+std::string generate_compiled_kernel_global(const FlattenedProgram& flat);
 
 }  // namespace gpu
 }  // namespace clifft
