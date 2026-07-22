@@ -316,19 +316,17 @@ void emit_array_h_static(std::ostringstream& out, uint32_t axis) {
     out << "  // array_h on axis " << axis << "\n";
     std::string ak = fresh_ssa();
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
-    // Guard: skip if active_k == 0 (no amplitudes to process)
-    std::string ak_zero = fresh_ssa();
-    out << "  " << ak_zero << " = llvm.icmp \"eq\" " << ak << ", %c0_i32 : i32\n";
-    std::string skip_lbl = fresh_label("skip_ah");
-    std::string do_lbl = fresh_label("do_ah");
-    out << "  llvm.cond_br " << ak_zero << ", ^" << skip_lbl << ", ^" << do_lbl << "\n";
-    out << "^" << do_lbl << ":\n";
     std::string ak64 = fresh_ssa();
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
+    // Clamp iters to 0 when active_k==0 to avoid 1<<(-1) underflow
     std::string ak_m1 = fresh_ssa();
     out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
+    std::string iters_raw = fresh_ssa();
+    out << "  " << iters_raw << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    std::string ak_pos = fresh_ssa();
+    out << "  " << ak_pos << " = llvm.icmp \"sgt\" " << ak << ", %c0_i32 : i32\n";
     std::string iters = fresh_ssa();
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    out << "  " << iters << " = llvm.select " << ak_pos << ", " << iters_raw << ", %c0_i64 : i1, i64\n";
     char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", axis);
     std::string axis_val = fresh_ssa();
     out << "  " << axis_val << " = llvm.mlir.constant(" << abuf << " : i64) : i64\n";
@@ -364,29 +362,23 @@ void emit_array_h_static(std::ostringstream& out, uint32_t axis) {
     out << "  " << i_next << " = llvm.add %h_i, %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit << ":\n";
-    out << "  llvm.br ^" << skip_lbl << "\n";
-    out << "^" << skip_lbl << ":\n";
     (void)inv_sq2;
 }
 
 void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt) {
     out << "  // array_cnot ctrl=" << ctrl << " tgt=" << tgt << "\n";
-    std::string ak = fresh_ssa();
+    std::string ak = fresh_ssa(), ak64 = fresh_ssa(), ak_m2 = fresh_ssa(), iters = fresh_ssa();
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
-    // Guard: skip if active_k < 2
-    std::string cn_guard = fresh_ssa();
-    std::string cn_skip = fresh_label("skip_cn");
-    std::string cn_do = fresh_label("do_cn");
-    out << "  " << cn_guard << " = llvm.icmp \"slt\" " << ak << ", %c2_i32 : i32\n";
-    out << "  llvm.cond_br " << cn_guard << ", ^" << cn_skip << ", ^" << cn_do << "\n";
-    out << "^" << cn_do << ":\n";
-    std::string ak64 = fresh_ssa(), ak_m2 = fresh_ssa(), iters = fresh_ssa();
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m2 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
     std::string ak_m2b = fresh_ssa();
     std::string c2_i64 = emit_const_i64(out, 2);
     out << "  " << ak_m2b << " = llvm.sub " << ak64 << ", " << c2_i64 << " : i64\n";
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m2b << " : i64\n";
+    std::string iters_raw = fresh_ssa();
+    out << "  " << iters_raw << " = llvm.shl %c1_i64, " << ak_m2b << " : i64\n";
+    std::string ak_ge2 = fresh_ssa();
+    out << "  " << ak_ge2 << " = llvm.icmp \"sge\" " << ak << ", %c2_i32 : i32\n";
+    out << "  " << iters << " = llvm.select " << ak_ge2 << ", " << iters_raw << ", %c0_i64 : i1, i64\n";
 
     char cbuf[32], tbuf[32];
     snprintf(cbuf, sizeof(cbuf), "%u", ctrl);
@@ -430,25 +422,20 @@ void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt
     out << "  " << i_next << " = llvm.add %cn_i, %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
-    out << "  llvm.br ^" << cn_skip << "\n";
-    out << "^" << cn_skip << ":\n";
     (void)ak_m2;
 }
 
 void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
                               double phs_re, double phs_im) {
-    std::string ak = fresh_ssa();
+    std::string ak = fresh_ssa(), ak64 = fresh_ssa(), ak_m1 = fresh_ssa(), iters = fresh_ssa();
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
-    std::string ph_guard = fresh_ssa();
-    std::string ph_skip = fresh_label("skip_ph");
-    std::string ph_do = fresh_label("do_ph");
-    out << "  " << ph_guard << " = llvm.icmp \"eq\" " << ak << ", %c0_i32 : i32\n";
-    out << "  llvm.cond_br " << ph_guard << ", ^" << ph_skip << ", ^" << ph_do << "\n";
-    out << "^" << ph_do << ":\n";
-    std::string ak64 = fresh_ssa(), ak_m1 = fresh_ssa(), iters = fresh_ssa();
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    std::string iters_raw = fresh_ssa();
+    out << "  " << iters_raw << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    std::string ak_pos = fresh_ssa();
+    out << "  " << ak_pos << " = llvm.icmp \"sgt\" " << ak << ", %c0_i32 : i32\n";
+    out << "  " << iters << " = llvm.select " << ak_pos << ", " << iters_raw << ", %c0_i64 : i1, i64\n";
     char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", axis);
     std::string axis64 = fresh_ssa(), axis_bit = fresh_ssa();
     out << "  " << axis64 << " = llvm.mlir.constant(" << abuf << " : i64) : i64\n";
@@ -473,8 +460,6 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
     out << "  " << i_next << " = llvm.add %ph_i, %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
-    out << "  llvm.br ^" << ph_skip << "\n";
-    out << "^" << ph_skip << ":\n";
 }
 
 // -----------------------------------------------------------------------
