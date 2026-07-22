@@ -497,14 +497,14 @@ void emit_barrier(std::ostringstream& out) {
 std::string emit_shfl_xor_i32(std::ostringstream& out,
                                const std::string& val_i32,
                                const std::string& lane_mask_i32) {
+    std::string c63 = emit_const_i32(out, 63);
+    std::string c2_shfl = emit_const_i32(out, 2);
     std::string self_lane = fresh_ssa();
-    out << "  " << self_lane << " = llvm.and %tidx_i32, "
-        << emit_const_i32(out, 63) << " : i32\n";
+    out << "  " << self_lane << " = llvm.and %tidx_i32, " << c63 << " : i32\n";
     std::string target = fresh_ssa();
     out << "  " << target << " = llvm.xor " << self_lane << ", " << lane_mask_i32 << " : i32\n";
     std::string byte_off = fresh_ssa();
-    out << "  " << byte_off << " = llvm.shl " << target << ", "
-        << emit_const_i32(out, 2) << " : i32\n";
+    out << "  " << byte_off << " = llvm.shl " << target << ", " << c2_shfl << " : i32\n";
     std::string result = fresh_ssa();
     out << "  " << result << " = llvm.call @llvm.amdgcn.ds.bpermute("
         << byte_off << ", " << val_i32 << ") : (i32, i32) -> i32\n";
@@ -515,11 +515,11 @@ std::string emit_shfl_xor_i32(std::ostringstream& out,
 std::string emit_shfl_xor_i64(std::ostringstream& out,
                                const std::string& val_i64,
                                const std::string& lane_mask_i32) {
+    std::string c32 = emit_const_i64(out, 32);
     std::string lo = fresh_ssa();
     out << "  " << lo << " = llvm.trunc " << val_i64 << " : i64 to i32\n";
     std::string hi_shift = fresh_ssa();
-    out << "  " << hi_shift << " = llvm.lshr " << val_i64 << ", "
-        << emit_const_i64(out, 32) << " : i64\n";
+    out << "  " << hi_shift << " = llvm.lshr " << val_i64 << ", " << c32 << " : i64\n";
     std::string hi = fresh_ssa();
     out << "  " << hi << " = llvm.trunc " << hi_shift << " : i64 to i32\n";
     std::string lo_shfl = emit_shfl_xor_i32(out, lo, lane_mask_i32);
@@ -529,8 +529,7 @@ std::string emit_shfl_xor_i64(std::ostringstream& out,
     std::string hi64 = fresh_ssa();
     out << "  " << hi64 << " = llvm.zext " << hi_shfl << " : i32 to i64\n";
     std::string hi_placed = fresh_ssa();
-    out << "  " << hi_placed << " = llvm.shl " << hi64 << ", "
-        << emit_const_i64(out, 32) << " : i64\n";
+    out << "  " << hi_placed << " = llvm.shl " << hi64 << ", " << c32 << " : i64\n";
     std::string combined = fresh_ssa();
     out << "  " << combined << " = llvm.or " << lo64 << ", " << hi_placed << " : i64\n";
     return combined;

@@ -21,6 +21,7 @@ done
 # Clean kernel cache
 rm -rf "$HOME/.clifft/kernel_cache/mlir" 2>/dev/null
 
+rm -rf "$HOME/.clifft/kernel_cache/mlir" 2>/dev/null
 echo "=== SVM test ==="
 $BIN --circuit "$BASE/tests/fixtures/incremental/01_frame_only/frame_h.stim" --shots 100 --seed 42 2>&1
 echo "EXIT: $?"
