@@ -588,11 +588,10 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
 
     out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
 
-    out << "llvm.func @compiled_mlir_kernel(\n"
+    out << "llvm.func amdgpu_kernelcc @compiled_mlir_kernel(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
-        << "    %num_obs: i32, %num_exp: i32) -> ()\n"
-        << "  attributes {CConv = #llvm.cconv<amdgpu_kernelcc>} {\n"
+        << "    %num_obs: i32, %num_exp: i32) -> () {\n"
 ;
 
     out << "  %c0_i32 = llvm.mlir.constant(0 : i32) : i32\n";
@@ -767,11 +766,11 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     out << "\n";
 
     // Kernel function
-    out << "llvm.func @compiled_mlir_kernel_coop(\n"
+    out << "llvm.func amdgpu_kernelcc @compiled_mlir_kernel_coop(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
-        << "  attributes {CConv = #llvm.cconv<amdgpu_kernelcc>, \"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
+        << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;
 
     // Constants
@@ -990,13 +989,13 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     out << "\n";
 
     // Global kernel with HBM pointers
-    out << "llvm.func @compiled_mlir_kernel_global(\n"
+    out << "llvm.func amdgpu_kernelcc @compiled_mlir_kernel_global(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %global_v: !llvm.ptr, %global_scratch: !llvm.ptr,\n"
         << "    %work_counter: !llvm.ptr,\n"
         << "    %block_counts: !llvm.ptr,\n"
         << "    %num_obs: i32, %num_exp: i32) -> ()\n"
-        << "  attributes {CConv = #llvm.cconv<amdgpu_kernelcc>, \"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
+        << "  attributes {\"amdgpu-flat-work-group-size\"=\"256,256\"} {\n"
 ;
 
     // Constants
