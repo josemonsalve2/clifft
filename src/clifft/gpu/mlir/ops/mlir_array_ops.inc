@@ -54,7 +54,11 @@ case Opcode::OP_ARRAY_T: {
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    std::string iters_raw = fresh_ssa();
+    out << "  " << iters_raw << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    std::string ak_pos = fresh_ssa();
+    out << "  " << ak_pos << " = llvm.icmp \"sgt\" " << ak << ", %c0_i32 : i32\n";
+    out << "  " << iters << " = llvm.select " << ak_pos << ", " << iters_raw << ", %c0_i64 : i1, i64\n";
     std::string axis64 = fresh_ssa(), axis_bit = fresh_ssa();
     out << "  " << axis64 << " = llvm.mlir.constant(" << abuf << " : i64) : i64\n";
     out << "  " << axis_bit << " = llvm.shl %c1_i64, " << axis64 << " : i64\n";
@@ -112,7 +116,10 @@ case Opcode::OP_ARRAY_T_DAG: {
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    { std::string _ir = fresh_ssa(), _ap = fresh_ssa();
+    out << "  " << _ir << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    out << "  " << _ap << " = llvm.icmp \"sgt\" " << ak << ", %c0_i32 : i32\n";
+    out << "  " << iters << " = llvm.select " << _ap << ", " << _ir << ", %c0_i64 : i1, i64\n"; }
     std::string axis64 = fresh_ssa(), axis_bit = fresh_ssa();
     out << "  " << axis64 << " = llvm.mlir.constant(" << abuf << " : i64) : i64\n";
     out << "  " << axis_bit << " = llvm.shl %c1_i64, " << axis64 << " : i64\n";
@@ -302,7 +309,10 @@ case Opcode::OP_ARRAY_ROT: {
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    { std::string _ir = fresh_ssa(), _ap = fresh_ssa();
+    out << "  " << _ir << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    out << "  " << _ap << " = llvm.icmp \"sgt\" " << ak << ", %c0_i32 : i32\n";
+    out << "  " << iters << " = llvm.select " << _ap << ", " << _ir << ", %c0_i64 : i1, i64\n"; }
     std::string axis64 = fresh_ssa(), axis_bit = fresh_ssa();
     out << "  " << axis64 << " = llvm.mlir.constant(" << abuf << " : i64) : i64\n";
     out << "  " << axis_bit << " = llvm.shl %c1_i64, " << axis64 << " : i64\n";
@@ -352,7 +362,10 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    { std::string _ir = fresh_ssa(), _ap = fresh_ssa();
+    out << "  " << _ir << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    out << "  " << _ap << " = llvm.icmp \"sgt\" " << ak << ", %c0_i32 : i32\n";
+    out << "  " << iters << " = llvm.select " << _ap << ", " << _ir << ", %c0_i64 : i1, i64\n"; }
     std::string axis64 = fresh_ssa(), axis_bit = fresh_ssa();
     out << "  " << axis64 << " = llvm.mlir.constant(" << abuf << " : i64) : i64\n";
     out << "  " << axis_bit << " = llvm.shl %c1_i64, " << axis64 << " : i64\n";
@@ -448,7 +461,10 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
-    out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    { std::string _ir = fresh_ssa(), _ap = fresh_ssa();
+    out << "  " << _ir << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+    out << "  " << _ap << " = llvm.icmp \"sgt\" " << ak << ", %c0_i32 : i32\n";
+    out << "  " << iters << " = llvm.select " << _ap << ", " << _ir << ", %c0_i64 : i1, i64\n"; }
     std::string axis64 = fresh_ssa(), axis_bit = fresh_ssa();
     out << "  " << axis64 << " = llvm.mlir.constant(" << abuf << " : i64) : i64\n";
     out << "  " << axis_bit << " = llvm.shl %c1_i64, " << axis64 << " : i64\n";
