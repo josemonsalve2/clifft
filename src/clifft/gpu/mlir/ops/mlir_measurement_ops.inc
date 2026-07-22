@@ -66,12 +66,15 @@ case Opcode::OP_OBSERVABLE: {
 }
 case Opcode::OP_DETECTOR:
     break;
-case Opcode::OP_MEAS_DORMANT_RANDOM:
+case Opcode::OP_MEAS_DORMANT_RANDOM: {
+    emit_meas_dormant_random(out, ins.axis_1, ins.a, sign);
+    break;
+}
 case Opcode::OP_MEAS_ACTIVE_DIAGONAL:
 case Opcode::OP_MEAS_ACTIVE_INTERFERE:
 case Opcode::OP_SWAP_MEAS_INTERFERE: {
-    out << "  // measurement op " << (unsigned)ins.opcode
-        << " requires RNG — discard\n";
+    out << "  // active measurement op " << (unsigned)ins.opcode
+        << " requires array reduction — discard\n";
     out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
     break;
 }

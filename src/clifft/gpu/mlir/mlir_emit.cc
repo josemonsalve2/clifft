@@ -573,6 +573,171 @@ std::string emit_scatter_bits_2(std::ostringstream& out,
     return s2;
 }
 
+// -----------------------------------------------------------------------
+// RNG helpers — xoshiro256++ PRNG emitted as inline MLIR
+// -----------------------------------------------------------------------
+
+void emit_rng_state_alloca(std::ostringstream& out) {
+    out << "  %c4_i32 = llvm.mlir.constant(4 : i32) : i32\n";
+    out << "  %rng_ptr_p5 = llvm.alloca %c4_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %rng_ptr = llvm.addrspacecast %rng_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+}
+
+void emit_splitmix64(std::ostringstream& out,
+                      const std::string& state_ptr,
+                      const std::string& result_name) {
+    std::string z = fresh_ssa();
+    out << "  " << z << " = llvm.load " << state_ptr << " : !llvm.ptr -> i64\n";
+    std::string inc = fresh_ssa();
+    out << "  " << inc << " = llvm.add " << z << ", llvm.mlir.constant(11400714819323198485 : i64) : i64\n";
+    out << "  llvm.store " << inc << ", " << state_ptr << " : i64, !llvm.ptr\n";
+    std::string z1 = fresh_ssa();
+    out << "  " << z1 << " = llvm.lshr " << inc << ", llvm.mlir.constant(30 : i64) : i64\n";
+    std::string z2 = fresh_ssa();
+    out << "  " << z2 << " = llvm.xor " << inc << ", " << z1 << " : i64\n";
+    std::string z3 = fresh_ssa();
+    out << "  " << z3 << " = llvm.mul " << z2 << ", llvm.mlir.constant(13787848793156543929 : i64) : i64\n";
+    std::string z4 = fresh_ssa();
+    out << "  " << z4 << " = llvm.lshr " << z3 << ", llvm.mlir.constant(27 : i64) : i64\n";
+    std::string z5 = fresh_ssa();
+    out << "  " << z5 << " = llvm.xor " << z3 << ", " << z4 << " : i64\n";
+    std::string z6 = fresh_ssa();
+    out << "  " << z6 << " = llvm.mul " << z5 << ", llvm.mlir.constant(10723151780598845931 : i64) : i64\n";
+    std::string z7 = fresh_ssa();
+    out << "  " << z7 << " = llvm.lshr " << z6 << ", llvm.mlir.constant(31 : i64) : i64\n";
+    out << "  " << result_name << " = llvm.xor " << z6 << ", " << z7 << " : i64\n";
+}
+
+void emit_rng_seed(std::ostringstream& out,
+                    const std::string& seed_val,
+                    const std::string& shot_id) {
+    // z = seed ^ (0x9e3779b97f4a7c15 * (shot_id + 1))
+    std::string shot_p1 = fresh_ssa();
+    out << "  " << shot_p1 << " = llvm.add " << shot_id << ", %c1_i64 : i64\n";
+    std::string mult = fresh_ssa();
+    out << "  " << mult << " = llvm.mul " << shot_p1
+        << ", llvm.mlir.constant(11400714819323198485 : i64) : i64\n";
+    std::string z_init = fresh_ssa();
+    out << "  " << z_init << " = llvm.xor " << seed_val << ", " << mult << " : i64\n";
+    // Use a temp alloca for splitmix state
+    out << "  %sm_tmp_p5 = llvm.alloca %c1_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %sm_tmp = llvm.addrspacecast %sm_tmp_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+    out << "  llvm.store " << z_init << ", %sm_tmp : i64, !llvm.ptr\n";
+    // Generate 4 state words
+    for (int i = 0; i < 4; ++i) {
+        std::string r = fresh_ssa();
+        emit_splitmix64(out, "%sm_tmp", r);
+        std::string idx = fresh_ssa();
+        out << "  " << idx << " = llvm.mlir.constant(" << i << " : i64) : i64\n";
+        std::string ptr = fresh_ssa();
+        out << "  " << ptr << " = llvm.getelementptr inbounds %rng_ptr["
+            << idx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        out << "  llvm.store " << r << ", " << ptr << " : i64, !llvm.ptr\n";
+    }
+}
+
+std::string emit_rng_next(std::ostringstream& out) {
+    // Load s[0..3]
+    std::string s[4], sp[4];
+    for (int i = 0; i < 4; ++i) {
+        std::string idx = fresh_ssa();
+        out << "  " << idx << " = llvm.mlir.constant(" << i << " : i64) : i64\n";
+        sp[i] = fresh_ssa();
+        out << "  " << sp[i] << " = llvm.getelementptr inbounds %rng_ptr["
+            << idx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        s[i] = fresh_ssa();
+        out << "  " << s[i] << " = llvm.load " << sp[i] << " : !llvm.ptr -> i64\n";
+    }
+    // result = rotl64(s[0] + s[3], 23) + s[0]
+    std::string sum03 = fresh_ssa();
+    out << "  " << sum03 << " = llvm.add " << s[0] << ", " << s[3] << " : i64\n";
+    std::string shl23 = fresh_ssa(), shr41 = fresh_ssa(), rotl = fresh_ssa();
+    out << "  " << shl23 << " = llvm.shl " << sum03 << ", llvm.mlir.constant(23 : i64) : i64\n";
+    out << "  " << shr41 << " = llvm.lshr " << sum03 << ", llvm.mlir.constant(41 : i64) : i64\n";
+    out << "  " << rotl << " = llvm.or " << shl23 << ", " << shr41 << " : i64\n";
+    std::string result = fresh_ssa();
+    out << "  " << result << " = llvm.add " << rotl << ", " << s[0] << " : i64\n";
+    // Update state: t = s[1] << 17
+    std::string t = fresh_ssa();
+    out << "  " << t << " = llvm.shl " << s[1] << ", llvm.mlir.constant(17 : i64) : i64\n";
+    // s[2] ^= s[0]; s[3] ^= s[1]; s[1] ^= s[2]; s[0] ^= s[3]
+    std::string ns2 = fresh_ssa(), ns3 = fresh_ssa(), ns1 = fresh_ssa(), ns0 = fresh_ssa();
+    out << "  " << ns2 << " = llvm.xor " << s[2] << ", " << s[0] << " : i64\n";
+    out << "  " << ns3 << " = llvm.xor " << s[3] << ", " << s[1] << " : i64\n";
+    out << "  " << ns1 << " = llvm.xor " << s[1] << ", " << ns2 << " : i64\n";
+    out << "  " << ns0 << " = llvm.xor " << s[0] << ", " << ns3 << " : i64\n";
+    // s[2] ^= t
+    std::string ns2t = fresh_ssa();
+    out << "  " << ns2t << " = llvm.xor " << ns2 << ", " << t << " : i64\n";
+    // s[3] = rotl64(s[3]_new, 45)
+    std::string shl45 = fresh_ssa(), shr19 = fresh_ssa(), ns3r = fresh_ssa();
+    out << "  " << shl45 << " = llvm.shl " << ns3 << ", llvm.mlir.constant(45 : i64) : i64\n";
+    out << "  " << shr19 << " = llvm.lshr " << ns3 << ", llvm.mlir.constant(19 : i64) : i64\n";
+    out << "  " << ns3r << " = llvm.or " << shl45 << ", " << shr19 << " : i64\n";
+    // Store back
+    out << "  llvm.store " << ns0 << ", " << sp[0] << " : i64, !llvm.ptr\n";
+    out << "  llvm.store " << ns1 << ", " << sp[1] << " : i64, !llvm.ptr\n";
+    out << "  llvm.store " << ns2t << ", " << sp[2] << " : i64, !llvm.ptr\n";
+    out << "  llvm.store " << ns3r << ", " << sp[3] << " : i64, !llvm.ptr\n";
+    return result;
+}
+
+std::string emit_rng_uniform(std::ostringstream& out) {
+    std::string raw = emit_rng_next(out);
+    std::string shifted = fresh_ssa();
+    out << "  " << shifted << " = llvm.lshr " << raw << ", llvm.mlir.constant(11 : i64) : i64\n";
+    std::string as_f64 = fresh_ssa();
+    out << "  " << as_f64 << " = llvm.uitofp " << shifted << " : i64 to f64\n";
+    std::string scale = fresh_ssa();
+    out << "  " << scale << " = llvm.mlir.constant(1.1102230246251565e-16 : f64) : f64\n";
+    std::string uniform = fresh_ssa();
+    out << "  " << uniform << " = llvm.fmul " << as_f64 << ", " << scale << " : f64\n";
+    return uniform;
+}
+
+void emit_meas_dormant_random(std::ostringstream& out,
+                               uint32_t axis, uint32_t classical_idx, bool sign) {
+    std::string u = emit_rng_uniform(out);
+    std::string half = fresh_ssa();
+    out << "  " << half << " = llvm.mlir.constant(0.5 : f64) : f64\n";
+    std::string cmp = fresh_ssa();
+    out << "  " << cmp << " = llvm.fcmp \"olt\" " << u << ", " << half << " : f64\n";
+    std::string m_abs_i8 = fresh_ssa();
+    out << "  " << m_abs_i8 << " = llvm.zext " << cmp << " : i1 to i8\n";
+    // Note: cmp is true when u < 0.5, meaning m_abs = 1 when u >= 0.5
+    // Actually: rng.uniform() < 0.5 ? 0 : 1 means m_abs=0 when u<0.5
+    // So cmp = (u < 0.5), m_abs = cmp ? 0 : 1 = !cmp
+    std::string not_cmp = fresh_ssa();
+    out << "  " << not_cmp << " = llvm.xor " << cmp
+        << ", llvm.mlir.constant(true) : i1\n";
+    std::string m_abs = fresh_ssa();
+    out << "  " << m_abs << " = llvm.zext " << not_cmp << " : i1 to i8\n";
+
+    // bit_set(px, axis, m_abs != 0) → bit_set(px, axis, !cmp)
+    char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", axis);
+    std::string axis_i32 = fresh_ssa();
+    out << "  " << axis_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
+    emit_bit_set(out, "%px_ptr", axis_i32, not_cmp);
+    // bit_set(pz, axis, false)
+    std::string false_i1 = fresh_ssa();
+    out << "  " << false_i1 << " = llvm.mlir.constant(false) : i1\n";
+    emit_bit_set(out, "%pz_ptr", axis_i32, false_i1);
+    // meas[classical_idx] = m_abs ^ sign
+    std::string meas_val = m_abs;
+    if (sign) {
+        std::string xored = fresh_ssa();
+        out << "  " << xored << " = llvm.xor " << m_abs << ", %c1_i8 : i8\n";
+        meas_val = xored;
+    }
+    char cidx[32]; snprintf(cidx, sizeof(cidx), "%u", classical_idx);
+    std::string cidx_i64 = fresh_ssa();
+    out << "  " << cidx_i64 << " = llvm.mlir.constant(" << cidx << " : i64) : i64\n";
+    std::string meas_p = fresh_ssa();
+    out << "  " << meas_p << " = llvm.getelementptr inbounds %meas_ptr["
+        << cidx_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    out << "  llvm.store " << meas_val << ", " << meas_p << " : i8, !llvm.ptr\n";
+}
+
 }  // anonymous namespace
 
 // -----------------------------------------------------------------------
@@ -610,6 +775,11 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %f_zero = llvm.mlir.constant(0.0 : f32) : f32\n";
 
     // Alloca state in private addrspace(5) — MUST be in entry block
+    out << "  %c4_i32 = llvm.mlir.constant(4 : i32) : i32\n";
+    out << "  %rng_ptr_p5 = llvm.alloca %c4_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %rng_ptr = llvm.addrspacecast %rng_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
+    out << "  %sm_tmp_p5 = llvm.alloca %c1_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %sm_tmp = llvm.addrspacecast %sm_tmp_p5 : !llvm.ptr<5> to !llvm.ptr\n";
     out << "  %px_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
     out << "  %px_ptr = llvm.addrspacecast %px_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
     out << "  %pz_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
@@ -678,6 +848,11 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
             << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
         out << "  llvm.store %c0_i8, " << ptr << " : i8, !llvm.ptr\n";
     }
+
+    // Seed RNG: shot_id = shot_offset + batch_shot_id
+    std::string shot_id = fresh_ssa();
+    out << "  " << shot_id << " = llvm.add %shot_offset, %batch_shot_id : i64\n";
+    emit_rng_seed(out, "%seed", shot_id);
 
     // Bind helper lambdas that forward to the named functions above
     // (the .inc files call these without passing `out` explicitly)
