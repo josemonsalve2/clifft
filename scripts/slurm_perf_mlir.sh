@@ -66,12 +66,12 @@ perf_test() {
 }
 
 echo "--- Register Tier (rank <= 4) ---"
-perf_test "frame_h" "$BASE/tests/fixtures/incremental/01_frame/frame_h.stim"
-perf_test "frame_h_x10" "$BASE/tests/fixtures/incremental/01_frame/frame_h_x10.stim"
-perf_test "h_then_t" "$BASE/tests/fixtures/incremental/03_array/h_then_t.stim"
-perf_test "rank4_mixed" "$BASE/tests/fixtures/incremental/03_array/rank4_mixed.stim"
-perf_test "rep_d3" "$BASE/tests/fixtures/incremental/03_array/rep_d3.stim"
-perf_test "noise_measure" "$BASE/tests/fixtures/incremental/06_noise/noise_measure.stim"
+perf_test "frame_h" "$BASE/tests/fixtures/incremental/01_frame_only/frame_h.stim"
+perf_test "frame_h_x10" "$BASE/tests/fixtures/incremental/01_frame_only/frame_h_x10.stim"
+perf_test "h_then_t" "$BASE/tests/fixtures/incremental/05_combinations/h_then_t.stim"
+perf_test "rank4_mixed" "$BASE/tests/fixtures/incremental/06_small_circuits/rank4_mixed.stim"
+perf_test "rep_d3" "$BASE/tests/fixtures/incremental/06_small_circuits/rep_d3.stim"
+perf_test "noise_measure" "$BASE/tests/fixtures/incremental/04_measure/noise_measure.stim"
 
 echo ""
 echo "--- Coop Tier (rank 5-10) ---"
