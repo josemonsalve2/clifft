@@ -340,14 +340,15 @@ void emit_array_h_static(std::ostringstream& out, uint32_t axis) {
     std::string hdr = fresh_label("h_hdr");
     std::string body = fresh_label("h_body");
     std::string exit = fresh_label("h_exit");
+    std::string lv = fresh_ssa(); // unique loop var name
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%h_i: i64):\n";
+    out << "^" << hdr << "(" << lv << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %h_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit << "\n";
     out << "^" << body << ":\n";
 
-    std::string idx0 = emit_scatter_bits_1(out, "%h_i", axis_val);
+    std::string idx0 = emit_scatter_bits_1(out, lv, axis_val);
     std::string idx1 = fresh_ssa();
     out << "  " << idx1 << " = llvm.or " << idx0 << ", " << axis_bit << " : i64\n";
 
@@ -359,7 +360,7 @@ void emit_array_h_static(std::ostringstream& out, uint32_t axis) {
     emit_store_v(out, idx1, emit_cscale_f64(out, diff, kInvSqrt2));
 
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %h_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit << ":\n";
     (void)inv_sq2;
@@ -392,10 +393,11 @@ void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt
     std::string hdr = fresh_label("cn_hdr");
     std::string body = fresh_label("cn_body");
     std::string exit_lbl = fresh_label("cn_exit");
+    std::string lv = fresh_ssa();
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%cn_i: i64):\n";
+    out << "^" << hdr << "(" << lv << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %cn_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
 
@@ -406,7 +408,7 @@ void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt
     std::string lo64 = fresh_ssa(), hi64 = fresh_ssa();
     out << "  " << lo64 << " = llvm.mlir.constant(" << lobuf << " : i64) : i64\n";
     out << "  " << hi64 << " = llvm.mlir.constant(" << hibuf << " : i64) : i64\n";
-    std::string s1 = emit_scatter_bits_1(out, "%cn_i", lo64);
+    std::string s1 = emit_scatter_bits_1(out, lv, lo64);
     std::string base_pre = emit_scatter_bits_1(out, s1, hi64);
     std::string base = fresh_ssa();
     out << "  " << base << " = llvm.or " << base_pre << ", " << c_bit << " : i64\n";
@@ -419,7 +421,7 @@ void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt
     emit_store_v(out, base_t, va);
 
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %cn_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     (void)ak_m2;
@@ -444,20 +446,21 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
     std::string hdr = fresh_label("ph_hdr");
     std::string body = fresh_label("ph_body");
     std::string exit_lbl = fresh_label("ph_exit");
+    std::string lv = fresh_ssa();
     out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
-    out << "^" << hdr << "(%ph_i: i64):\n";
+    out << "^" << hdr << "(" << lv << ": i64):\n";
     std::string cond = fresh_ssa();
-    out << "  " << cond << " = llvm.icmp \"ult\" %ph_i, " << iters << " : i64\n";
+    out << "  " << cond << " = llvm.icmp \"ult\" " << lv << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
-    std::string scattered = emit_scatter_bits_1(out, "%ph_i", axis64);
+    std::string scattered = emit_scatter_bits_1(out, lv, axis64);
     std::string idx = fresh_ssa();
     out << "  " << idx << " = llvm.or " << scattered << ", " << axis_bit << " : i64\n";
     std::string vc = emit_load_v(out, idx);
     std::string phased = emit_cmul_const(out, vc, phs_re, phs_im);
     emit_store_v(out, idx, phased);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add %ph_i, %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
 }
