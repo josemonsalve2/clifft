@@ -179,7 +179,8 @@ case Opcode::OP_ARRAY_CZ: {
     std::string ak = fresh_ssa(), ak64 = fresh_ssa(), ak_m2 = fresh_ssa(), iters = fresh_ssa();
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
-    out << "  " << ak_m2 << " = llvm.sub " << ak64 << ", llvm.mlir.constant(2 : i64) : i64\n";
+    { std::string c2 = emit_const_i64(out, 2);
+    out << "  " << ak_m2 << " = llvm.sub " << ak64 << ", " << c2 << " : i64\n"; }
     out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m2 << " : i64\n";
     char cbuf[32], tbuf[32];
     snprintf(cbuf, sizeof(cbuf), "%u", ctrl);
@@ -239,7 +240,8 @@ case Opcode::OP_ARRAY_SWAP: {
     std::string ak = fresh_ssa(), ak64 = fresh_ssa(), ak_m2 = fresh_ssa(), iters = fresh_ssa();
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
-    out << "  " << ak_m2 << " = llvm.sub " << ak64 << ", llvm.mlir.constant(2 : i64) : i64\n";
+    { std::string c2 = emit_const_i64(out, 2);
+    out << "  " << ak_m2 << " = llvm.sub " << ak64 << ", " << c2 << " : i64\n"; }
     out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m2 << " : i64\n";
     char abuf[32], bbuf[32];
     snprintf(abuf, sizeof(abuf), "%u", a1);
