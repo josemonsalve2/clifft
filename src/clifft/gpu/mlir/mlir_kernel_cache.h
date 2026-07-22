@@ -13,6 +13,8 @@ namespace gpu {
 /// Loads via HSA. Caches at ~/.clifft/kernel_cache/mlir/{hash}_{arch}.hsaco
 /// Returns an invalid HsaLoadedKernel on failure.
 HsaLoadedKernel compile_or_load_mlir_kernel(const FlattenedProgram& flat);
+HsaLoadedKernel compile_or_load_mlir_kernel_coop(const FlattenedProgram& flat);
+HsaLoadedKernel compile_or_load_mlir_kernel_global(const FlattenedProgram& flat);
 
 }  // namespace gpu
 }  // namespace clifft

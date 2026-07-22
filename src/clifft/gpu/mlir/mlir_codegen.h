@@ -23,6 +23,10 @@ namespace gpu {
 /// Returns empty string on failure.
 std::string generate_mlir_kernel_llvmir(const FlattenedProgram& flat,
                                          const std::string& gpu_arch);
+std::string generate_mlir_kernel_llvmir_coop(const FlattenedProgram& flat,
+                                              const std::string& gpu_arch);
+std::string generate_mlir_kernel_llvmir_global(const FlattenedProgram& flat,
+                                                const std::string& gpu_arch);
 
 }  // namespace gpu
 }  // namespace clifft

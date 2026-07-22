@@ -177,6 +177,120 @@ HsaLoadedKernel compile_or_load_mlir_kernel(const FlattenedProgram& flat) {
     return hsa_load_kernel(hsaco_path, "compiled_mlir_kernel", 0);
 }
 
+HsaLoadedKernel compile_or_load_mlir_kernel_coop(const FlattenedProgram& flat) {
+    HsaLoadedKernel lk;
+    auto& rt = hsa_runtime();
+    std::string gpu_arch = rt.device(0).arch_name;
+
+    std::string llvmir = generate_mlir_kernel_llvmir_coop(flat, gpu_arch);
+    if (llvmir.empty()) {
+        std::cerr << "[clifft-mlir-coop] LLVM-IR generation failed\n";
+        return lk;
+    }
+
+    std::string hash = fnv1a_hex_mlir(llvmir + gpu_arch);
+    std::string dir = mlir_cache_dir();
+    std::string hsaco_path = dir + "/mlir_coop_" + hash + "_" + gpu_arch + ".hsaco";
+
+    if (!std::filesystem::exists(hsaco_path)) {
+        std::string tmp_ll = "/tmp/clifft_mlir_coop_" + hash + ".ll";
+        std::string tmp_obj = "/tmp/clifft_mlir_coop_" + hash + ".o";
+        { std::ofstream f(tmp_ll); if (!f) return lk; f << llvmir; }
+
+        auto t0 = std::chrono::steady_clock::now();
+        std::string llc = find_llc();
+        std::ostringstream cmd_llc;
+        cmd_llc << "\"" << llc << "\" --march=amdgcn --mcpu=" << gpu_arch
+                << " -mattr=+wavefrontsize64 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
+        std::string out_llc;
+        int rc_llc = run_cmd(cmd_llc.str(), out_llc);
+
+        if (rc_llc == 0) {
+            std::string lld = find_lld();
+            std::ostringstream cmd_lld;
+            cmd_lld << "\"" << lld << "\" -shared -o \"" << hsaco_path << "\" \"" << tmp_obj << "\"";
+            std::string out_lld;
+            int rc_lld = run_cmd(cmd_lld.str(), out_lld);
+            std::filesystem::remove(tmp_obj);
+            if (rc_lld != 0) { rc_llc = -1; }
+        }
+        if (rc_llc != 0) {
+            std::string clangpp = find_clangpp_mlir();
+            std::ostringstream cmd_cl;
+            cmd_cl << "\"" << clangpp << "\" -x ir --offload-arch=" << gpu_arch
+                   << " -O3 --offload-device-only -o \"" << hsaco_path << "\" \"" << tmp_ll << "\"";
+            std::string out_cl;
+            if (run_cmd(cmd_cl.str(), out_cl) != 0) {
+                std::cerr << "[clifft-mlir-coop] COMPILATION FAILED\n";
+                std::filesystem::remove(tmp_ll);
+                return lk;
+            }
+        }
+        std::filesystem::remove(tmp_ll);
+        auto t1 = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        std::cerr << "[clifft-mlir-coop] compiled in " << ms << " ms\n";
+    }
+    return hsa_load_kernel(hsaco_path, "compiled_mlir_kernel_coop", 0);
+}
+
+HsaLoadedKernel compile_or_load_mlir_kernel_global(const FlattenedProgram& flat) {
+    HsaLoadedKernel lk;
+    auto& rt = hsa_runtime();
+    std::string gpu_arch = rt.device(0).arch_name;
+
+    std::string llvmir = generate_mlir_kernel_llvmir_global(flat, gpu_arch);
+    if (llvmir.empty()) {
+        std::cerr << "[clifft-mlir-global] LLVM-IR generation failed\n";
+        return lk;
+    }
+
+    std::string hash = fnv1a_hex_mlir(llvmir + gpu_arch);
+    std::string dir = mlir_cache_dir();
+    std::string hsaco_path = dir + "/mlir_global_" + hash + "_" + gpu_arch + ".hsaco";
+
+    if (!std::filesystem::exists(hsaco_path)) {
+        std::string tmp_ll = "/tmp/clifft_mlir_global_" + hash + ".ll";
+        std::string tmp_obj = "/tmp/clifft_mlir_global_" + hash + ".o";
+        { std::ofstream f(tmp_ll); if (!f) return lk; f << llvmir; }
+
+        auto t0 = std::chrono::steady_clock::now();
+        std::string llc = find_llc();
+        std::ostringstream cmd_llc;
+        cmd_llc << "\"" << llc << "\" --march=amdgcn --mcpu=" << gpu_arch
+                << " -mattr=+wavefrontsize64 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
+        std::string out_llc;
+        int rc_llc = run_cmd(cmd_llc.str(), out_llc);
+
+        if (rc_llc == 0) {
+            std::string lld = find_lld();
+            std::ostringstream cmd_lld;
+            cmd_lld << "\"" << lld << "\" -shared -o \"" << hsaco_path << "\" \"" << tmp_obj << "\"";
+            std::string out_lld;
+            int rc_lld = run_cmd(cmd_lld.str(), out_lld);
+            std::filesystem::remove(tmp_obj);
+            if (rc_lld != 0) { rc_llc = -1; }
+        }
+        if (rc_llc != 0) {
+            std::string clangpp = find_clangpp_mlir();
+            std::ostringstream cmd_cl;
+            cmd_cl << "\"" << clangpp << "\" -x ir --offload-arch=" << gpu_arch
+                   << " -O3 --offload-device-only -o \"" << hsaco_path << "\" \"" << tmp_ll << "\"";
+            std::string out_cl;
+            if (run_cmd(cmd_cl.str(), out_cl) != 0) {
+                std::cerr << "[clifft-mlir-global] COMPILATION FAILED\n";
+                std::filesystem::remove(tmp_ll);
+                return lk;
+            }
+        }
+        std::filesystem::remove(tmp_ll);
+        auto t1 = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        std::cerr << "[clifft-mlir-global] compiled in " << ms << "\n";
+    }
+    return hsa_load_kernel(hsaco_path, "compiled_mlir_kernel_global", 0);
+}
+
 }  // namespace gpu
 }  // namespace clifft
 
