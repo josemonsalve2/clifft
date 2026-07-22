@@ -2068,6 +2068,8 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         bool need_global_buffers =
             use_global_coop_kernel ||
             (options.hybrid && flat.peak_rank > kSharedMaxPeakRank &&
+             flat.peak_rank <= kGlobalMaxPeakRank) ||
+            (options.mlir && flat.peak_rank > kSharedMaxPeakRank &&
              flat.peak_rank <= kGlobalMaxPeakRank);
         if (need_global_buffers) {
             size_t v_count = static_cast<size_t>(global_worker_blocks) * kGlobalMaxAmplitudes;
@@ -2237,6 +2239,67 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                 std::cerr << "[clifft-gpu] FATAL: MLIR NOT COMPILED IN (CLIFFT_ENABLE_MLIR=OFF)\n";
                 std::abort();
 #endif
+            } else if (options.mlir && flat.peak_rank <= kSharedMaxPeakRank) {
+#ifdef CLIFFT_ENABLE_MLIR
+                // MLIR→LLVM-IR megakernel via HSA dispatch (coop tier, rank 5-10)
+                static HsaLoadedKernel hsa_ck_mlir_coop{};
+                if (!hsa_ck_mlir_coop.valid) {
+                    hsa_ck_mlir_coop = compile_or_load_mlir_kernel_coop(flat);
+                }
+                if (!hsa_ck_mlir_coop.valid) {
+                    std::cerr << "[clifft-gpu] FATAL: MLIR coop kernel failed — aborting\n";
+                    std::abort();
+                }
+                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
+                           "clear coop MLIR counts");
+                struct { uint64_t so; uint64_t bs; uint64_t sd;
+                         BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs_coop;
+                kargs_coop.so = shot_offset; kargs_coop.bs = batch_shots;
+                kargs_coop.sd = options.seed; kargs_coop.bc = buffers.block_counts;
+                kargs_coop.nobs = flat.num_observables; kargs_coop.nexp = flat.num_exp_vals;
+                uint32_t coop_blocks = static_cast<uint32_t>(batch_shots);
+                kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir_coop, 0,
+                    coop_blocks * block_size, block_size,
+                    &kargs_coop, sizeof(kargs_coop));
+#else
+                std::cerr << "[clifft-gpu] FATAL: MLIR NOT COMPILED IN\n";
+                std::abort();
+#endif
+            } else if (options.mlir && flat.peak_rank <= kGlobalMaxPeakRank) {
+#ifdef CLIFFT_ENABLE_MLIR
+                // MLIR→LLVM-IR megakernel via HSA dispatch (global tier, rank 11-19)
+                static HsaLoadedKernel hsa_ck_mlir_global{};
+                if (!hsa_ck_mlir_global.valid) {
+                    hsa_ck_mlir_global = compile_or_load_mlir_kernel_global(flat);
+                }
+                if (!hsa_ck_mlir_global.valid) {
+                    std::cerr << "[clifft-gpu] FATAL: MLIR global kernel failed — aborting\n";
+                    std::abort();
+                }
+                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
+                           "clear global MLIR counts");
+                check_hip(hipMemset(buffers.work_counter, 0, kNumXCDs * sizeof(uint64_t)),
+                           "clear MLIR work counters");
+                struct { uint64_t so; uint64_t bs; uint64_t sd;
+                         GpuComplex* gv; GpuComplex* gs; uint64_t* wc;
+                         BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs_global;
+                kargs_global.so = shot_offset; kargs_global.bs = batch_shots;
+                kargs_global.sd = options.seed;
+                kargs_global.gv = buffers.global_v; kargs_global.gs = buffers.global_scratch;
+                kargs_global.wc = buffers.work_counter;
+                kargs_global.bc = buffers.block_counts;
+                kargs_global.nobs = flat.num_observables; kargs_global.nexp = flat.num_exp_vals;
+                kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir_global, 0,
+                    batch_blocks * block_size, block_size,
+                    &kargs_global, sizeof(kargs_global));
+#else
+                std::cerr << "[clifft-gpu] FATAL: MLIR NOT COMPILED IN\n";
+                std::abort();
+#endif
+            } else if (options.mlir) {
+                std::cerr << "[clifft-gpu] FATAL: --mlir rank " << flat.peak_rank
+                          << " exceeds kGlobalMaxPeakRank (" << kGlobalMaxPeakRank << ") — aborting\n";
+                std::abort();
             // SVM interpreter paths (no --hybrid / --mlir)
             } else if (use_shared_coop_kernel) {
                 check_hip(hipEventRecord(start), "record start event");
