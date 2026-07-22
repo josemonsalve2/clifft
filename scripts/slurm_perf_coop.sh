@@ -20,8 +20,20 @@ done
 
 rm -rf "$HOME/.clifft/kernel_cache/mlir" 2>/dev/null
 
-echo "Using existing binary: $BIN"
-ls -la "$BIN" || { echo "FATAL: binary not found"; exit 1; }
+# Build fresh
+export PATH="/home/jmonsalv/software/bin:$HOME/.local/bin:$PATH"
+if ! command -v cmake &>/dev/null; then pip install --user --break-system-packages cmake 2>&1 | tail -3; fi
+GPU_ARCH=$(rocm_agent_enumerator | grep gfx | head -1)
+echo "Building for $GPU_ARCH..."
+rm -rf "$BUILD"
+mkdir -p "$BUILD" && cd "$BUILD"
+cmake "$BASE" -DCLIFFT_ENABLE_HIP=ON -DCLIFFT_ENABLE_MLIR=ON \
+    -DCMAKE_HIP_ARCHITECTURES=$GPU_ARCH \
+    -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3
+make -j2 run_gpu 2>&1 | tail -10
+cd "$BASE"
+if [ ! -x "$BIN" ]; then echo "FATAL: build failed"; exit 1; fi
+echo "Build OK"
 
 SHOTS=100000
 
