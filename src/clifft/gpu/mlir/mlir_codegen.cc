@@ -29,8 +29,8 @@
 
 #ifdef CLIFFT_ENABLE_MLIR
 
-#include "clifft/gpu/mlir_codegen.h"
-#include "clifft/gpu/kernel_codegen.h"  // UsedFunctions, analyze_used_functions
+#include "clifft/gpu/mlir/mlir_codegen.h"
+#include "clifft/gpu/codegen/kernel_codegen.h"  // UsedFunctions, analyze_used_functions
 #include "clifft/gpu/gpu_types.h"
 
 #include <array>

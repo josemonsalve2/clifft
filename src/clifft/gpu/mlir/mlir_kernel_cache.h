@@ -3,7 +3,7 @@
 #ifdef CLIFFT_ENABLE_MLIR
 
 #include "clifft/gpu/device_program.h"
-#include "clifft/gpu/hsa_kernel_dispatch.h"
+#include "clifft/gpu/runtime/hsa_kernel_dispatch.h"
 
 namespace clifft {
 namespace gpu {

@@ -6,10 +6,10 @@
 
 #ifdef CLIFFT_ENABLE_MLIR
 
-#include "clifft/gpu/mlir_kernel_cache.h"
-#include "clifft/gpu/mlir_codegen.h"
-#include "clifft/gpu/hsa_runtime.h"
-#include "clifft/gpu/hsa_kernel_dispatch.h"
+#include "clifft/gpu/mlir/mlir_kernel_cache.h"
+#include "clifft/gpu/mlir/mlir_codegen.h"
+#include "clifft/gpu/runtime/hsa_runtime.h"
+#include "clifft/gpu/runtime/hsa_kernel_dispatch.h"
 
 #include <array>
 #include <chrono>
