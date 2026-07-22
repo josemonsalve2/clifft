@@ -94,6 +94,7 @@ if(CLIFFT_ENABLE_HIP)
         gpu/device_program.cc
         gpu/kernel_codegen.cc
         gpu/hsa_runtime.cc
+        gpu/hsa_kernel_dispatch.cc
     )
     set_source_files_properties(gpu/hip_sampler.hip PROPERTIES LANGUAGE HIP)
     set_source_files_properties(gpu/hip_sampler.hip
