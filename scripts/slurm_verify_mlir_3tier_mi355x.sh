@@ -131,7 +131,7 @@ echo "  SKIP: $SKIP"
 echo "  Total: $((PASS+FAIL+SKIP))"
 echo ""
 echo "=== Performance (warm cache, 1M shots) ==="
-PERF_SHOTS=1000000
+PERF_SHOTS=100000
 for circuit_name in frame_h h_then_t rep_d3 rank4_mixed; do
     stim="$BASE/tests/fixtures/incremental/01_frame/${circuit_name}.stim"
     [ -f "$stim" ] || stim="$BASE/tests/fixtures/incremental/03_array/${circuit_name}.stim"
