@@ -83,6 +83,22 @@ std::string fresh_ssa() {
 
 const double kInvSqrt2 = 0.70710678118654752440084436210484903928;
 
+std::string emit_const_i64(std::ostringstream& out, uint64_t val) {
+    std::string name = fresh_ssa();
+    out << "  " << name << " = llvm.mlir.constant(" << val << " : i64) : i64\n";
+    return name;
+}
+std::string emit_const_i32(std::ostringstream& out, int32_t val) {
+    std::string name = fresh_ssa();
+    out << "  " << name << " = llvm.mlir.constant(" << val << " : i32) : i32\n";
+    return name;
+}
+std::string emit_const_i1(std::ostringstream& out, bool val) {
+    std::string name = fresh_ssa();
+    out << "  " << name << " = llvm.mlir.constant(" << (val ? "true" : "false") << ") : i1\n";
+    return name;
+}
+
 // -----------------------------------------------------------------------
 // Bit manipulation helpers for Pauli frame tracking
 // -----------------------------------------------------------------------
@@ -351,7 +367,8 @@ void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt
     out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
     out << "  " << ak_m2 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
     std::string ak_m2b = fresh_ssa();
-    out << "  " << ak_m2b << " = llvm.sub " << ak64 << ", llvm.mlir.constant(2 : i64) : i64\n";
+    std::string c2_i64 = emit_const_i64(out, 2);
+    out << "  " << ak_m2b << " = llvm.sub " << ak64 << ", " << c2_i64 << " : i64\n";
     out << "  " << iters << " = llvm.shl %c1_i64, " << ak_m2b << " : i64\n";
 
     char cbuf[32], tbuf[32];
@@ -536,8 +553,8 @@ void emit_store_complex64_packed(std::ostringstream& out,
     out << "  " << re_i64 << " = llvm.zext " << re_i32 << " : i32 to i64\n";
     out << "  " << im_i64 << " = llvm.zext " << im_i32 << " : i32 to i64\n";
     std::string im_sh = fresh_ssa();
-    out << "  " << im_sh << " = llvm.shl " << im_i64
-        << ", llvm.mlir.constant(32 : i64) : i64\n";
+    std::string c32 = emit_const_i64(out, 32);
+    out << "  " << im_sh << " = llvm.shl " << im_i64 << ", " << c32 << " : i64\n";
     std::string packed = fresh_ssa();
     out << "  " << packed << " = llvm.or " << re_i64 << ", " << im_sh << " : i64\n";
     std::string cast_ptr = fresh_ssa();
@@ -588,23 +605,29 @@ void emit_splitmix64(std::ostringstream& out,
                       const std::string& result_name) {
     std::string z = fresh_ssa();
     out << "  " << z << " = llvm.load " << state_ptr << " : !llvm.ptr -> i64\n";
+    std::string k1 = emit_const_i64(out, 11400714819323198485ULL);
     std::string inc = fresh_ssa();
-    out << "  " << inc << " = llvm.add " << z << ", llvm.mlir.constant(11400714819323198485 : i64) : i64\n";
+    out << "  " << inc << " = llvm.add " << z << ", " << k1 << " : i64\n";
     out << "  llvm.store " << inc << ", " << state_ptr << " : i64, !llvm.ptr\n";
+    std::string c30 = emit_const_i64(out, 30);
     std::string z1 = fresh_ssa();
-    out << "  " << z1 << " = llvm.lshr " << inc << ", llvm.mlir.constant(30 : i64) : i64\n";
+    out << "  " << z1 << " = llvm.lshr " << inc << ", " << c30 << " : i64\n";
     std::string z2 = fresh_ssa();
     out << "  " << z2 << " = llvm.xor " << inc << ", " << z1 << " : i64\n";
+    std::string k2 = emit_const_i64(out, 13787848793156543929ULL);
     std::string z3 = fresh_ssa();
-    out << "  " << z3 << " = llvm.mul " << z2 << ", llvm.mlir.constant(13787848793156543929 : i64) : i64\n";
+    out << "  " << z3 << " = llvm.mul " << z2 << ", " << k2 << " : i64\n";
+    std::string c27 = emit_const_i64(out, 27);
     std::string z4 = fresh_ssa();
-    out << "  " << z4 << " = llvm.lshr " << z3 << ", llvm.mlir.constant(27 : i64) : i64\n";
+    out << "  " << z4 << " = llvm.lshr " << z3 << ", " << c27 << " : i64\n";
     std::string z5 = fresh_ssa();
     out << "  " << z5 << " = llvm.xor " << z3 << ", " << z4 << " : i64\n";
+    std::string k3 = emit_const_i64(out, 10723151780598845931ULL);
     std::string z6 = fresh_ssa();
-    out << "  " << z6 << " = llvm.mul " << z5 << ", llvm.mlir.constant(10723151780598845931 : i64) : i64\n";
+    out << "  " << z6 << " = llvm.mul " << z5 << ", " << k3 << " : i64\n";
+    std::string c31 = emit_const_i64(out, 31);
     std::string z7 = fresh_ssa();
-    out << "  " << z7 << " = llvm.lshr " << z6 << ", llvm.mlir.constant(31 : i64) : i64\n";
+    out << "  " << z7 << " = llvm.lshr " << z6 << ", " << c31 << " : i64\n";
     out << "  " << result_name << " = llvm.xor " << z6 << ", " << z7 << " : i64\n";
 }
 
@@ -614,9 +637,9 @@ void emit_rng_seed(std::ostringstream& out,
     // z = seed ^ (0x9e3779b97f4a7c15 * (shot_id + 1))
     std::string shot_p1 = fresh_ssa();
     out << "  " << shot_p1 << " = llvm.add " << shot_id << ", %c1_i64 : i64\n";
+    std::string k_seed = emit_const_i64(out, 11400714819323198485ULL);
     std::string mult = fresh_ssa();
-    out << "  " << mult << " = llvm.mul " << shot_p1
-        << ", llvm.mlir.constant(11400714819323198485 : i64) : i64\n";
+    out << "  " << mult << " = llvm.mul " << shot_p1 << ", " << k_seed << " : i64\n";
     std::string z_init = fresh_ssa();
     out << "  " << z_init << " = llvm.xor " << seed_val << ", " << mult << " : i64\n";
     // Use a temp alloca for splitmix state
@@ -651,15 +674,18 @@ std::string emit_rng_next(std::ostringstream& out) {
     // result = rotl64(s[0] + s[3], 23) + s[0]
     std::string sum03 = fresh_ssa();
     out << "  " << sum03 << " = llvm.add " << s[0] << ", " << s[3] << " : i64\n";
+    std::string c23 = emit_const_i64(out, 23);
+    std::string c41 = emit_const_i64(out, 41);
     std::string shl23 = fresh_ssa(), shr41 = fresh_ssa(), rotl = fresh_ssa();
-    out << "  " << shl23 << " = llvm.shl " << sum03 << ", llvm.mlir.constant(23 : i64) : i64\n";
-    out << "  " << shr41 << " = llvm.lshr " << sum03 << ", llvm.mlir.constant(41 : i64) : i64\n";
+    out << "  " << shl23 << " = llvm.shl " << sum03 << ", " << c23 << " : i64\n";
+    out << "  " << shr41 << " = llvm.lshr " << sum03 << ", " << c41 << " : i64\n";
     out << "  " << rotl << " = llvm.or " << shl23 << ", " << shr41 << " : i64\n";
     std::string result = fresh_ssa();
     out << "  " << result << " = llvm.add " << rotl << ", " << s[0] << " : i64\n";
     // Update state: t = s[1] << 17
     std::string t = fresh_ssa();
-    out << "  " << t << " = llvm.shl " << s[1] << ", llvm.mlir.constant(17 : i64) : i64\n";
+    std::string c17 = emit_const_i64(out, 17);
+    out << "  " << t << " = llvm.shl " << s[1] << ", " << c17 << " : i64\n";
     // s[2] ^= s[0]; s[3] ^= s[1]; s[1] ^= s[2]; s[0] ^= s[3]
     std::string ns2 = fresh_ssa(), ns3 = fresh_ssa(), ns1 = fresh_ssa(), ns0 = fresh_ssa();
     out << "  " << ns2 << " = llvm.xor " << s[2] << ", " << s[0] << " : i64\n";
@@ -671,8 +697,10 @@ std::string emit_rng_next(std::ostringstream& out) {
     out << "  " << ns2t << " = llvm.xor " << ns2 << ", " << t << " : i64\n";
     // s[3] = rotl64(s[3]_new, 45)
     std::string shl45 = fresh_ssa(), shr19 = fresh_ssa(), ns3r = fresh_ssa();
-    out << "  " << shl45 << " = llvm.shl " << ns3 << ", llvm.mlir.constant(45 : i64) : i64\n";
-    out << "  " << shr19 << " = llvm.lshr " << ns3 << ", llvm.mlir.constant(19 : i64) : i64\n";
+    std::string c45 = emit_const_i64(out, 45);
+    std::string c19 = emit_const_i64(out, 19);
+    out << "  " << shl45 << " = llvm.shl " << ns3 << ", " << c45 << " : i64\n";
+    out << "  " << shr19 << " = llvm.lshr " << ns3 << ", " << c19 << " : i64\n";
     out << "  " << ns3r << " = llvm.or " << shl45 << ", " << shr19 << " : i64\n";
     // Store back
     out << "  llvm.store " << ns0 << ", " << sp[0] << " : i64, !llvm.ptr\n";
@@ -685,7 +713,8 @@ std::string emit_rng_next(std::ostringstream& out) {
 std::string emit_rng_uniform(std::ostringstream& out) {
     std::string raw = emit_rng_next(out);
     std::string shifted = fresh_ssa();
-    out << "  " << shifted << " = llvm.lshr " << raw << ", llvm.mlir.constant(11 : i64) : i64\n";
+    std::string c11 = emit_const_i64(out, 11);
+    out << "  " << shifted << " = llvm.lshr " << raw << ", " << c11 << " : i64\n";
     std::string as_f64 = fresh_ssa();
     out << "  " << as_f64 << " = llvm.uitofp " << shifted << " : i64 to f64\n";
     std::string scale = fresh_ssa();
@@ -707,9 +736,9 @@ void emit_meas_dormant_random(std::ostringstream& out,
     // Note: cmp is true when u < 0.5, meaning m_abs = 1 when u >= 0.5
     // Actually: rng.uniform() < 0.5 ? 0 : 1 means m_abs=0 when u<0.5
     // So cmp = (u < 0.5), m_abs = cmp ? 0 : 1 = !cmp
+    std::string true_i1 = emit_const_i1(out, true);
     std::string not_cmp = fresh_ssa();
-    out << "  " << not_cmp << " = llvm.xor " << cmp
-        << ", llvm.mlir.constant(true) : i1\n";
+    out << "  " << not_cmp << " = llvm.xor " << cmp << ", " << true_i1 << " : i1\n";
     std::string m_abs = fresh_ssa();
     out << "  " << m_abs << " = llvm.zext " << not_cmp << " : i1 to i8\n";
 
@@ -1309,7 +1338,8 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
         << "\"s_getreg_b32 $0, hwreg(HW_REG_XCC_ID)\", \"=s\" "
         << ": () -> i32\n";
     std::string xcd_mod = fresh_ssa();
-    out << "  " << xcd_mod << " = llvm.urem " << xcd_raw << ", llvm.mlir.constant(8 : i32) : i32\n";
+    std::string c8_i32 = emit_const_i32(out, 8);
+    out << "  " << xcd_mod << " = llvm.urem " << xcd_raw << ", " << c8_i32 << " : i32\n";
     std::string xcd_i64 = fresh_ssa();
     out << "  " << xcd_i64 << " = llvm.zext " << xcd_mod << " : i32 to i64\n";
     std::string my_counter = fresh_ssa();
