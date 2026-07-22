@@ -20,15 +20,15 @@ echo "GPU arch: $(rocm_agent_enumerator | grep gfx)"
 echo "Node: $(hostname)"
 echo "Date: $(date)"
 
-# Rebuild if needed
-if [ ! -f "$BUILD/run_gpu" ]; then
-    echo "=== Building ==="
-    rm -rf "$BUILD"
-    mkdir -p "$BUILD" && cd "$BUILD"
+# Always rebuild to verify latest source
+echo "=== Building ==="
+rm -rf "$BUILD"
+mkdir -p "$BUILD" && cd "$BUILD"
+{
     cmake "$BASE" -DCLIFFT_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=gfx942 \
         -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3
     make -j$(nproc) run_gpu 2>&1 | tail -3
-fi
+}
 
 BIN="$BUILD/run_gpu"
 echo "Binary: $BIN"

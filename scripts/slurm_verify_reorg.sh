@@ -23,8 +23,8 @@ echo "GPU arch: $(rocm_agent_enumerator | grep gfx)"
 echo "Node: $(hostname)"
 echo "Date: $(date)"
 
-echo "=== Building (post-reorganization) ==="
-BUILD="$BASE/build-gpu-verify-reorg"
+echo "=== Building (post-MLIR-split) ==="
+BUILD="$BASE/build-gpu-verify-mlir"
 rm -rf "$BUILD"
 mkdir -p "$BUILD" && cd "$BUILD"
 cmake "$BASE" -DCLIFFT_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=gfx942 \
@@ -49,11 +49,11 @@ for stim_file in "$BASE"/tests/fixtures/rank_sweep/*.stim "$BASE"/tests/fixtures
     circuit_name=$(basename "$stim_file" .stim)
 
     # SVM reference run
-    svm_out=$(timeout 120 "$BUILD/run_gpu" "$stim_file" --shots 100000 --seed 42 2>/dev/null) || { SKIP=$((SKIP+1)); printf "%-52s %4s %7s\n" "$circuit_name" "?" "SVM_ERR"; continue; }
-    svm_logical=$(echo "$svm_out" | grep 'logical_errors' | awk -F= '{print $2}' | tr -d ' ')
+    svm_out=$(timeout 120 "$BUILD/run_gpu" --circuit "$stim_file" --shots 100000 --seed 42 2>/dev/null) || { SKIP=$((SKIP+1)); printf "%-52s %4s %7s\n" "$circuit_name" "?" "SVM_ERR"; continue; }
+    svm_logical=$(echo "$svm_out" | grep '"logical_errors"' | grep -o '[0-9]*')
 
     # Compiled kernel run
-    ck_out=$(timeout 120 "$BUILD/run_gpu" "$stim_file" --shots 100000 --seed 42 --hybrid 2>/dev/null)
+    ck_out=$(timeout 120 "$BUILD/run_gpu" --circuit "$stim_file" --shots 100000 --seed 42 --hybrid 2>/dev/null)
     ck_rc=$?
     if [ $ck_rc -eq 124 ]; then
         TIMEOUT=$((TIMEOUT+1))
@@ -65,7 +65,7 @@ for stim_file in "$BASE"/tests/fixtures/rank_sweep/*.stim "$BASE"/tests/fixtures
         printf "%-52s %4s %7s\n" "$circuit_name" "?" "CK_ERR"
         continue
     fi
-    ck_logical=$(echo "$ck_out" | grep 'logical_errors' | awk -F= '{print $2}' | tr -d ' ')
+    ck_logical=$(echo "$ck_out" | grep '"logical_errors"' | grep -o '[0-9]*')
 
     if [ "$svm_logical" = "$ck_logical" ]; then
         PASS=$((PASS+1))
