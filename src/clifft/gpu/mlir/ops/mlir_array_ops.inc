@@ -67,7 +67,7 @@ case Opcode::OP_ARRAY_T: {
 
     std::string hdr = fresh_label("t_hdr"), body = fresh_label("t_body"), exit_lbl = fresh_label("t_exit");
     std::string lv_t = fresh_ssa();
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    out << "  llvm.br ^" << hdr << "(" << coop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv_t << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_t << ", " << iters << " : i64\n";
@@ -94,7 +94,7 @@ case Opcode::OP_ARRAY_T: {
     out << "  " << res << " = llvm.insertvalue " << im_out << ", " << res1 << "[1] : !llvm.struct<(f32, f32)>\n";
     emit_store_v(idx, res);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv_t << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_t << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     break;
@@ -128,7 +128,7 @@ case Opcode::OP_ARRAY_T_DAG: {
     out << "  " << are_c << " = llvm.mlir.constant(" << re_buf << " : f32) : f32\n";
     std::string lv_td = fresh_ssa();
     std::string hdr = fresh_label("td_hdr"), body = fresh_label("td_body"), exit_lbl = fresh_label("td_exit");
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    out << "  llvm.br ^" << hdr << "(" << coop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv_td << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_td << ", " << iters << " : i64\n";
@@ -153,7 +153,7 @@ case Opcode::OP_ARRAY_T_DAG: {
     out << "  " << res << " = llvm.insertvalue " << im_out << ", " << r1 << "[1] : !llvm.struct<(f32, f32)>\n";
     emit_store_v(idx, res);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv_td << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_td << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     break;
@@ -195,7 +195,7 @@ case Opcode::OP_ARRAY_CZ: {
 
     std::string lv_cz = fresh_ssa();
     std::string hdr = fresh_label("cz_hdr"), body = fresh_label("cz_body"), exit_lbl = fresh_label("cz_exit");
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    out << "  llvm.br ^" << hdr << "(" << coop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv_cz << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_cz << ", " << iters << " : i64\n";
@@ -219,7 +219,7 @@ case Opcode::OP_ARRAY_CZ: {
     out << "  " << res << " = llvm.insertvalue " << neg_im << ", " << r1 << "[1] : !llvm.struct<(f32, f32)>\n";
     emit_store_v(idx, res);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv_cz << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_cz << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame update: pz[axis_1] ^= px[axis_2]; pz[axis_2] ^= px[axis_1]
@@ -254,7 +254,7 @@ case Opcode::OP_ARRAY_SWAP: {
 
     std::string lv_sw = fresh_ssa();
     std::string hdr = fresh_label("sw_hdr"), body = fresh_label("sw_body"), exit_lbl = fresh_label("sw_exit");
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    out << "  llvm.br ^" << hdr << "(" << coop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv_sw << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_sw << ", " << iters << " : i64\n";
@@ -269,7 +269,7 @@ case Opcode::OP_ARRAY_SWAP: {
     emit_store_v(idx_a, vb);
     emit_store_v(idx_b, va);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv_sw << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_sw << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame: swap px bits, swap pz bits
@@ -321,7 +321,7 @@ case Opcode::OP_ARRAY_ROT: {
 
     std::string lv_rot = fresh_ssa();
     std::string hdr = fresh_label("rot_hdr"), body_lbl = fresh_label("rot_body"), exit_lbl = fresh_label("rot_exit");
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    out << "  llvm.br ^" << hdr << "(" << coop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv_rot << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_rot << ", " << iters << " : i64\n";
@@ -349,7 +349,7 @@ case Opcode::OP_ARRAY_ROT: {
     out << "  " << res << " = llvm.insertvalue " << im_out << ", " << r1 << "[1] : !llvm.struct<(f32, f32)>\n";
     emit_store_v(idx, res);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv_rot << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_rot << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     break;
@@ -377,7 +377,7 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
 
     std::string lv_mcn = fresh_ssa();
     std::string hdr = fresh_label("mcn_hdr"), body_lbl = fresh_label("mcn_body"), exit_lbl = fresh_label("mcn_exit");
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    out << "  llvm.br ^" << hdr << "(" << coop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv_mcn << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_mcn << ", " << iters << " : i64\n";
@@ -414,7 +414,7 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
     out << "  llvm.br ^" << merge_lbl << "\n";
     out << "^" << merge_lbl << ":\n";
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv_mcn << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_mcn << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame update: for each bit j in mask, pz[j] ^= px[axis_1]
@@ -476,7 +476,7 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
 
     std::string lv_mcz = fresh_ssa();
     std::string hdr = fresh_label("mcz_hdr"), body_lbl = fresh_label("mcz_body"), exit_lbl = fresh_label("mcz_exit");
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    out << "  llvm.br ^" << hdr << "(" << coop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv_mcz << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_mcz << ", " << iters << " : i64\n";
@@ -512,7 +512,7 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
     out << "  llvm.br ^" << merge_lbl << "\n";
     out << "^" << merge_lbl << ":\n";
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv_mcz << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv_mcz << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame update: for each bit j in mask, pz[j] ^= px[axis_1]; pz[axis_1] ^= px[j]

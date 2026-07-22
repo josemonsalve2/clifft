@@ -72,6 +72,7 @@ namespace {
 
 static int label_counter = 0;
 static int ssa_counter = 100;
+static bool cooperative_mode = false;
 
 std::string fresh_label(const std::string& prefix = "bb") {
     return prefix + std::to_string(label_counter++);
@@ -340,8 +341,10 @@ void emit_array_h_static(std::ostringstream& out, uint32_t axis) {
     std::string hdr = fresh_label("h_hdr");
     std::string body = fresh_label("h_body");
     std::string exit = fresh_label("h_exit");
-    std::string lv = fresh_ssa(); // unique loop var name
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    std::string lv = fresh_ssa();
+    std::string loop_init = cooperative_mode ? "%tidx" : "%c0_i64";
+    std::string loop_step = cooperative_mode ? "%c256_i64" : "%c1_i64";
+    out << "  llvm.br ^" << hdr << "(" << loop_init << " : i64)\n";
     out << "^" << hdr << "(" << lv << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv << ", " << iters << " : i64\n";
@@ -360,9 +363,10 @@ void emit_array_h_static(std::ostringstream& out, uint32_t axis) {
     emit_store_v(out, idx1, emit_cscale_f64(out, diff, kInvSqrt2));
 
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv << ", " << loop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit << ":\n";
+    if (cooperative_mode) emit_barrier(out);
     (void)inv_sq2;
 }
 
@@ -394,7 +398,9 @@ void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt
     std::string body = fresh_label("cn_body");
     std::string exit_lbl = fresh_label("cn_exit");
     std::string lv = fresh_ssa();
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    std::string cn_init = cooperative_mode ? "%tidx" : "%c0_i64";
+    std::string cn_step = cooperative_mode ? "%c256_i64" : "%c1_i64";
+    out << "  llvm.br ^" << hdr << "(" << cn_init << " : i64)\n";
     out << "^" << hdr << "(" << lv << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv << ", " << iters << " : i64\n";
@@ -421,9 +427,10 @@ void emit_array_cnot_static(std::ostringstream& out, uint32_t ctrl, uint32_t tgt
     emit_store_v(out, base_t, va);
 
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv << ", " << cn_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
+    if (cooperative_mode) emit_barrier(out);
     (void)ak_m2;
 }
 
@@ -447,7 +454,9 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
     std::string body = fresh_label("ph_body");
     std::string exit_lbl = fresh_label("ph_exit");
     std::string lv = fresh_ssa();
-    out << "  llvm.br ^" << hdr << "(%c0_i64 : i64)\n";
+    std::string ph_init = cooperative_mode ? "%tidx" : "%c0_i64";
+    std::string ph_step = cooperative_mode ? "%c256_i64" : "%c1_i64";
+    out << "  llvm.br ^" << hdr << "(" << ph_init << " : i64)\n";
     out << "^" << hdr << "(" << lv << ": i64):\n";
     std::string cond = fresh_ssa();
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv << ", " << iters << " : i64\n";
@@ -460,9 +469,10 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
     std::string phased = emit_cmul_const(out, vc, phs_re, phs_im);
     emit_store_v(out, idx, phased);
     std::string i_next = fresh_ssa();
-    out << "  " << i_next << " = llvm.add " << lv << ", %c1_i64 : i64\n";
+    out << "  " << i_next << " = llvm.add " << lv << ", " << ph_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
+    if (cooperative_mode) emit_barrier(out);
 }
 
 // -----------------------------------------------------------------------
@@ -1341,6 +1351,7 @@ void emit_expand_t(std::ostringstream& out, uint32_t axis, bool dagger) {
 std::string emit_mlir_text(const FlattenedProgram& flat) {
     label_counter = 0;
     ssa_counter = 100;
+    cooperative_mode = false;
     UsedFunctions uf = analyze_used_functions(flat);
 
     std::ostringstream out;
@@ -1548,6 +1559,8 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     // Instruction dispatch — per-category ops included from ops/*.inc
     // -----------------------------------------------------------------------
     using Opcode = clifft::Opcode;
+    std::string coop_init = cooperative_mode ? "%tidx" : "%c0_i64";
+    std::string coop_step = cooperative_mode ? "%c256_i64" : "%c1_i64";
     out << "  // --- Instruction sequence (" << flat.instrs.size() << " ops) ---\n";
 
     for (size_t pc = 0; pc < flat.instrs.size(); ++pc) {
@@ -1780,6 +1793,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
 std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     label_counter = 0;
     ssa_counter = 100;
+    cooperative_mode = true;
 
     std::ostringstream out;
     uint32_t num_amps = 1u << flat.peak_rank;
@@ -2015,6 +2029,8 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     };
 
     using Opcode = clifft::Opcode;
+    std::string coop_init = "%tidx";
+    std::string coop_step = "%c256_i64";
     out << "  // --- Coop instruction sequence (" << flat.instrs.size() << " ops) ---\n";
 
     for (size_t pc = 0; pc < flat.instrs.size(); ++pc) {
@@ -2125,6 +2141,7 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
 std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     label_counter = 0;
     ssa_counter = 100;
+    cooperative_mode = true;
 
     std::ostringstream out;
 
@@ -2416,6 +2433,8 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     };
 
     using Opcode = clifft::Opcode;
+    std::string coop_init = "%tidx";
+    std::string coop_step = "%c256_i64";
     out << "  // --- Global instruction sequence (" << flat.instrs.size() << " ops) ---\n";
 
     for (size_t pc = 0; pc < flat.instrs.size(); ++pc) {
