@@ -765,6 +765,226 @@ void emit_meas_dormant_random(std::ostringstream& out,
     out << "  llvm.store " << meas_val << ", " << meas_p << " : i8, !llvm.ptr\n";
 }
 
+void emit_meas_active_diagonal(std::ostringstream& out,
+                                uint32_t axis, uint32_t classical_idx, bool sign) {
+    // half = 1 << (active_k - 1)
+    std::string ak = fresh_ssa();
+    out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
+    std::string ak64 = fresh_ssa();
+    out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
+    std::string ak_m1 = fresh_ssa();
+    out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
+    std::string half = fresh_ssa();
+    out << "  " << half << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+
+    // Read px bit at axis
+    char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", axis);
+    std::string axis_i32 = fresh_ssa();
+    out << "  " << axis_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
+    std::string px_bit = emit_bit_get(out, "%px_ptr", axis_i32);
+
+    // Sum probabilities: p0 = sum cnorm(v[i]) for i in [0,half), p1 for [half,2*half)
+    std::string p_hdr = fresh_label("p_hdr"), p_body = fresh_label("p_body"), p_done = fresh_label("p_done");
+    out << "  llvm.br ^" << p_hdr << "(%c0_i64, %c0_i64, %c0_i64 : i64, i64, i64)\n";
+    // Hack: use i64 to carry f64 via bitcast since MLIR block args need consistent types
+    // Actually just use f64 directly
+    // Re-do: block args can be f64
+    // Let me use a simpler approach — accumulate via alloca
+    // Use p0_ptr and p1_ptr allocas
+    std::string p0_ptr = fresh_ssa(), p1_ptr = fresh_ssa();
+    // Can't alloca here (not in entry block). Use a different approach:
+    // Compute the sum in a loop with block arguments carrying f64 accumulators
+
+    // Restart: proper loop with f64 block arguments
+    std::string p_hdr2 = fresh_label("psum_hdr");
+    std::string p_body2 = fresh_label("psum_body");
+    std::string p_done2 = fresh_label("psum_done");
+    std::string f0 = fresh_ssa();
+    out << "  " << f0 << " = llvm.mlir.constant(0.0 : f64) : f64\n";
+    out << "  llvm.br ^" << p_hdr2 << "(%c0_i64, " << f0 << ", " << f0 << " : i64, f64, f64)\n";
+    out << "^" << p_hdr2 << "(%psum_i: i64, %psum_p0: f64, %psum_p1: f64):\n";
+    std::string pcond = fresh_ssa();
+    out << "  " << pcond << " = llvm.icmp \"ult\" %psum_i, " << half << " : i64\n";
+    out << "  llvm.cond_br " << pcond << ", ^" << p_body2 << ", ^" << p_done2 << "\n";
+    out << "^" << p_body2 << ":\n";
+    // Load v[i] and v[i + half]
+    std::string vi = emit_load_v(out, "%psum_i");
+    std::string idx_hi = fresh_ssa();
+    out << "  " << idx_hi << " = llvm.add %psum_i, " << half << " : i64\n";
+    std::string vh = emit_load_v(out, idx_hi);
+    std::string n0 = emit_cnorm(out, vi);
+    std::string n1 = emit_cnorm(out, vh);
+    std::string new_p0 = fresh_ssa(), new_p1 = fresh_ssa();
+    out << "  " << new_p0 << " = llvm.fadd %psum_p0, " << n0 << " : f64\n";
+    out << "  " << new_p1 << " = llvm.fadd %psum_p1, " << n1 << " : f64\n";
+    std::string next_i = fresh_ssa();
+    out << "  " << next_i << " = llvm.add %psum_i, %c1_i64 : i64\n";
+    out << "  llvm.br ^" << p_hdr2 << "(" << next_i << ", " << new_p0 << ", " << new_p1 << " : i64, f64, f64)\n";
+    out << "^" << p_done2 << ":\n";
+
+    // sample_branch: if prob1 <= eps return 0; if prob0 <= eps return 1; else rng
+    std::string total = fresh_ssa();
+    out << "  " << total << " = llvm.fadd %psum_p0, %psum_p1 : f64\n";
+    std::string eps_k = fresh_ssa();
+    out << "  " << eps_k << " = llvm.mlir.constant(1.0e-300 : f64) : f64\n";
+    std::string eps = fresh_ssa();
+    out << "  " << eps << " = llvm.fmul " << eps_k << ", " << total << " : f64\n";
+    // Check if p1 <= eps → branch = 0
+    std::string p1_small = fresh_ssa();
+    out << "  " << p1_small << " = llvm.fcmp \"ole\" %psum_p1, " << eps << " : f64\n";
+    // Check if p0 <= eps → branch = 1
+    std::string p0_small = fresh_ssa();
+    out << "  " << p0_small << " = llvm.fcmp \"ole\" %psum_p0, " << eps << " : f64\n";
+    // RNG sample
+    std::string u = emit_rng_uniform(out);
+    std::string threshold = fresh_ssa();
+    out << "  " << threshold << " = llvm.fmul " << u << ", " << total << " : f64\n";
+    std::string rng_b = fresh_ssa();
+    out << "  " << rng_b << " = llvm.fcmp \"oge\" " << threshold << ", %psum_p0 : f64\n";
+    // Final branch: p1_small ? 0 : (p0_small ? 1 : rng_b)
+    std::string b_sel1 = fresh_ssa();
+    out << "  " << b_sel1 << " = llvm.select " << p0_small << ", "
+        << emit_const_i1(out, true) << ", " << rng_b << " : i1, i1\n";
+    std::string b_final = fresh_ssa();
+    out << "  " << b_final << " = llvm.select " << p1_small << ", "
+        << emit_const_i1(out, false) << ", " << b_sel1 << " : i1, i1\n";
+
+    // m_abs = b ^ px
+    std::string b_i8 = fresh_ssa();
+    out << "  " << b_i8 << " = llvm.zext " << b_final << " : i1 to i8\n";
+    std::string px_i8 = fresh_ssa();
+    out << "  " << px_i8 << " = llvm.zext " << px_bit << " : i1 to i8\n";
+    std::string m_abs = fresh_ssa();
+    out << "  " << m_abs << " = llvm.xor " << b_i8 << ", " << px_i8 << " : i8\n";
+
+    // meas[classical_idx] = m_abs ^ sign
+    std::string meas_val = m_abs;
+    if (sign) {
+        std::string xored = fresh_ssa();
+        out << "  " << xored << " = llvm.xor " << m_abs << ", %c1_i8 : i8\n";
+        meas_val = xored;
+    }
+    char cidx[32]; snprintf(cidx, sizeof(cidx), "%u", classical_idx);
+    std::string cidx_i64 = emit_const_i64(out, classical_idx);
+    std::string meas_p = fresh_ssa();
+    out << "  " << meas_p << " = llvm.getelementptr inbounds %meas_ptr["
+        << cidx_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    out << "  llvm.store " << meas_val << ", " << meas_p << " : i8, !llvm.ptr\n";
+
+    // If b != 0: copy v[i+half] → v[i] for i in [0, half)
+    std::string lbl_copy = fresh_label("copy");
+    std::string lbl_nocopy = fresh_label("nocopy");
+    out << "  llvm.cond_br " << b_final << ", ^" << lbl_copy << ", ^" << lbl_nocopy << "\n";
+    out << "^" << lbl_copy << ":\n";
+    std::string cp_hdr = fresh_label("cp_hdr"), cp_body = fresh_label("cp_body"), cp_done = fresh_label("cp_done");
+    out << "  llvm.br ^" << cp_hdr << "(%c0_i64 : i64)\n";
+    out << "^" << cp_hdr << "(%cp_i: i64):\n";
+    std::string cp_cond = fresh_ssa();
+    out << "  " << cp_cond << " = llvm.icmp \"ult\" %cp_i, " << half << " : i64\n";
+    out << "  llvm.cond_br " << cp_cond << ", ^" << cp_body << ", ^" << cp_done << "\n";
+    out << "^" << cp_body << ":\n";
+    std::string cp_src = fresh_ssa();
+    out << "  " << cp_src << " = llvm.add %cp_i, " << half << " : i64\n";
+    std::string cp_val = emit_load_v(out, cp_src);
+    emit_store_v(out, "%cp_i", cp_val);
+    std::string cp_next = fresh_ssa();
+    out << "  " << cp_next << " = llvm.add %cp_i, %c1_i64 : i64\n";
+    out << "  llvm.br ^" << cp_hdr << "(" << cp_next << " : i64)\n";
+    out << "^" << cp_done << ":\n";
+    out << "  llvm.br ^" << lbl_nocopy << "\n";
+    out << "^" << lbl_nocopy << ":\n";
+
+    // active_k--
+    std::string new_ak = fresh_ssa();
+    out << "  " << new_ak << " = llvm.sub " << ak << ", %c1_i32 : i32\n";
+    out << "  llvm.store " << new_ak << ", %active_k_ptr : i32, !llvm.ptr\n";
+    // bit_set(px, axis, m_abs != 0)
+    std::string m_ne0 = fresh_ssa();
+    out << "  " << m_ne0 << " = llvm.icmp \"ne\" " << m_abs << ", %c0_i8 : i8\n";
+    emit_bit_set(out, "%px_ptr", axis_i32, m_ne0);
+    std::string false_val = emit_const_i1(out, false);
+    emit_bit_set(out, "%pz_ptr", axis_i32, false_val);
+}
+
+void emit_expand_plain(std::ostringstream& out) {
+    std::string ak = fresh_ssa();
+    out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
+    std::string ak64 = fresh_ssa();
+    out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
+    std::string half = fresh_ssa();
+    out << "  " << half << " = llvm.shl %c1_i64, " << ak64 << " : i64\n";
+
+    // Copy v[i] → v[i+half] for i in [0, half)
+    std::string ex_hdr = fresh_label("ex_hdr"), ex_body = fresh_label("ex_body"), ex_done = fresh_label("ex_done");
+    out << "  llvm.br ^" << ex_hdr << "(%c0_i64 : i64)\n";
+    out << "^" << ex_hdr << "(%ex_i: i64):\n";
+    std::string ex_cond = fresh_ssa();
+    out << "  " << ex_cond << " = llvm.icmp \"ult\" %ex_i, " << half << " : i64\n";
+    out << "  llvm.cond_br " << ex_cond << ", ^" << ex_body << ", ^" << ex_done << "\n";
+    out << "^" << ex_body << ":\n";
+    std::string src = emit_load_v(out, "%ex_i");
+    std::string dst_idx = fresh_ssa();
+    out << "  " << dst_idx << " = llvm.add %ex_i, " << half << " : i64\n";
+    emit_store_v(out, dst_idx, src);
+    std::string ex_next = fresh_ssa();
+    out << "  " << ex_next << " = llvm.add %ex_i, %c1_i64 : i64\n";
+    out << "  llvm.br ^" << ex_hdr << "(" << ex_next << " : i64)\n";
+    out << "^" << ex_done << ":\n";
+
+    // active_k++
+    std::string new_ak = fresh_ssa();
+    out << "  " << new_ak << " = llvm.add " << ak << ", %c1_i32 : i32\n";
+    out << "  llvm.store " << new_ak << ", %active_k_ptr : i32, !llvm.ptr\n";
+}
+
+void emit_expand_t(std::ostringstream& out, uint32_t axis, bool dagger) {
+    std::string ak = fresh_ssa();
+    out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
+    std::string ak64 = fresh_ssa();
+    out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
+    std::string half = fresh_ssa();
+    out << "  " << half << " = llvm.shl %c1_i64, " << ak64 << " : i64\n";
+
+    // Read px bit
+    char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", axis);
+    std::string axis_i32 = fresh_ssa();
+    out << "  " << axis_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
+    std::string px_bit = emit_bit_get(out, "%px_ptr", axis_i32);
+
+    // Phase: T = (inv_sqrt2, inv_sqrt2), T_dag = (inv_sqrt2, -inv_sqrt2)
+    // If px is set, negate imaginary
+    double imag_base = dagger ? -kInvSqrt2 : kInvSqrt2;
+
+    // v[i + half] = cmul(v[i], phase) for i in [0, half)
+    std::string et_hdr = fresh_label("et_hdr"), et_body = fresh_label("et_body"), et_done = fresh_label("et_done");
+    out << "  llvm.br ^" << et_hdr << "(%c0_i64 : i64)\n";
+    out << "^" << et_hdr << "(%et_i: i64):\n";
+    std::string et_cond = fresh_ssa();
+    out << "  " << et_cond << " = llvm.icmp \"ult\" %et_i, " << half << " : i64\n";
+    out << "  llvm.cond_br " << et_cond << ", ^" << et_body << ", ^" << et_done << "\n";
+    out << "^" << et_body << ":\n";
+    std::string src = emit_load_v(out, "%et_i");
+    // Apply phase: use px_bit to potentially negate imag
+    // cmul_const with conditional negate
+    std::string pos_phase = emit_cmul_const(out, src, kInvSqrt2, imag_base);
+    std::string neg_phase = emit_cmul_const(out, src, kInvSqrt2, -imag_base);
+    std::string phased = fresh_ssa();
+    out << "  " << phased << " = llvm.select " << px_bit << ", " << neg_phase << ", " << pos_phase
+        << " : i1, !llvm.struct<(f32, f32)>\n";
+    std::string dst_idx = fresh_ssa();
+    out << "  " << dst_idx << " = llvm.add %et_i, " << half << " : i64\n";
+    emit_store_v(out, dst_idx, phased);
+    std::string et_next = fresh_ssa();
+    out << "  " << et_next << " = llvm.add %et_i, %c1_i64 : i64\n";
+    out << "  llvm.br ^" << et_hdr << "(" << et_next << " : i64)\n";
+    out << "^" << et_done << ":\n";
+
+    // active_k++
+    std::string new_ak = fresh_ssa();
+    out << "  " << new_ak << " = llvm.add " << ak << ", %c1_i32 : i32\n";
+    out << "  llvm.store " << new_ak << ", %active_k_ptr : i32, !llvm.ptr\n";
+}
+
 }  // anonymous namespace
 
 // -----------------------------------------------------------------------
