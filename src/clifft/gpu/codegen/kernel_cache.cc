@@ -7,10 +7,10 @@
 // Replaces the previous hipModuleLoad/hipModuleGetFunction path.
 // The .hsaco caching on disk is preserved (same hash-based scheme).
 
-#include "clifft/gpu/kernel_cache.h"
-#include "clifft/gpu/kernel_codegen.h"
-#include "clifft/gpu/hsa_runtime.h"
-#include "clifft/gpu/hsa_kernel_dispatch.h"
+#include "clifft/gpu/codegen/kernel_cache.h"
+#include "clifft/gpu/codegen/kernel_codegen.h"
+#include "clifft/gpu/runtime/hsa_runtime.h"
+#include "clifft/gpu/runtime/hsa_kernel_dispatch.h"
 
 #include <sys/wait.h>
 
