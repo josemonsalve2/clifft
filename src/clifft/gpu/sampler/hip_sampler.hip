@@ -2217,12 +2217,14 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     &kargs, sizeof(kargs));
             } else if (options.mlir && flat.peak_rank <= kThreadMaxPeakRank) {
 #ifdef CLIFFT_ENABLE_MLIR
-                // MLIR→LLVM-IR megakernel via HSA dispatch (register tier)
+                // MLIR→LLVM-IR megakernel via PersistentDispatcher (register tier)
                 static HsaLoadedKernel hsa_ck_mlir{};
+                static PersistentDispatcher pd_mlir;
                 if (!hsa_ck_mlir.valid) {
                     hsa_ck_mlir = compile_or_load_mlir_kernel(flat);
                 }
                 if (hsa_ck_mlir.valid) {
+                    if (!pd_mlir.is_bound()) pd_mlir.bind(hsa_ck_mlir, 0);
                     struct { uint64_t so; uint64_t bs; uint64_t sd;
                              BlockCounts* bc;
                              double* nhaz; void* nsites; void* nchans; uint64_t nsites_n;
@@ -2234,7 +2236,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     kargs.nchans = buffers.noise_channels;
                     kargs.nsites_n = static_cast<uint64_t>(flat.noise_sites.size());
                     kargs.nobs = flat.num_observables; kargs.nexp = flat.num_exp_vals;
-                    kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir, 0,
+                    kernel_seconds += pd_mlir.dispatch(
                         batch_blocks * block_size, block_size,
                         &kargs, sizeof(kargs));
                 } else {
@@ -2249,6 +2251,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
 #ifdef CLIFFT_ENABLE_MLIR
                 // MLIR→LLVM-IR megakernel via HSA dispatch (coop tier, rank 5-10)
                 static HsaLoadedKernel hsa_ck_mlir_coop{};
+                static PersistentDispatcher pd_mlir_coop;
                 if (!hsa_ck_mlir_coop.valid) {
                     hsa_ck_mlir_coop = compile_or_load_mlir_kernel_coop(flat);
                 }
@@ -2256,6 +2259,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     std::cerr << "[clifft-gpu] FATAL: MLIR coop kernel failed — aborting\n";
                     std::abort();
                 }
+                if (!pd_mlir_coop.is_bound()) pd_mlir_coop.bind(hsa_ck_mlir_coop, 0);
                 check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
                            "clear coop MLIR counts");
                 struct { uint64_t so; uint64_t bs; uint64_t sd;
@@ -2270,7 +2274,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                 kargs_coop.nsites_n = static_cast<uint64_t>(flat.noise_sites.size());
                 kargs_coop.nobs = flat.num_observables; kargs_coop.nexp = flat.num_exp_vals;
                 uint32_t coop_blocks = static_cast<uint32_t>(batch_shots);
-                kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir_coop, 0,
+                kernel_seconds += pd_mlir_coop.dispatch(
                     coop_blocks * block_size, block_size,
                     &kargs_coop, sizeof(kargs_coop));
 #else
@@ -2279,8 +2283,9 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
 #endif
             } else if (options.mlir && flat.peak_rank <= kGlobalMaxPeakRank) {
 #ifdef CLIFFT_ENABLE_MLIR
-                // MLIR→LLVM-IR megakernel via HSA dispatch (global tier, rank 11-19)
+                // MLIR→LLVM-IR megakernel via PersistentDispatcher (global tier, rank 11-19)
                 static HsaLoadedKernel hsa_ck_mlir_global{};
+                static PersistentDispatcher pd_mlir_global;
                 if (!hsa_ck_mlir_global.valid) {
                     hsa_ck_mlir_global = compile_or_load_mlir_kernel_global(flat);
                 }
@@ -2288,6 +2293,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     std::cerr << "[clifft-gpu] FATAL: MLIR global kernel failed — aborting\n";
                     std::abort();
                 }
+                if (!pd_mlir_global.is_bound()) pd_mlir_global.bind(hsa_ck_mlir_global, 0);
                 check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
                            "clear global MLIR counts");
                 check_hip(hipMemset(buffers.work_counter, 0, kNumXCDs * sizeof(uint64_t)),
@@ -2307,7 +2313,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                 kargs_global.nchans = buffers.noise_channels;
                 kargs_global.nsites_n = static_cast<uint64_t>(flat.noise_sites.size());
                 kargs_global.nobs = flat.num_observables; kargs_global.nexp = flat.num_exp_vals;
-                kernel_seconds += hsa_dispatch_and_wait(hsa_ck_mlir_global, 0,
+                kernel_seconds += pd_mlir_global.dispatch(
                     batch_blocks * block_size, block_size,
                     &kargs_global, sizeof(kargs_global));
 #else
