@@ -777,62 +777,56 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  llvm.cond_br " << is_disc << ", ^" << lbl_done << ", ^" << lbl_agg << "\n";
     out << "^" << lbl_agg << ":\n";
 
-    // atomic add passed++ (offset 0 in BlockCounts)
-    out << "  %bc_passed_ptr = llvm.getelementptr inbounds %block_counts[%c0_i64, 0]"
-        << " : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(i64, i64, !llvm.array<"
-        << kMaxObs << " x i64>, !llvm.array<" << kMaxExpVals << " x f64>, i64)>\n";
-    out << "  " << fresh_ssa() << " = llvm.atomicrmw add %bc_passed_ptr, %c1_i64 monotonic"
+    // atomic add passed++ at byte offset 0 of block_counts
+    // BlockCounts: passed(8) | logical_errors(8) | obs_ones[8](64) | exp_sums[8](64) | count(8)
+    // Use byte-level GEP (treat block_counts as i8*) for simplicity
+    out << "  " << fresh_ssa() << " = llvm.atomicrmw add %block_counts, %c1_i64 monotonic"
         << " : !llvm.ptr, i64\n";
 
-    // Check observables: for each obs, if obs[i] != 0, atomic add observable_ones[i]++
-    // Also track if any observable is nonzero for logical_errors
-    bool has_obs = flat.num_observables > 0;
-    if (has_obs) {
-        for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
-            std::string idx = fresh_ssa();
-            out << "  " << idx << " = llvm.mlir.constant(" << i << " : i64) : i64\n";
-            std::string obs_p = fresh_ssa();
-            out << "  " << obs_p << " = llvm.getelementptr inbounds %obs_ptr["
-                << idx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-            std::string oval = fresh_ssa();
-            out << "  " << oval << " = llvm.load " << obs_p << " : !llvm.ptr -> i8\n";
+    // Check observables and increment logical_errors + observable_ones
+    for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
+        std::string idx = fresh_ssa();
+        out << "  " << idx << " = llvm.mlir.constant(" << i << " : i64) : i64\n";
+        std::string obs_p = fresh_ssa();
+        out << "  " << obs_p << " = llvm.getelementptr inbounds %obs_ptr["
+            << idx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string oval = fresh_ssa();
+        out << "  " << oval << " = llvm.load " << obs_p << " : !llvm.ptr -> i8\n";
 
-            // Check expected observable (from flat.expected_observables)
-            if (i < flat.expected_observables.size() && flat.expected_observables[i] != 0) {
-                std::string xored = fresh_ssa();
-                out << "  " << xored << " = llvm.xor " << oval << ", %c1_i8 : i8\n";
-                oval = xored;
-            }
-
-            std::string obs_ne = fresh_ssa();
-            out << "  " << obs_ne << " = llvm.icmp \"ne\" " << oval << ", %c0_i8 : i8\n";
-            std::string lbl_obs_inc = fresh_label("obs_inc");
-            std::string lbl_obs_skip = fresh_label("obs_skip");
-            out << "  llvm.cond_br " << obs_ne << ", ^" << lbl_obs_inc << ", ^" << lbl_obs_skip << "\n";
-            out << "^" << lbl_obs_inc << ":\n";
-
-            // atomic add observable_ones[i]++ (offset 2+i in BlockCounts struct)
-            // Use byte offset: passed(8) + logical_errors(8) + i*8 = 16 + i*8
-            std::string obs_offset = fresh_ssa();
-            out << "  " << obs_offset << " = llvm.mlir.constant(" << (16 + i * 8) << " : i64) : i64\n";
-            std::string bc_byte = fresh_ssa();
-            out << "  " << bc_byte << " = llvm.getelementptr %block_counts["
-                << obs_offset << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-            out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << bc_byte
-                << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
-
-            // Also increment logical_errors (offset 8)
-            std::string le_off = fresh_ssa();
-            out << "  " << le_off << " = llvm.mlir.constant(8 : i64) : i64\n";
-            std::string bc_le = fresh_ssa();
-            out << "  " << bc_le << " = llvm.getelementptr %block_counts["
-                << le_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-            out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << bc_le
-                << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
-
-            out << "  llvm.br ^" << lbl_obs_skip << "\n";
-            out << "^" << lbl_obs_skip << ":\n";
+        if (i < flat.expected_observables.size() && flat.expected_observables[i] != 0) {
+            std::string xored = fresh_ssa();
+            out << "  " << xored << " = llvm.xor " << oval << ", %c1_i8 : i8\n";
+            oval = xored;
         }
+
+        std::string obs_ne = fresh_ssa();
+        out << "  " << obs_ne << " = llvm.icmp \"ne\" " << oval << ", %c0_i8 : i8\n";
+        std::string lbl_obs_inc = fresh_label("obs_inc");
+        std::string lbl_obs_skip = fresh_label("obs_skip");
+        out << "  llvm.cond_br " << obs_ne << ", ^" << lbl_obs_inc << ", ^" << lbl_obs_skip << "\n";
+        out << "^" << lbl_obs_inc << ":\n";
+
+        // observable_ones[i] at byte offset 16 + i*8
+        uint32_t obs_byte_offset = 16 + i * 8;
+        std::string obs_off_val = fresh_ssa();
+        out << "  " << obs_off_val << " = llvm.mlir.constant(" << obs_byte_offset << " : i64) : i64\n";
+        std::string obs_ones_ptr = fresh_ssa();
+        out << "  " << obs_ones_ptr << " = llvm.getelementptr %block_counts["
+            << obs_off_val << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << obs_ones_ptr
+            << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
+
+        // logical_errors at byte offset 8
+        std::string le_ptr = fresh_ssa();
+        out << "  " << le_ptr << " = llvm.mlir.constant(8 : i64) : i64\n";
+        std::string le_gep = fresh_ssa();
+        out << "  " << le_gep << " = llvm.getelementptr %block_counts["
+            << le_ptr << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << le_gep
+            << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
+
+        out << "  llvm.br ^" << lbl_obs_skip << "\n";
+        out << "^" << lbl_obs_skip << ":\n";
     }
 
     out << "  llvm.br ^" << lbl_done << "\n";
