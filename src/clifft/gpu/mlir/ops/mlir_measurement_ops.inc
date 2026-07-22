@@ -74,10 +74,12 @@ case Opcode::OP_MEAS_ACTIVE_DIAGONAL: {
     emit_meas_active_diagonal(out, ins.axis_1, ins.a, sign);
     break;
 }
-case Opcode::OP_MEAS_ACTIVE_INTERFERE:
+case Opcode::OP_MEAS_ACTIVE_INTERFERE: {
+    emit_meas_active_interfere(out, ins.axis_1, ins.a, sign);
+    break;
+}
 case Opcode::OP_SWAP_MEAS_INTERFERE: {
-    out << "  // active interfere measurement op " << (unsigned)ins.opcode
-        << " requires array folding — discard\n";
+    out << "  // swap_meas_interfere — discard (needs frame_swap + interfere)\n";
     out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
     break;
 }

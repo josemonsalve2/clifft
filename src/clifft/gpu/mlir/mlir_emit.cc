@@ -898,6 +898,128 @@ void emit_meas_active_diagonal(std::ostringstream& out,
     emit_bit_set(out, "%pz_ptr", axis_i32, false_val);
 }
 
+void emit_meas_active_interfere(std::ostringstream& out,
+                                 uint32_t axis, uint32_t classical_idx, bool sign) {
+    std::string ak = fresh_ssa();
+    out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
+    std::string ak64 = fresh_ssa();
+    out << "  " << ak64 << " = llvm.zext " << ak << " : i32 to i64\n";
+    std::string ak_m1 = fresh_ssa();
+    out << "  " << ak_m1 << " = llvm.sub " << ak64 << ", %c1_i64 : i64\n";
+    std::string half = fresh_ssa();
+    out << "  " << half << " = llvm.shl %c1_i64, " << ak_m1 << " : i64\n";
+
+    char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", axis);
+    std::string axis_i32 = fresh_ssa();
+    out << "  " << axis_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
+    std::string pz_bit = emit_bit_get(out, "%pz_ptr", axis_i32);
+
+    // Sum p_plus = sum(cnorm(v[i]+v[i+half])), p_minus = sum(cnorm(v[i]-v[i+half]))
+    std::string pi_hdr = fresh_label("pi_hdr"), pi_body = fresh_label("pi_body"), pi_done = fresh_label("pi_done");
+    std::string fz = fresh_ssa();
+    out << "  " << fz << " = llvm.mlir.constant(0.0 : f64) : f64\n";
+    out << "  llvm.br ^" << pi_hdr << "(%c0_i64, " << fz << ", " << fz << " : i64, f64, f64)\n";
+    out << "^" << pi_hdr << "(%pi_i: i64, %pi_pp: f64, %pi_pm: f64):\n";
+    std::string pi_cond = fresh_ssa();
+    out << "  " << pi_cond << " = llvm.icmp \"ult\" %pi_i, " << half << " : i64\n";
+    out << "  llvm.cond_br " << pi_cond << ", ^" << pi_body
+        << ", ^" << pi_done << "(%pi_pp, %pi_pm : f64, f64)\n";
+    out << "^" << pi_body << ":\n";
+    std::string vi = emit_load_v(out, "%pi_i");
+    std::string hi_idx = fresh_ssa();
+    out << "  " << hi_idx << " = llvm.add %pi_i, " << half << " : i64\n";
+    std::string vh = emit_load_v(out, hi_idx);
+    std::string sum_c = emit_cadd(out, vi, vh);
+    std::string diff_c = emit_csub(out, vi, vh);
+    std::string np = emit_cnorm(out, sum_c);
+    std::string nm = emit_cnorm(out, diff_c);
+    std::string new_pp = fresh_ssa(), new_pm = fresh_ssa();
+    out << "  " << new_pp << " = llvm.fadd %pi_pp, " << np << " : f64\n";
+    out << "  " << new_pm << " = llvm.fadd %pi_pm, " << nm << " : f64\n";
+    std::string pi_next = fresh_ssa();
+    out << "  " << pi_next << " = llvm.add %pi_i, %c1_i64 : i64\n";
+    out << "  llvm.br ^" << pi_hdr << "(" << pi_next << ", " << new_pp << ", " << new_pm << " : i64, f64, f64)\n";
+    out << "^" << pi_done << "(%fp_plus: f64, %fp_minus: f64):\n";
+
+    // sample_branch
+    std::string total = fresh_ssa();
+    out << "  " << total << " = llvm.fadd %fp_plus, %fp_minus : f64\n";
+    std::string eps_k = fresh_ssa();
+    out << "  " << eps_k << " = llvm.mlir.constant(1.0e-300 : f64) : f64\n";
+    std::string eps = fresh_ssa();
+    out << "  " << eps << " = llvm.fmul " << eps_k << ", " << total << " : f64\n";
+    std::string pm_small = fresh_ssa();
+    out << "  " << pm_small << " = llvm.fcmp \"ole\" %fp_minus, " << eps << " : f64\n";
+    std::string pp_small = fresh_ssa();
+    out << "  " << pp_small << " = llvm.fcmp \"ole\" %fp_plus, " << eps << " : f64\n";
+    std::string u = emit_rng_uniform(out);
+    std::string threshold = fresh_ssa();
+    out << "  " << threshold << " = llvm.fmul " << u << ", " << total << " : f64\n";
+    std::string rng_bx = fresh_ssa();
+    out << "  " << rng_bx << " = llvm.fcmp \"oge\" " << threshold << ", %fp_plus : f64\n";
+    std::string const_true = emit_const_i1(out, true);
+    std::string const_false = emit_const_i1(out, false);
+    std::string bx_sel1 = fresh_ssa();
+    out << "  " << bx_sel1 << " = llvm.select " << pp_small << ", "
+        << const_true << ", " << rng_bx << " : i1, i1\n";
+    std::string bx_final = fresh_ssa();
+    out << "  " << bx_final << " = llvm.select " << pm_small << ", "
+        << const_false << ", " << bx_sel1 << " : i1, i1\n";
+
+    // m_abs = b_x ^ pz
+    std::string bx_i8 = fresh_ssa();
+    out << "  " << bx_i8 << " = llvm.zext " << bx_final << " : i1 to i8\n";
+    std::string pz_i8 = fresh_ssa();
+    out << "  " << pz_i8 << " = llvm.zext " << pz_bit << " : i1 to i8\n";
+    std::string m_abs = fresh_ssa();
+    out << "  " << m_abs << " = llvm.xor " << bx_i8 << ", " << pz_i8 << " : i8\n";
+    std::string meas_val = m_abs;
+    if (sign) {
+        std::string xored = fresh_ssa();
+        out << "  " << xored << " = llvm.xor " << m_abs << ", %c1_i8 : i8\n";
+        meas_val = xored;
+    }
+    std::string cidx_i64 = emit_const_i64(out, classical_idx);
+    std::string meas_p = fresh_ssa();
+    out << "  " << meas_p << " = llvm.getelementptr inbounds %meas_ptr["
+        << cidx_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    out << "  llvm.store " << meas_val << ", " << meas_p << " : i8, !llvm.ptr\n";
+
+    // Fold amplitudes: v[i] = cscale(b_x ? csub(v[i],v[i+half]) : cadd(v[i],v[i+half]), inv_sqrt2)
+    std::string fold_hdr = fresh_label("fold_hdr"), fold_body = fresh_label("fold_body"), fold_done = fresh_label("fold_done");
+    out << "  llvm.br ^" << fold_hdr << "(%c0_i64 : i64)\n";
+    out << "^" << fold_hdr << "(%fold_i: i64):\n";
+    std::string fold_cond = fresh_ssa();
+    out << "  " << fold_cond << " = llvm.icmp \"ult\" %fold_i, " << half << " : i64\n";
+    out << "  llvm.cond_br " << fold_cond << ", ^" << fold_body << ", ^" << fold_done << "\n";
+    out << "^" << fold_body << ":\n";
+    std::string fvi = emit_load_v(out, "%fold_i");
+    std::string fhi = fresh_ssa();
+    out << "  " << fhi << " = llvm.add %fold_i, " << half << " : i64\n";
+    std::string fvh = emit_load_v(out, fhi);
+    std::string fsum = emit_cadd(out, fvi, fvh);
+    std::string fdiff = emit_csub(out, fvi, fvh);
+    std::string folded = fresh_ssa();
+    out << "  " << folded << " = llvm.select " << bx_final << ", " << fdiff << ", " << fsum
+        << " : i1, !llvm.struct<(f32, f32)>\n";
+    std::string scaled = emit_cscale_f64(out, folded, kInvSqrt2);
+    emit_store_v(out, "%fold_i", scaled);
+    std::string fold_next = fresh_ssa();
+    out << "  " << fold_next << " = llvm.add %fold_i, %c1_i64 : i64\n";
+    out << "  llvm.br ^" << fold_hdr << "(" << fold_next << " : i64)\n";
+    out << "^" << fold_done << ":\n";
+
+    // active_k--, bit_set(px, axis, m_abs!=0), bit_set(pz, axis, false)
+    std::string new_ak = fresh_ssa();
+    out << "  " << new_ak << " = llvm.sub " << ak << ", %c1_i32 : i32\n";
+    out << "  llvm.store " << new_ak << ", %active_k_ptr : i32, !llvm.ptr\n";
+    std::string m_ne0 = fresh_ssa();
+    out << "  " << m_ne0 << " = llvm.icmp \"ne\" " << m_abs << ", %c0_i8 : i8\n";
+    emit_bit_set(out, "%px_ptr", axis_i32, m_ne0);
+    std::string false_val2 = emit_const_i1(out, false);
+    emit_bit_set(out, "%pz_ptr", axis_i32, false_val2);
+}
+
 void emit_expand_plain(std::ostringstream& out) {
     std::string ak = fresh_ssa();
     out << "  " << ak << " = llvm.load %active_k_ptr : !llvm.ptr -> i32\n";
