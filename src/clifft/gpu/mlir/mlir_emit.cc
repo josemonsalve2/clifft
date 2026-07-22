@@ -493,6 +493,64 @@ void emit_barrier(std::ostringstream& out) {
     out << "  llvm.call @llvm.amdgcn.s.barrier() : () -> ()\n";
 }
 
+// Warp shuffle: ds_bpermute XOR for i32
+std::string emit_shfl_xor_i32(std::ostringstream& out,
+                               const std::string& val_i32,
+                               const std::string& lane_mask_i32) {
+    std::string self_lane = fresh_ssa();
+    out << "  " << self_lane << " = llvm.and %tidx_i32, "
+        << emit_const_i32(out, 63) << " : i32\n";
+    std::string target = fresh_ssa();
+    out << "  " << target << " = llvm.xor " << self_lane << ", " << lane_mask_i32 << " : i32\n";
+    std::string byte_off = fresh_ssa();
+    out << "  " << byte_off << " = llvm.shl " << target << ", "
+        << emit_const_i32(out, 2) << " : i32\n";
+    std::string result = fresh_ssa();
+    out << "  " << result << " = llvm.call @llvm.amdgcn.ds.bpermute("
+        << byte_off << ", " << val_i32 << ") : (i32, i32) -> i32\n";
+    return result;
+}
+
+// Warp shuffle XOR for i64 (split into two i32 halves)
+std::string emit_shfl_xor_i64(std::ostringstream& out,
+                               const std::string& val_i64,
+                               const std::string& lane_mask_i32) {
+    std::string lo = fresh_ssa();
+    out << "  " << lo << " = llvm.trunc " << val_i64 << " : i64 to i32\n";
+    std::string hi_shift = fresh_ssa();
+    out << "  " << hi_shift << " = llvm.lshr " << val_i64 << ", "
+        << emit_const_i64(out, 32) << " : i64\n";
+    std::string hi = fresh_ssa();
+    out << "  " << hi << " = llvm.trunc " << hi_shift << " : i64 to i32\n";
+    std::string lo_shfl = emit_shfl_xor_i32(out, lo, lane_mask_i32);
+    std::string hi_shfl = emit_shfl_xor_i32(out, hi, lane_mask_i32);
+    std::string lo64 = fresh_ssa();
+    out << "  " << lo64 << " = llvm.zext " << lo_shfl << " : i32 to i64\n";
+    std::string hi64 = fresh_ssa();
+    out << "  " << hi64 << " = llvm.zext " << hi_shfl << " : i32 to i64\n";
+    std::string hi_placed = fresh_ssa();
+    out << "  " << hi_placed << " = llvm.shl " << hi64 << ", "
+        << emit_const_i64(out, 32) << " : i64\n";
+    std::string combined = fresh_ssa();
+    out << "  " << combined << " = llvm.or " << lo64 << ", " << hi_placed << " : i64\n";
+    return combined;
+}
+
+// Intra-wavefront reduction: reduce 64 threads to 1 value via ds_bpermute
+// Offsets: 32, 16, 8, 4, 2 (lane XOR pattern)
+std::string emit_wavefront_reduce_i64(std::ostringstream& out,
+                                       const std::string& val_i64) {
+    std::string acc = val_i64;
+    for (int offset : {32, 16, 8, 4, 2}) {
+        std::string mask = emit_const_i32(out, offset);
+        std::string peer = emit_shfl_xor_i64(out, acc, mask);
+        std::string sum = fresh_ssa();
+        out << "  " << sum << " = llvm.add " << acc << ", " << peer << " : i64\n";
+        acc = sum;
+    }
+    return acc;
+}
+
 void emit_lds_global(std::ostringstream& out,
                      const std::string& name,
                      const std::string& elem_type,
@@ -1292,6 +1350,12 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
     emit_gpu_intrinsic_decls(out);
 
+    // LDS for warp shuffle inter-wavefront reduction (4 wavefronts × values)
+    emit_lds_global(out, "lds_red_passed", "i64", 4);
+    emit_lds_global(out, "lds_red_logical", "i64", 4);
+    emit_lds_global(out, "lds_red_obs", "i64", 4 * kMaxObs);
+    out << "\n";
+
     out << "llvm.func amdgpu_kernelcc @compiled_mlir_kernel(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
         << "    %block_counts: !llvm.ptr,\n"
@@ -1511,69 +1575,195 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
 
     out << "  // --- End instruction sequence ---\n";
 
-    // Result aggregation: check discarded, then atomic-add to block_counts
-    // BlockCounts layout: passed(i64), logical_errors(i64), observable_ones[8](i64), ...
+    // Warp-shuffle result aggregation (256→1 via ds_bpermute + LDS)
+    // Phase 0: Compute per-thread values
     std::string disc_val = fresh_ssa();
     out << "  " << disc_val << " = llvm.load %discarded_ptr : !llvm.ptr -> i8\n";
-    std::string is_disc = fresh_ssa();
-    out << "  " << is_disc << " = llvm.icmp \"ne\" " << disc_val << ", %c0_i8 : i8\n";
-    std::string lbl_agg = fresh_label("agg");
-    std::string lbl_done = fresh_label("done");
-    out << "  llvm.cond_br " << is_disc << ", ^" << lbl_done << ", ^" << lbl_agg << "\n";
-    out << "^" << lbl_agg << ":\n";
+    std::string is_valid = fresh_ssa();
+    out << "  " << is_valid << " = llvm.icmp \"eq\" " << disc_val << ", %c0_i8 : i8\n";
+    std::string local_passed = fresh_ssa();
+    out << "  " << local_passed << " = llvm.zext " << is_valid << " : i1 to i64\n";
 
-    // atomic add passed++ at byte offset 0 of block_counts
-    // BlockCounts: passed(8) | logical_errors(8) | obs_ones[8](64) | exp_sums[8](64) | count(8)
-    // Use byte-level GEP (treat block_counts as i8*) for simplicity
-    out << "  " << fresh_ssa() << " = llvm.atomicrmw add %block_counts, %c1_i64 monotonic"
-        << " : !llvm.ptr, i64\n";
-
-    // Check observables and increment logical_errors + observable_ones
+    // Compute local_logical (1 if any observable mismatch)
+    std::string any_obs_fail = fresh_ssa();
+    out << "  " << any_obs_fail << " = llvm.mlir.constant(0 : i64) : i64\n";
+    std::string local_obs_arr[kMaxObs];
     for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
-        std::string idx = fresh_ssa();
-        out << "  " << idx << " = llvm.mlir.constant(" << i << " : i64) : i64\n";
+        std::string idx = emit_const_i64(out, i);
         std::string obs_p = fresh_ssa();
         out << "  " << obs_p << " = llvm.getelementptr inbounds %obs_ptr["
             << idx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
         std::string oval = fresh_ssa();
         out << "  " << oval << " = llvm.load " << obs_p << " : !llvm.ptr -> i8\n";
-
         if (i < flat.expected_observables.size() && flat.expected_observables[i] != 0) {
             std::string xored = fresh_ssa();
             out << "  " << xored << " = llvm.xor " << oval << ", %c1_i8 : i8\n";
             oval = xored;
         }
-
         std::string obs_ne = fresh_ssa();
         out << "  " << obs_ne << " = llvm.icmp \"ne\" " << oval << ", %c0_i8 : i8\n";
-        std::string lbl_obs_inc = fresh_label("obs_inc");
-        std::string lbl_obs_skip = fresh_label("obs_skip");
-        out << "  llvm.cond_br " << obs_ne << ", ^" << lbl_obs_inc << ", ^" << lbl_obs_skip << "\n";
-        out << "^" << lbl_obs_inc << ":\n";
+        std::string obs_val = fresh_ssa();
+        out << "  " << obs_val << " = llvm.zext " << obs_ne << " : i1 to i64\n";
+        // Mask with is_valid (only count if not discarded)
+        std::string masked = fresh_ssa();
+        out << "  " << masked << " = llvm.and " << obs_val << ", " << local_passed << " : i64\n";
+        local_obs_arr[i] = masked;
+        std::string new_fail = fresh_ssa();
+        out << "  " << new_fail << " = llvm.or " << any_obs_fail << ", " << masked << " : i64\n";
+        any_obs_fail = new_fail;
+    }
+    std::string local_logical = fresh_ssa();
+    out << "  " << local_logical << " = llvm.and " << any_obs_fail << ", " << local_passed << " : i64\n";
 
-        // observable_ones[i] at byte offset 16 + i*8
-        uint32_t obs_byte_offset = 16 + i * 8;
-        std::string obs_off_val = fresh_ssa();
-        out << "  " << obs_off_val << " = llvm.mlir.constant(" << obs_byte_offset << " : i64) : i64\n";
-        std::string obs_ones_ptr = fresh_ssa();
-        out << "  " << obs_ones_ptr << " = llvm.getelementptr %block_counts["
-            << obs_off_val << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-        out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << obs_ones_ptr
-            << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
-
-        // logical_errors at byte offset 8
-        std::string le_ptr = fresh_ssa();
-        out << "  " << le_ptr << " = llvm.mlir.constant(8 : i64) : i64\n";
-        std::string le_gep = fresh_ssa();
-        out << "  " << le_gep << " = llvm.getelementptr %block_counts["
-            << le_ptr << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-        out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << le_gep
-            << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
-
-        out << "  llvm.br ^" << lbl_obs_skip << "\n";
-        out << "^" << lbl_obs_skip << ":\n";
+    // Phase 1: Intra-wavefront reduction (5 rounds with ds_bpermute)
+    std::string red_passed = emit_wavefront_reduce_i64(out, local_passed);
+    std::string red_logical = emit_wavefront_reduce_i64(out, local_logical);
+    std::string red_obs[kMaxObs];
+    for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
+        red_obs[i] = emit_wavefront_reduce_i64(out, local_obs_arr[i]);
     }
 
+    // Phase 2: Inter-wavefront via LDS (4 wavefronts)
+    // Get LDS pointers for reduction scratch
+    out << "  %lds_red_p_as3 = llvm.mlir.addressof @lds_red_passed : !llvm.ptr<3>\n";
+    out << "  %lds_red_p = llvm.addrspacecast %lds_red_p_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_red_l_as3 = llvm.mlir.addressof @lds_red_logical : !llvm.ptr<3>\n";
+    out << "  %lds_red_l = llvm.addrspacecast %lds_red_l_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+    out << "  %lds_red_o_as3 = llvm.mlir.addressof @lds_red_obs : !llvm.ptr<3>\n";
+    out << "  %lds_red_o = llvm.addrspacecast %lds_red_o_as3 : !llvm.ptr<3> to !llvm.ptr\n";
+
+    // Lane 0 of each wavefront writes to LDS[warp_id]
+    std::string lane_id = fresh_ssa();
+    out << "  " << lane_id << " = llvm.and %tidx_i32, " << emit_const_i32(out, 63) << " : i32\n";
+    std::string is_lane0 = fresh_ssa();
+    out << "  " << is_lane0 << " = llvm.icmp \"eq\" " << lane_id << ", %c0_i32 : i32\n";
+    std::string warp_id = fresh_ssa();
+    out << "  " << warp_id << " = llvm.lshr %tidx_i32, " << emit_const_i32(out, 6) << " : i32\n";
+    std::string warp_i64 = fresh_ssa();
+    out << "  " << warp_i64 << " = llvm.zext " << warp_id << " : i32 to i64\n";
+
+    std::string lbl_wr_lds = fresh_label("wr_lds");
+    std::string lbl_wr_done = fresh_label("wr_done");
+    out << "  llvm.cond_br " << is_lane0 << ", ^" << lbl_wr_lds << ", ^" << lbl_wr_done << "\n";
+    out << "^" << lbl_wr_lds << ":\n";
+    // Store to LDS
+    std::string lds_p_ptr = fresh_ssa();
+    out << "  " << lds_p_ptr << " = llvm.getelementptr inbounds %lds_red_p["
+        << warp_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  llvm.store " << red_passed << ", " << lds_p_ptr << " : i64, !llvm.ptr\n";
+    std::string lds_l_ptr = fresh_ssa();
+    out << "  " << lds_l_ptr << " = llvm.getelementptr inbounds %lds_red_l["
+        << warp_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    out << "  llvm.store " << red_logical << ", " << lds_l_ptr << " : i64, !llvm.ptr\n";
+    for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
+        std::string obs_lds_idx = emit_const_i64(out, i * 4);
+        std::string obs_lds_off = fresh_ssa();
+        out << "  " << obs_lds_off << " = llvm.add " << obs_lds_idx << ", " << warp_i64 << " : i64\n";
+        std::string obs_lds_p = fresh_ssa();
+        out << "  " << obs_lds_p << " = llvm.getelementptr inbounds %lds_red_o["
+            << obs_lds_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        out << "  llvm.store " << red_obs[i] << ", " << obs_lds_p << " : i64, !llvm.ptr\n";
+    }
+    out << "  llvm.br ^" << lbl_wr_done << "\n";
+    out << "^" << lbl_wr_done << ":\n";
+    emit_barrier(out);
+
+    // Phase 3: tid < 4 reads LDS and reduces with ds_bpermute
+    std::string is_first4 = fresh_ssa();
+    out << "  " << is_first4 << " = llvm.icmp \"ult\" %tidx_i32, "
+        << emit_const_i32(out, 4) << " : i32\n";
+    std::string lbl_final = fresh_label("final_red");
+    std::string lbl_done = fresh_label("done");
+    out << "  llvm.cond_br " << is_first4 << ", ^" << lbl_final << ", ^" << lbl_done << "\n";
+    out << "^" << lbl_final << ":\n";
+
+    // Load from LDS
+    std::string tid_i64 = fresh_ssa();
+    out << "  " << tid_i64 << " = llvm.zext %tidx_i32 : i32 to i64\n";
+    std::string fp_ptr = fresh_ssa();
+    out << "  " << fp_ptr << " = llvm.getelementptr inbounds %lds_red_p["
+        << tid_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    std::string fp_val = fresh_ssa();
+    out << "  " << fp_val << " = llvm.load " << fp_ptr << " : !llvm.ptr -> i64\n";
+    std::string fl_ptr = fresh_ssa();
+    out << "  " << fl_ptr << " = llvm.getelementptr inbounds %lds_red_l["
+        << tid_i64 << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+    std::string fl_val = fresh_ssa();
+    out << "  " << fl_val << " = llvm.load " << fl_ptr << " : !llvm.ptr -> i64\n";
+
+    // Reduce 4→1 with ds_bpermute (offsets 2, 1)
+    std::string fp2 = fp_val, fl2 = fl_val;
+    for (int off : {2, 1}) {
+        std::string mask = emit_const_i32(out, off);
+        std::string pp = emit_shfl_xor_i64(out, fp2, mask);
+        std::string fp_sum = fresh_ssa();
+        out << "  " << fp_sum << " = llvm.add " << fp2 << ", " << pp << " : i64\n";
+        fp2 = fp_sum;
+        std::string lp = emit_shfl_xor_i64(out, fl2, mask);
+        std::string fl_sum = fresh_ssa();
+        out << "  " << fl_sum << " = llvm.add " << fl2 << ", " << lp << " : i64\n";
+        fl2 = fl_sum;
+    }
+
+    // tid==0: single atomic add to block_counts
+    std::string is_tid0 = fresh_ssa();
+    out << "  " << is_tid0 << " = llvm.icmp \"eq\" %tidx_i32, %c0_i32 : i32\n";
+    std::string lbl_t0_wr = fresh_label("t0_wr");
+    std::string lbl_t0_done = fresh_label("t0_done");
+    out << "  llvm.cond_br " << is_tid0 << ", ^" << lbl_t0_wr << ", ^" << lbl_t0_done << "\n";
+    out << "^" << lbl_t0_wr << ":\n";
+    out << "  " << fresh_ssa() << " = llvm.atomicrmw add %block_counts, " << fp2
+        << " monotonic : !llvm.ptr, i64\n";
+    // logical_errors at byte offset 8
+    std::string le_off = emit_const_i64(out, 8);
+    std::string le_p = fresh_ssa();
+    out << "  " << le_p << " = llvm.getelementptr %block_counts["
+        << le_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+    out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << le_p << ", " << fl2
+        << " monotonic : !llvm.ptr, i64\n";
+    // observable_ones
+    for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
+        // Load & reduce obs[i] from LDS
+        std::string oi_base = emit_const_i64(out, i * 4);
+        std::string oi_ptr = fresh_ssa();
+        out << "  " << oi_ptr << " = llvm.getelementptr inbounds %lds_red_o["
+            << oi_base << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        std::string oi_v0 = fresh_ssa();
+        out << "  " << oi_v0 << " = llvm.load " << oi_ptr << " : !llvm.ptr -> i64\n";
+        std::string oi1_ptr = fresh_ssa();
+        std::string oi1_off = emit_const_i64(out, i * 4 + 1);
+        out << "  " << oi1_ptr << " = llvm.getelementptr inbounds %lds_red_o["
+            << oi1_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        std::string oi_v1 = fresh_ssa();
+        out << "  " << oi_v1 << " = llvm.load " << oi1_ptr << " : !llvm.ptr -> i64\n";
+        std::string oi2_ptr = fresh_ssa();
+        std::string oi2_off = emit_const_i64(out, i * 4 + 2);
+        out << "  " << oi2_ptr << " = llvm.getelementptr inbounds %lds_red_o["
+            << oi2_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        std::string oi_v2 = fresh_ssa();
+        out << "  " << oi_v2 << " = llvm.load " << oi2_ptr << " : !llvm.ptr -> i64\n";
+        std::string oi3_ptr = fresh_ssa();
+        std::string oi3_off = emit_const_i64(out, i * 4 + 3);
+        out << "  " << oi3_ptr << " = llvm.getelementptr inbounds %lds_red_o["
+            << oi3_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        std::string oi_v3 = fresh_ssa();
+        out << "  " << oi_v3 << " = llvm.load " << oi3_ptr << " : !llvm.ptr -> i64\n";
+        std::string oi_s01 = fresh_ssa();
+        out << "  " << oi_s01 << " = llvm.add " << oi_v0 << ", " << oi_v1 << " : i64\n";
+        std::string oi_s23 = fresh_ssa();
+        out << "  " << oi_s23 << " = llvm.add " << oi_v2 << ", " << oi_v3 << " : i64\n";
+        std::string oi_total = fresh_ssa();
+        out << "  " << oi_total << " = llvm.add " << oi_s01 << ", " << oi_s23 << " : i64\n";
+        uint32_t obs_byte_offset = 16 + i * 8;
+        std::string obs_off = emit_const_i64(out, obs_byte_offset);
+        std::string obs_gep = fresh_ssa();
+        out << "  " << obs_gep << " = llvm.getelementptr %block_counts["
+            << obs_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << obs_gep << ", " << oi_total
+            << " monotonic : !llvm.ptr, i64\n";
+    }
+    out << "  llvm.br ^" << lbl_t0_done << "\n";
+    out << "^" << lbl_t0_done << ":\n";
     out << "  llvm.br ^" << lbl_done << "\n";
     out << "^" << lbl_done << ":\n";
     out << "  llvm.return\n";
