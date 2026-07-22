@@ -89,13 +89,19 @@ if(CLIFFT_ENABLE_HIP)
     if(NOT CMAKE_HIP_ARCHITECTURES)
         set(CMAKE_HIP_ARCHITECTURES gfx942)
     endif()
-    target_sources(clifft_core PRIVATE gpu/hip_sampler.hip gpu/device_program.cc gpu/kernel_codegen.cc)
+    target_sources(clifft_core PRIVATE
+        gpu/hip_sampler.hip
+        gpu/device_program.cc
+        gpu/kernel_codegen.cc
+        gpu/hsa_runtime.cc
+    )
     set_source_files_properties(gpu/hip_sampler.hip PROPERTIES LANGUAGE HIP)
     set_source_files_properties(gpu/hip_sampler.hip
         PROPERTIES COMPILE_OPTIONS "-ffp-contract=off"
     )
     find_package(hip REQUIRED)
-    target_link_libraries(clifft_core PRIVATE hip::host)
+    find_package(hsa-runtime64 REQUIRED)
+    target_link_libraries(clifft_core PRIVATE hip::host hsa-runtime64::hsa-runtime64)
     target_compile_definitions(clifft_core PUBLIC CLIFFT_ENABLE_GPU)
 else()
     target_sources(clifft_core PRIVATE gpu/hip_sampler_stub.cc gpu/device_program.cc gpu/kernel_codegen.cc)
