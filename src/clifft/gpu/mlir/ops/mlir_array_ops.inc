@@ -10,6 +10,7 @@
 
 case Opcode::OP_ARRAY_H: {
     emit_array_h_static(ins.axis_1);
+    { auto g = emit_tid0_guard_begin(out);
     char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", ins.axis_1);
     std::string ax_i32 = fresh_ssa();
     out << "  " << ax_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
@@ -17,24 +18,29 @@ case Opcode::OP_ARRAY_H: {
     std::string pzv = emit_bit_get("%pz_ptr", ax_i32);
     emit_bit_set("%px_ptr", ax_i32, pzv);
     emit_bit_set("%pz_ptr", ax_i32, pxv);
+    emit_tid0_guard_end(out, g); }
     break;
 }
 case Opcode::OP_ARRAY_S: {
     emit_apply_phase_static(ins.axis_1, 0.0, 1.0);
+    { auto g = emit_tid0_guard_begin(out);
     char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", ins.axis_1);
     std::string ax_i32 = fresh_ssa();
     out << "  " << ax_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
     std::string pxv = emit_bit_get("%px_ptr", ax_i32);
     emit_bit_xor("%pz_ptr", ax_i32, pxv);
+    emit_tid0_guard_end(out, g); }
     break;
 }
 case Opcode::OP_ARRAY_S_DAG: {
     emit_apply_phase_static(ins.axis_1, 0.0, -1.0);
+    { auto g = emit_tid0_guard_begin(out);
     char abuf[32]; snprintf(abuf, sizeof(abuf), "%u", ins.axis_1);
     std::string ax_i32 = fresh_ssa();
     out << "  " << ax_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
     std::string pxv = emit_bit_get("%px_ptr", ax_i32);
     emit_bit_xor("%pz_ptr", ax_i32, pxv);
+    emit_tid0_guard_end(out, g); }
     break;
 }
 case Opcode::OP_ARRAY_T: {
@@ -160,7 +166,7 @@ case Opcode::OP_ARRAY_T_DAG: {
 }
 case Opcode::OP_ARRAY_CNOT:
     emit_array_cnot_static(ins.axis_1, ins.axis_2);
-    {
+    { auto g = emit_tid0_guard_begin(out);
         char cbuf[32], tbuf[32];
         snprintf(cbuf, sizeof(cbuf), "%u", ins.axis_1);
         snprintf(tbuf, sizeof(tbuf), "%u", ins.axis_2);
@@ -171,7 +177,7 @@ case Opcode::OP_ARRAY_CNOT:
         std::string pz_t = emit_bit_get("%pz_ptr", t_i32);
         emit_bit_xor("%px_ptr", t_i32, px_c);
         emit_bit_xor("%pz_ptr", c_i32, pz_t);
-    }
+    emit_tid0_guard_end(out, g); }
     break;
 case Opcode::OP_ARRAY_CZ: {
     out << "  // array_cz ctrl=" << ins.axis_1 << " tgt=" << ins.axis_2 << "\n";
@@ -223,7 +229,7 @@ case Opcode::OP_ARRAY_CZ: {
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame update: pz[axis_1] ^= px[axis_2]; pz[axis_2] ^= px[axis_1]
-    {
+    { auto g = emit_tid0_guard_begin(out);
         std::string a_i32 = fresh_ssa(), b_i32 = fresh_ssa();
         out << "  " << a_i32 << " = llvm.mlir.constant(" << cbuf << " : i32) : i32\n";
         out << "  " << b_i32 << " = llvm.mlir.constant(" << tbuf << " : i32) : i32\n";
@@ -231,7 +237,7 @@ case Opcode::OP_ARRAY_CZ: {
         std::string px_b = emit_bit_get("%px_ptr", a_i32);
         emit_bit_xor("%pz_ptr", a_i32, px_a);
         emit_bit_xor("%pz_ptr", b_i32, px_b);
-    }
+    emit_tid0_guard_end(out, g); }
     break;
 }
 case Opcode::OP_ARRAY_SWAP: {
@@ -273,7 +279,7 @@ case Opcode::OP_ARRAY_SWAP: {
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
     // Frame: swap px bits, swap pz bits
-    {
+    { auto g = emit_tid0_guard_begin(out);
         std::string ai32 = fresh_ssa(), bi32 = fresh_ssa();
         out << "  " << ai32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
         out << "  " << bi32 << " = llvm.mlir.constant(" << bbuf << " : i32) : i32\n";
@@ -285,7 +291,7 @@ case Opcode::OP_ARRAY_SWAP: {
         std::string pz_b = emit_bit_get("%pz_ptr", bi32);
         emit_bit_set("%pz_ptr", ai32, pz_b);
         emit_bit_set("%pz_ptr", bi32, pz_a);
-    }
+    emit_tid0_guard_end(out, g); }
     break;
 }
 case Opcode::OP_ARRAY_ROT: {
@@ -417,9 +423,7 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
     out << "  " << i_next << " = llvm.add " << lv_mcn << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
-    // Frame update: for each bit j in mask, pz[j] ^= px[axis_1]
-    // Then px[axis_1] ^= XOR of pz bits at mask positions
-    {
+    { auto g = emit_tid0_guard_begin(out);
         std::string ax_i32 = fresh_ssa();
         out << "  " << ax_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
         std::string px_ax = emit_bit_get("%px_ptr", ax_i32);
@@ -431,13 +435,9 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
                 emit_bit_xor("%pz_ptr", j_i32, px_ax);
             }
         }
-        // px[axis_1] ^= XOR of pz[j] for each j in mask
-        // Accumulate XOR
-        std::string accum = "%c0_i1_mcn";
-        // Create i1 zero constant
         std::string zero_i1 = fresh_ssa();
         out << "  " << zero_i1 << " = llvm.mlir.constant(false) : i1\n";
-        accum = zero_i1;
+        std::string accum = zero_i1;
         for (uint32_t j = 0; j < 64; ++j) {
             if (mask_val & (1ULL << j)) {
                 char jbuf[32]; snprintf(jbuf, sizeof(jbuf), "%u", j);
@@ -450,7 +450,7 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
             }
         }
         emit_bit_xor("%px_ptr", ax_i32, accum);
-    }
+    emit_tid0_guard_end(out, g); }
     break;
 }
 case Opcode::OP_ARRAY_MULTI_CZ: {
@@ -515,8 +515,7 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
     out << "  " << i_next << " = llvm.add " << lv_mcz << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
-    // Frame update: for each bit j in mask, pz[j] ^= px[axis_1]; pz[axis_1] ^= px[j]
-    {
+    { auto g = emit_tid0_guard_begin(out);
         std::string ax_i32 = fresh_ssa();
         out << "  " << ax_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
         std::string px_ax = emit_bit_get("%px_ptr", ax_i32);
@@ -530,7 +529,7 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
                 emit_bit_xor("%pz_ptr", ax_i32, px_j);
             }
         }
-    }
+    emit_tid0_guard_end(out, g); }
     break;
 }
 case Opcode::OP_ARRAY_U2:

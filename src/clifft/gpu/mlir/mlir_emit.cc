@@ -560,6 +560,25 @@ std::string emit_wavefront_reduce_i64(std::ostringstream& out,
     return acc;
 }
 
+// Emit begin/end for tid-0 guard block in cooperative mode
+std::string emit_tid0_guard_begin(std::ostringstream& out) {
+    if (!cooperative_mode) return "";
+    std::string lbl_t0 = fresh_label("t0_guard");
+    std::string lbl_done = fresh_label("t0_done");
+    std::string is_t0 = fresh_ssa();
+    out << "  " << is_t0 << " = llvm.icmp \"eq\" %tidx_i32, %c0_i32 : i32\n";
+    out << "  llvm.cond_br " << is_t0 << ", ^" << lbl_t0 << ", ^" << lbl_done << "\n";
+    out << "^" << lbl_t0 << ":\n";
+    return lbl_done;
+}
+
+void emit_tid0_guard_end(std::ostringstream& out, const std::string& lbl_done) {
+    if (!cooperative_mode || lbl_done.empty()) return;
+    out << "  llvm.br ^" << lbl_done << "\n";
+    out << "^" << lbl_done << ":\n";
+    emit_barrier(out);
+}
+
 void emit_lds_global(std::ostringstream& out,
                      const std::string& name,
                      const std::string& elem_type,
