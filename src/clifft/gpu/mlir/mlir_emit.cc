@@ -587,6 +587,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     uint32_t kMaxAmplitudes = 1u << flat.peak_rank;
 
     out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
+    emit_gpu_intrinsic_decls(out);
 
     out << "llvm.func amdgpu_kernelcc @compiled_mlir_kernel(\n"
         << "    %shot_offset: i64, %shots: i64, %seed: i64,\n"
@@ -597,6 +598,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %c0_i32 = llvm.mlir.constant(0 : i32) : i32\n";
     out << "  %c1_i32 = llvm.mlir.constant(1 : i32) : i32\n";
     out << "  %c2_i32 = llvm.mlir.constant(2 : i32) : i32\n";
+    out << "  %c256_i32 = llvm.mlir.constant(256 : i32) : i32\n";
     out << "  %c0_i64 = llvm.mlir.constant(0 : i64) : i64\n";
     out << "  %c1_i64 = llvm.mlir.constant(1 : i64) : i64\n";
     out << "  %c6_i64 = llvm.mlir.constant(6 : i64) : i64\n";
@@ -604,7 +606,26 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %cminus1_i64 = llvm.mlir.constant(-1 : i64) : i64\n";
     out << "  %c0_i8 = llvm.mlir.constant(0 : i8) : i8\n";
     out << "  %c1_i8 = llvm.mlir.constant(1 : i8) : i8\n";
+    out << "  %f_one = llvm.mlir.constant(1.0 : f32) : f32\n";
+    out << "  %f_zero = llvm.mlir.constant(0.0 : f32) : f32\n";
 
+    // Compute batch_shot_id = BIDX * 256 + TIDX
+    out << "  %tidx_i32 = llvm.call @llvm.amdgcn.workitem.id.x() : () -> i32\n";
+    out << "  %bidx_i32 = llvm.call @llvm.amdgcn.workgroup.id.x() : () -> i32\n";
+    out << "  %scaled_bidx = llvm.mul %bidx_i32, %c256_i32 : i32\n";
+    out << "  %shot_idx_i32 = llvm.add %scaled_bidx, %tidx_i32 : i32\n";
+    out << "  %batch_shot_id = llvm.zext %shot_idx_i32 : i32 to i64\n";
+
+    // Guard: if batch_shot_id >= shots, early return
+    std::string lbl_run = fresh_label("run");
+    std::string lbl_exit = fresh_label("exit");
+    out << "  %oob = llvm.icmp \"uge\" %batch_shot_id, %shots : i64\n";
+    out << "  llvm.cond_br %oob, ^" << lbl_exit << ", ^" << lbl_run << "\n";
+    out << "^" << lbl_exit << ":\n";
+    out << "  llvm.return\n";
+    out << "^" << lbl_run << ":\n";
+
+    // Alloca state in private addrspace(5)
     out << "  %px_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
     out << "  %px_ptr = llvm.addrspacecast %px_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
     out << "  %pz_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
@@ -629,6 +650,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %obs_ptr_p5 = llvm.alloca %obs_size x i8 : (i32) -> !llvm.ptr<5>\n";
     out << "  %obs_ptr = llvm.addrspacecast %obs_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
 
+    // Initialize state
     out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
     out << "  %px1_ptr = llvm.getelementptr inbounds %px_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
     out << "  %pz0_ptr = llvm.getelementptr inbounds %pz_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
@@ -640,13 +662,22 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  llvm.store %c0_i32, %active_k_ptr : i32, !llvm.ptr\n";
     out << "  llvm.store %c0_i8, %discarded_ptr : i8, !llvm.ptr\n";
 
+    // Initialize v[0] = {1.0, 0.0}
     out << "  %v0_ptr = llvm.getelementptr inbounds %v_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
-    out << "  %f_one = llvm.mlir.constant(1.0 : f32) : f32\n";
-    out << "  %f_zero = llvm.mlir.constant(0.0 : f32) : f32\n";
     out << "  %init_c0 = llvm.mlir.undef : !llvm.struct<(f32, f32)>\n";
     out << "  %init_c1 = llvm.insertvalue %f_one, %init_c0[0] : !llvm.struct<(f32, f32)>\n";
     out << "  %init_c2 = llvm.insertvalue %f_zero, %init_c1[1] : !llvm.struct<(f32, f32)>\n";
     out << "  llvm.store %init_c2, %v0_ptr : !llvm.struct<(f32, f32)>, !llvm.ptr\n";
+
+    // Initialize obs[] to zero (unroll, max 8)
+    for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
+        std::string idx = fresh_ssa();
+        out << "  " << idx << " = llvm.mlir.constant(" << i << " : i64) : i64\n";
+        std::string ptr = fresh_ssa();
+        out << "  " << ptr << " = llvm.getelementptr inbounds %obs_ptr[" << idx
+            << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        out << "  llvm.store %c0_i8, " << ptr << " : i8, !llvm.ptr\n";
+    }
 
     // Bind helper lambdas that forward to the named functions above
     // (the .inc files call these without passing `out` explicitly)
@@ -734,6 +765,78 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     }
 
     out << "  // --- End instruction sequence ---\n";
+
+    // Result aggregation: check discarded, then atomic-add to block_counts
+    // BlockCounts layout: passed(i64), logical_errors(i64), observable_ones[8](i64), ...
+    std::string disc_val = fresh_ssa();
+    out << "  " << disc_val << " = llvm.load %discarded_ptr : !llvm.ptr -> i8\n";
+    std::string is_disc = fresh_ssa();
+    out << "  " << is_disc << " = llvm.icmp \"ne\" " << disc_val << ", %c0_i8 : i8\n";
+    std::string lbl_agg = fresh_label("agg");
+    std::string lbl_done = fresh_label("done");
+    out << "  llvm.cond_br " << is_disc << ", ^" << lbl_done << ", ^" << lbl_agg << "\n";
+    out << "^" << lbl_agg << ":\n";
+
+    // atomic add passed++ (offset 0 in BlockCounts)
+    out << "  %bc_passed_ptr = llvm.getelementptr inbounds %block_counts[%c0_i64, 0]"
+        << " : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(i64, i64, !llvm.array<"
+        << kMaxObs << " x i64>, !llvm.array<" << kMaxExpVals << " x f64>, i64)>\n";
+    out << "  " << fresh_ssa() << " = llvm.atomicrmw add %bc_passed_ptr, %c1_i64 monotonic"
+        << " : !llvm.ptr, i64\n";
+
+    // Check observables: for each obs, if obs[i] != 0, atomic add observable_ones[i]++
+    // Also track if any observable is nonzero for logical_errors
+    bool has_obs = flat.num_observables > 0;
+    if (has_obs) {
+        for (uint32_t i = 0; i < std::min(flat.num_observables, kMaxObs); ++i) {
+            std::string idx = fresh_ssa();
+            out << "  " << idx << " = llvm.mlir.constant(" << i << " : i64) : i64\n";
+            std::string obs_p = fresh_ssa();
+            out << "  " << obs_p << " = llvm.getelementptr inbounds %obs_ptr["
+                << idx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+            std::string oval = fresh_ssa();
+            out << "  " << oval << " = llvm.load " << obs_p << " : !llvm.ptr -> i8\n";
+
+            // Check expected observable (from flat.expected_observables)
+            if (i < flat.expected_observables.size() && flat.expected_observables[i] != 0) {
+                std::string xored = fresh_ssa();
+                out << "  " << xored << " = llvm.xor " << oval << ", %c1_i8 : i8\n";
+                oval = xored;
+            }
+
+            std::string obs_ne = fresh_ssa();
+            out << "  " << obs_ne << " = llvm.icmp \"ne\" " << oval << ", %c0_i8 : i8\n";
+            std::string lbl_obs_inc = fresh_label("obs_inc");
+            std::string lbl_obs_skip = fresh_label("obs_skip");
+            out << "  llvm.cond_br " << obs_ne << ", ^" << lbl_obs_inc << ", ^" << lbl_obs_skip << "\n";
+            out << "^" << lbl_obs_inc << ":\n";
+
+            // atomic add observable_ones[i]++ (offset 2+i in BlockCounts struct)
+            // Use byte offset: passed(8) + logical_errors(8) + i*8 = 16 + i*8
+            std::string obs_offset = fresh_ssa();
+            out << "  " << obs_offset << " = llvm.mlir.constant(" << (16 + i * 8) << " : i64) : i64\n";
+            std::string bc_byte = fresh_ssa();
+            out << "  " << bc_byte << " = llvm.getelementptr %block_counts["
+                << obs_offset << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+            out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << bc_byte
+                << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
+
+            // Also increment logical_errors (offset 8)
+            std::string le_off = fresh_ssa();
+            out << "  " << le_off << " = llvm.mlir.constant(8 : i64) : i64\n";
+            std::string bc_le = fresh_ssa();
+            out << "  " << bc_le << " = llvm.getelementptr %block_counts["
+                << le_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+            out << "  " << fresh_ssa() << " = llvm.atomicrmw add " << bc_le
+                << ", %c1_i64 monotonic : !llvm.ptr, i64\n";
+
+            out << "  llvm.br ^" << lbl_obs_skip << "\n";
+            out << "^" << lbl_obs_skip << ":\n";
+        }
+    }
+
+    out << "  llvm.br ^" << lbl_done << "\n";
+    out << "^" << lbl_done << ":\n";
     out << "  llvm.return\n";
     out << "}\n\n";
     out << "} // end module\n";
