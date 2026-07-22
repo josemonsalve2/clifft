@@ -437,11 +437,12 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
     out << "  " << cond << " = llvm.icmp \"ult\" %ph_i, " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body << ", ^" << exit_lbl << "\n";
     out << "^" << body << ":\n";
+    std::string scattered = emit_scatter_bits_1(out, "%ph_i", axis64);
     std::string idx = fresh_ssa();
-    out << "  " << idx << " = llvm.or "
-        << emit_scatter_bits_1(out, "%ph_i", axis64) << ", " << axis_bit << " : i64\n";
+    out << "  " << idx << " = llvm.or " << scattered << ", " << axis_bit << " : i64\n";
     std::string vc = emit_load_v(out, idx);
-    emit_store_v(out, idx, emit_cmul_const(out, vc, phs_re, phs_im));
+    std::string phased = emit_cmul_const(out, vc, phs_re, phs_im);
+    emit_store_v(out, idx, phased);
     std::string i_next = fresh_ssa();
     out << "  " << i_next << " = llvm.add %ph_i, %c1_i64 : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
@@ -830,12 +831,14 @@ void emit_meas_active_diagonal(std::ostringstream& out,
     std::string rng_b = fresh_ssa();
     out << "  " << rng_b << " = llvm.fcmp \"oge\" " << threshold << ", %psum_p0 : f64\n";
     // Final branch: p1_small ? 0 : (p0_small ? 1 : rng_b)
+    std::string const_true = emit_const_i1(out, true);
+    std::string const_false = emit_const_i1(out, false);
     std::string b_sel1 = fresh_ssa();
     out << "  " << b_sel1 << " = llvm.select " << p0_small << ", "
-        << emit_const_i1(out, true) << ", " << rng_b << " : i1, i1\n";
+        << const_true << ", " << rng_b << " : i1, i1\n";
     std::string b_final = fresh_ssa();
     out << "  " << b_final << " = llvm.select " << p1_small << ", "
-        << emit_const_i1(out, false) << ", " << b_sel1 << " : i1, i1\n";
+        << const_false << ", " << b_sel1 << " : i1, i1\n";
 
     // m_abs = b ^ px
     std::string b_i8 = fresh_ssa();
