@@ -119,7 +119,7 @@ if(CLIFFT_ENABLE_HIP)
     # Enable with: cmake -DCLIFFT_ENABLE_MLIR=ON
     option(CLIFFT_ENABLE_MLIR "Build MLIR→LLVM-IR megakernel codegen (uses mlir-opt/mlir-translate subprocesses)" OFF)
     if(CLIFFT_ENABLE_MLIR)
-        target_sources(clifft_core PRIVATE gpu/mlir/mlir_codegen.cc gpu/mlir/mlir_kernel_cache.cc)
+        target_sources(clifft_core PRIVATE gpu/mlir/mlir_codegen.cc gpu/mlir/mlir_emit.cc gpu/mlir/mlir_kernel_cache.cc)
         target_compile_definitions(clifft_core PRIVATE CLIFFT_ENABLE_MLIR)
         message(STATUS "CLIFFT_ENABLE_MLIR=ON: mlir-opt/mlir-translate must be in PATH or LLVM_PREFIX/bin")
     endif()
