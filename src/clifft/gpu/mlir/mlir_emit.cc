@@ -1632,12 +1632,14 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %lds_red_o = llvm.addrspacecast %lds_red_o_as3 : !llvm.ptr<3> to !llvm.ptr\n";
 
     // Lane 0 of each wavefront writes to LDS[warp_id]
+    std::string c63_i32 = emit_const_i32(out, 63);
+    std::string c6_i32 = emit_const_i32(out, 6);
     std::string lane_id = fresh_ssa();
-    out << "  " << lane_id << " = llvm.and %tidx_i32, " << emit_const_i32(out, 63) << " : i32\n";
+    out << "  " << lane_id << " = llvm.and %tidx_i32, " << c63_i32 << " : i32\n";
     std::string is_lane0 = fresh_ssa();
     out << "  " << is_lane0 << " = llvm.icmp \"eq\" " << lane_id << ", %c0_i32 : i32\n";
     std::string warp_id = fresh_ssa();
-    out << "  " << warp_id << " = llvm.lshr %tidx_i32, " << emit_const_i32(out, 6) << " : i32\n";
+    out << "  " << warp_id << " = llvm.lshr %tidx_i32, " << c6_i32 << " : i32\n";
     std::string warp_i64 = fresh_ssa();
     out << "  " << warp_i64 << " = llvm.zext " << warp_id << " : i32 to i64\n";
 
@@ -1668,9 +1670,9 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     emit_barrier(out);
 
     // Phase 3: tid < 4 reads LDS and reduces with ds_bpermute
+    std::string c4_red = emit_const_i32(out, 4);
     std::string is_first4 = fresh_ssa();
-    out << "  " << is_first4 << " = llvm.icmp \"ult\" %tidx_i32, "
-        << emit_const_i32(out, 4) << " : i32\n";
+    out << "  " << is_first4 << " = llvm.icmp \"ult\" %tidx_i32, " << c4_red << " : i32\n";
     std::string lbl_final = fresh_label("final_red");
     std::string lbl_done = fresh_label("done");
     out << "  llvm.cond_br " << is_first4 << ", ^" << lbl_final << ", ^" << lbl_done << "\n";
