@@ -93,8 +93,8 @@ if(CLIFFT_ENABLE_HIP)
         gpu/hip_sampler.hip
         gpu/device_program.cc
         gpu/kernel_codegen.cc
-        gpu/hsa_runtime.cc
         gpu/kernel_cache.cc
+        gpu/hsa_runtime.cc
         gpu/hsa_kernel_dispatch.cc
         gpu/hsa_persistent_dispatch.cc
     )
@@ -106,6 +106,18 @@ if(CLIFFT_ENABLE_HIP)
     find_package(hsa-runtime64 REQUIRED)
     target_link_libraries(clifft_core PRIVATE hip::host hsa-runtime64::hsa-runtime64)
     target_compile_definitions(clifft_core PUBLIC CLIFFT_ENABLE_GPU)
+
+    # Optional: MLIR→LLVM-IR megakernel codegen (via subprocess tools)
+    # Uses mlir-opt and mlir-translate subprocesses from the LLVM module install.
+    # No MLIR C++ library linkage needed — tools are invoked via popen().
+    # Requires: module load llvm/upstream_05082025 (or LLVM_PREFIX env var)
+    # Enable with: cmake -DCLIFFT_ENABLE_MLIR=ON
+    option(CLIFFT_ENABLE_MLIR "Build MLIR→LLVM-IR megakernel codegen (uses mlir-opt/mlir-translate subprocesses)" OFF)
+    if(CLIFFT_ENABLE_MLIR)
+        target_sources(clifft_core PRIVATE gpu/mlir_codegen.cc gpu/mlir_kernel_cache.cc)
+        target_compile_definitions(clifft_core PRIVATE CLIFFT_ENABLE_MLIR)
+        message(STATUS "CLIFFT_ENABLE_MLIR=ON: mlir-opt/mlir-translate must be in PATH or LLVM_PREFIX/bin")
+    endif()
 else()
     target_sources(clifft_core PRIVATE gpu/hip_sampler_stub.cc gpu/device_program.cc gpu/kernel_codegen.cc)
 endif()
