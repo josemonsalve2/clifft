@@ -480,12 +480,16 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
 // GPU intrinsic helpers for coop/global kernels
 // -----------------------------------------------------------------------
 
+void emit_log_function_def(std::ostringstream& out);  // defined below
+
 void emit_gpu_intrinsic_decls(std::ostringstream& out) {
     out << "llvm.func @llvm.amdgcn.workitem.id.x() -> i32\n";
     out << "llvm.func @llvm.amdgcn.workgroup.id.x() -> i32\n";
     // No llvm.log.f64 — AMDGCN needs device math library. Use inline approx instead.
     out << "llvm.func @llvm.amdgcn.s.barrier() -> ()\n";
     out << "llvm.func @llvm.amdgcn.ds.bpermute(i32, i32) -> i32\n\n";
+    // Shared log(x) function — called by every noise draw (emit_inline_log).
+    emit_log_function_def(out);
 }
 
 std::string emit_tidx(std::ostringstream& out) {
@@ -1343,10 +1347,10 @@ void emit_meas_active_interfere(std::ostringstream& out,
     }
 }
 
-void emit_inline_log(std::ostringstream& out, const std::string& x, std::string& result) {
-    // log(x) via IEEE 754 decomposition and an atanh series through 1/29.
-    // The previous truncation at 1/13 had errors near 1e-8, large enough to
-    // move gap-sampling targets across cumulative-noise-hazard boundaries.
+// Emit the straight-line body of log(x) (IEEE-754 decomposition + atanh
+// series through 1/29) into `out`, returning the SSA name of the result.
+// Shared by the inline path and the @clifft_log function definition.
+void emit_log_body(std::ostringstream& out, const std::string& x, std::string& result) {
     std::string x_bits = fresh_ssa();
     out << "  " << x_bits << " = llvm.bitcast " << x << " : f64 to i64\n";
     std::string c52 = emit_const_i64(out, 52);
@@ -1406,6 +1410,25 @@ void emit_inline_log(std::ostringstream& out, const std::string& x, std::string&
     out << "  " << mantissa_part << " = llvm.fmul " << two_g << ", " << atanh_factor << " : f64\n";
     result = fresh_ssa();
     out << "  " << result << " = llvm.fadd " << exp_part << ", " << mantissa_part << " : f64\n";
+}
+
+// Emit the standalone @clifft_log(f64)->f64 function definition ONCE per
+// module. Inlining the ~64-line log body at every noise draw produced
+// hundreds of thousands of IR lines for large noisy circuits (e.g.
+// surface_d9_t5: 1444 OP_NOISE × ~317 lines). Hoisting to a called function
+// collapses that to one definition + short call sites.
+void emit_log_function_def(std::ostringstream& out) {
+    out << "llvm.func @clifft_log(%lx: f64) -> f64 {\n";
+    std::string r;
+    emit_log_body(out, "%lx", r);
+    out << "  llvm.return " << r << " : f64\n";
+    out << "}\n\n";
+}
+
+// Inline-log call site: emit a call to the shared @clifft_log function.
+void emit_inline_log(std::ostringstream& out, const std::string& x, std::string& result) {
+    result = fresh_ssa();
+    out << "  " << result << " = llvm.call @clifft_log(" << x << ") : (f64) -> f64\n";
 }
 
 void emit_draw_next_noise(std::ostringstream& out,
