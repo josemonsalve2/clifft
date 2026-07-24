@@ -155,9 +155,10 @@ if(CLIFFT_ENABLE_MLIR_V2)
         target_link_libraries(clifft_core PRIVATE hsa-runtime64::hsa-runtime64)
         target_compile_definitions(clifft_core PUBLIC CLIFFT_ENABLE_GPU)
     endif()
-    # V2 host sources (kernel load/dispatch + host codegen driver).
+    # V2 host sources (kernel load/dispatch + host codegen driver + ABI checks).
     target_sources(clifft_core PRIVATE
         gpu/mlir/v2/v2_kernel.cc
+        gpu/mlir/v2/device_abi_checks.cc
     )
     target_compile_definitions(clifft_core PRIVATE CLIFFT_ENABLE_MLIR_V2)
 
