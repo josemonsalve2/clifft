@@ -54,6 +54,8 @@ extern __attribute__((address_space(3))) u8   lds_branch;   // sampled branch br
 extern __attribute__((address_space(3))) u32  lds_next_noise;// next scheduled noise site
 extern __attribute__((address_space(3))) double lds_red0[256];
 extern __attribute__((address_space(3))) double lds_red1[256];
+extern __attribute__((address_space(3))) u32 lds_xcd;        // global tier: XCD id
+extern __attribute__((address_space(3))) u64 lds_shot;       // global tier: claimed shot
 
 // ----- intrinsics ------------------------------------------------------------
 static inline u32 tid(void)  { return __builtin_amdgcn_workitem_id_x(); }
@@ -152,12 +154,12 @@ static inline u64 scatter_bits_2(u64 val, u32 b1, u32 b2) {
 
 // Cooperative diagonal phase on an active axis: v[idx | axis_bit] *= phase,
 // strided over the 2^(active_k-1) lower half. Matches SVM coop_apply_phase.
-static inline void coop_apply_phase(u32 t, u32 axis, CV2Complex phase) {
+static inline void coop_apply_phase(u32 t, CV2Complex* v, u32 axis, CV2Complex phase) {
     u64 axis_bit = 1ull << axis;
     u64 iters = 1ull << (lds_active_k - 1u);
     for (u64 i = t; i < iters; i += 256u) {
         u64 idx = insert_zero_bit(i, axis) | axis_bit;
-        lds_v[idx] = cmul(lds_v[idx], phase);
+        v[idx] = cmul(v[idx], phase);
     }
     barrier();
 }
@@ -252,43 +254,41 @@ static inline void apply_noise_site(const CV2NoiseSite* sites, const CV2Channel*
 }
 
 // =============================================================================
-// The coop interpreter kernel. One workgroup = one shot.
-//   args: packed CV2KernArgs (see device_abi.h).
-// For P1 milestone 1 this handles: init, RNG seed, FRAME ops, OBSERVABLE, and
-// result aggregation. Amplitude/measurement ops are added incrementally; any
-// unhandled opcode sets discarded=1 (loud failure, never silent-wrong).
+// execute_shot — the SHARED interpreter body. One workgroup = one shot; 256
+// threads cooperate on the amplitude buffer `v` (flat pointer: LDS for the coop
+// tier, HBM for the global tier). `scratch` is a half-size fold buffer in the
+// same space. `amp_capacity` is the number of amplitudes to zero at init
+// (1<<peak_rank). Classical state (frame, meas, obs, rng) always lives in LDS.
+// Both kernels below call this; the opcode logic is written ONCE.
 // =============================================================================
-__attribute__((amdgpu_kernel, visibility("default")))
-void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
-                    u32 total_meas_slots, u32 num_observables,
-                    u64 seed, u64 shot_offset, u64 shots,
-                    CV2BlockCounts* block_counts,
-                    const CV2FusedU2Entry* fused_u2,
-                    const CV2FusedU4Entry* fused_u4,
-                    const u32* observable_offsets,
-                    const u32* observable_targets,
-                    const CV2NoiseSite* noise_sites,
-                    const CV2Channel* noise_channels,
-                    const double* noise_hazards,
-                    u32 num_noise_sites,
-                    const CV2Mask* pauli_masks,
-                    const CV2ReadoutNoise* readout_noise,
-                    const u32* detector_offsets,
-                    const u32* detector_targets) {
-    (void)peak_rank; (void)fused_u2; (void)fused_u4;
-    u64 shot_id = shot_offset + (u64)bid();
-    if (shot_id >= shots) return;
-
+static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
+                         u64 shot_id,
+                         const CV2Instr* instrs, u32 num_instrs,
+                         u32 total_meas_slots, u32 num_observables,
+                         u64 seed,
+                         CV2BlockCounts* block_counts,
+                         const CV2FusedU2Entry* fused_u2,
+                         const CV2FusedU4Entry* fused_u4,
+                         const u32* observable_offsets,
+                         const u32* observable_targets,
+                         const CV2NoiseSite* noise_sites,
+                         const CV2Channel* noise_channels,
+                         const double* noise_hazards,
+                         u32 num_noise_sites,
+                         const CV2Mask* pauli_masks,
+                         const CV2ReadoutNoise* readout_noise,
+                         const u32* detector_offsets,
+                         const u32* detector_targets) {
     u32 t = tid();
 
     // --- cooperative init ---
-    for (u32 i = t; i < V2_MAX_AMP; i += 256u) { lds_v[i].re = 0.0f; lds_v[i].im = 0.0f; }
+    for (u32 i = t; i < amp_capacity; i += 256u) { v[i].re = 0.0f; v[i].im = 0.0f; }
     barrier();
     if (t == 0) {
         for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) { lds_px[w] = 0; lds_pz[w] = 0; }
         lds_active_k = 0;
         lds_discarded = 0;
-        lds_v[0].re = 1.0f; lds_v[0].im = 0.0f;
+        v[0].re = 1.0f; v[0].im = 0.0f;
         for (u32 i = 0; i < num_observables; ++i) lds_obs[i] = 0;
         for (u32 i = 0; i < total_meas_slots && i < V2_MAX_MEAS; ++i) lds_meas[i] = 0;
         lds_next_noise = 0;
@@ -371,7 +371,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
         case OP_EXPAND: {
             // Virtual H on a dormant axis: duplicate v[0,half) -> v[half,2half).
             u32 half = 1u << lds_active_k;
-            for (u32 i = t; i < half; i += 256u) lds_v[i + half] = lds_v[i];
+            for (u32 i = t; i < half; i += 256u) v[i + half] = v[i];
             barrier();
             if (t == 0) lds_active_k += 1;
             barrier();
@@ -385,7 +385,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             double imag = (ins.opcode == OP_EXPAND_T_DAG) ? -V2_INV_SQRT2 : V2_INV_SQRT2;
             if (px) imag = -imag;
             CV2Complex phase; phase.re = (float)V2_INV_SQRT2; phase.im = (float)imag;
-            for (u32 i = t; i < half; i += 256u) lds_v[i + half] = cmul(lds_v[i], phase);
+            for (u32 i = t; i < half; i += 256u) v[i + half] = cmul(v[i], phase);
             barrier();
             if (t == 0) lds_active_k += 1;
             barrier();
@@ -398,8 +398,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             int px = fget(lds_px, ins.axis_1);
             double l0 = 0.0, l1 = 0.0;
             for (u32 i = t; i < half; i += 256u) {
-                l0 += cnorm(lds_v[i]);
-                l1 += cnorm(lds_v[i + half]);
+                l0 += cnorm(v[i]);
+                l1 += cnorm(v[i + half]);
             }
             double p0, p1;
             coop_reduce2(t, l0, l1, &p0, &p1);
@@ -412,7 +412,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             }
             barrier();
             if (lds_branch != 0) {
-                for (u32 i = t; i < half; i += 256u) lds_v[i] = lds_v[i + half];
+                for (u32 i = t; i < half; i += 256u) v[i] = v[i + half];
             }
             barrier();
             if (t == 0) {
@@ -430,7 +430,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             int pz = fget(lds_pz, ins.axis_1);
             double lp = 0.0, lm = 0.0;
             for (u32 i = t; i < half; i += 256u) {
-                CV2Complex vi = lds_v[i], vh = lds_v[i + half];
+                CV2Complex vi = v[i], vh = v[i + half];
                 lp += cnorm(cadd(vi, vh));
                 lm += cnorm(csub(vi, vh));
             }
@@ -445,9 +445,9 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             }
             barrier();
             for (u32 i = t; i < half; i += 256u) {
-                CV2Complex vi = lds_v[i], vh = lds_v[i + half];
+                CV2Complex vi = v[i], vh = v[i + half];
                 CV2Complex folded = (lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh);
-                lds_v[i] = cscale(folded, V2_INV_SQRT2);
+                v[i] = cscale(folded, V2_INV_SQRT2);
             }
             barrier();
             if (t == 0) {
@@ -465,8 +465,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             u64 iters = 1ull << (lds_active_k - 2u);
             for (u64 i = t; i < iters; i += 256u) {
                 u64 base = scatter_bits_2(i, c, tg) | c_bit;
-                CV2Complex a = lds_v[base], b = lds_v[base | t_bit];
-                lds_v[base] = b; lds_v[base | t_bit] = a;
+                CV2Complex a = v[base], b = v[base | t_bit];
+                v[base] = b; v[base | t_bit] = a;
             }
             barrier();
             if (t == 0) {
@@ -482,7 +482,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             u64 iters = 1ull << (lds_active_k - 2u);
             for (u64 i = t; i < iters; i += 256u) {
                 u64 idx = scatter_bits_2(i, a, b) | both;
-                CV2Complex c = lds_v[idx]; c.re = -c.re; c.im = -c.im; lds_v[idx] = c;
+                CV2Complex c = v[idx]; c.re = -c.re; c.im = -c.im; v[idx] = c;
             }
             barrier();
             if (t == 0) {
@@ -498,8 +498,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             u64 iters = 1ull << (lds_active_k - 2u);
             for (u64 i = t; i < iters; i += 256u) {
                 u64 base = scatter_bits_2(i, a, b);
-                CV2Complex ta = lds_v[base | a_bit], tb = lds_v[base | b_bit];
-                lds_v[base | a_bit] = tb; lds_v[base | b_bit] = ta;
+                CV2Complex ta = v[base | a_bit], tb = v[base | b_bit];
+                v[base | a_bit] = tb; v[base | b_bit] = ta;
             }
             barrier();
             if (t == 0) { fswap(lds_px, a, b); fswap(lds_pz, a, b); }
@@ -513,8 +513,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             for (u64 idx = t; idx < half; idx += 256u) {
                 u64 actual = scatter_bits_1(idx, tg);
                 if (__builtin_popcountll(actual & ctrl_mask) & 1) {
-                    CV2Complex a = lds_v[actual], b = lds_v[actual | t_bit];
-                    lds_v[actual] = b; lds_v[actual | t_bit] = a;
+                    CV2Complex a = v[actual], b = v[actual | t_bit];
+                    v[actual] = b; v[actual | t_bit] = a;
                 }
             }
             barrier();
@@ -534,7 +534,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             for (u64 idx = t; idx < half; idx += 256u) {
                 u64 actual = scatter_bits_1(idx, ctrl) | c_bit;
                 if (__builtin_popcountll(actual & target_mask) & 1) {
-                    CV2Complex v = lds_v[actual]; v.re = -v.re; v.im = -v.im; lds_v[actual] = v;
+                    CV2Complex vv = v[actual]; vv.re = -vv.re; vv.im = -vv.im; v[actual] = vv;
                 }
             }
             barrier();
@@ -552,9 +552,9 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             u64 iters = 1ull << (lds_active_k - 1u);
             for (u64 i = t; i < iters; i += 256u) {
                 u64 i0 = scatter_bits_1(i, axis), i1 = i0 | axis_bit;
-                CV2Complex a = lds_v[i0], b = lds_v[i1];
-                lds_v[i0] = cscale(cadd(a, b), V2_INV_SQRT2);
-                lds_v[i1] = cscale(csub(a, b), V2_INV_SQRT2);
+                CV2Complex a = v[i0], b = v[i1];
+                v[i0] = cscale(cadd(a, b), V2_INV_SQRT2);
+                v[i1] = cscale(csub(a, b), V2_INV_SQRT2);
             }
             barrier();
             if (t == 0) {
@@ -569,7 +569,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             u32 axis = ins.axis_1;
             CV2Complex ph; ph.re = 0.0f;
             ph.im = (ins.opcode == OP_ARRAY_S_DAG) ? -1.0f : 1.0f;
-            coop_apply_phase(t, axis, ph);
+            coop_apply_phase(t, v, axis, ph);
             if (t == 0) { int px = fget(lds_px, axis); fxor(lds_pz, axis, px); }
             barrier();
             break;
@@ -580,7 +580,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 int px = fget(lds_px, axis);
                 double im = px ? -ins.weight_im : ins.weight_im;
                 CV2Complex phase; phase.re = (float)ins.weight_re; phase.im = (float)im;
-                coop_apply_phase(t, axis, phase);
+                coop_apply_phase(t, v, axis, phase);
             } else barrier();
             break;
         }
@@ -589,7 +589,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             int px = fget(lds_px, ins.axis_1);
             double im = px ? -ins.weight_im : ins.weight_im;
             CV2Complex phase; phase.re = (float)ins.weight_re; phase.im = (float)im;
-            for (u32 i = t; i < half; i += 256u) lds_v[i + half] = cmul(lds_v[i], phase);
+            for (u32 i = t; i < half; i += 256u) v[i + half] = cmul(v[i], phase);
             barrier();
             if (t == 0) lds_active_k += 1;
             barrier();
@@ -604,9 +604,9 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 u64 iters = 1ull << (lds_active_k - 1u);
                 for (u64 i = t; i < iters; i += 256u) {
                     u64 i0 = scatter_bits_1(i, axis), i1 = i0 | axis_bit;
-                    CV2Complex a = lds_v[i0], b = lds_v[i1];
-                    lds_v[i0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
-                    lds_v[i1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
+                    CV2Complex a = v[i0], b = v[i1];
+                    v[i0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
+                    v[i1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
                 }
             }
             barrier();
@@ -628,15 +628,15 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 u64 iters = 1ull << (lds_active_k - 2u);
                 for (u64 i = t; i < iters; i += 256u) {
                     u64 base = scatter_bits_2(i, lo, hi);
-                    CV2Complex v0 = lds_v[base], v1 = lds_v[base | lo_bit];
-                    CV2Complex v2 = lds_v[base | hi_bit], v3 = lds_v[base | lo_bit | hi_bit];
-                    lds_v[base] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
+                    CV2Complex v0 = v[base], v1 = v[base | lo_bit];
+                    CV2Complex v2 = v[base | hi_bit], v3 = v[base | lo_bit | hi_bit];
+                    v[base] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
                                        cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3])));
-                    lds_v[base | lo_bit] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
+                    v[base | lo_bit] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
                                        cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3])));
-                    lds_v[base | hi_bit] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
+                    v[base | hi_bit] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
                                        cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3])));
-                    lds_v[base | lo_bit | hi_bit] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
+                    v[base | lo_bit | hi_bit] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
                                        cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
                 }
             }
@@ -657,7 +657,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 int pz = fget(lds_pz, to);
                 double lp = 0.0, lm = 0.0;
                 for (u32 i = t; i < half; i += 256u) {
-                    CV2Complex vi = lds_v[i], vh = lds_v[i + half];
+                    CV2Complex vi = v[i], vh = v[i + half];
                     lp += cnorm(cadd(vi, vh)); lm += cnorm(csub(vi, vh));
                 }
                 double pp, pm; coop_reduce2(t, lp, lm, &pp, &pm);
@@ -668,8 +668,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 }
                 barrier();
                 for (u32 i = t; i < half; i += 256u) {
-                    CV2Complex vi = lds_v[i], vh = lds_v[i + half];
-                    lds_v[i] = cscale((lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh), V2_INV_SQRT2);
+                    CV2Complex vi = v[i], vh = v[i + half];
+                    v[i] = cscale((lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh), V2_INV_SQRT2);
                 }
                 barrier();
                 if (t == 0) {
@@ -688,7 +688,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             for (u64 idx = t; idx < half; idx += 256u) {
                 u64 b_f = (idx >> from) & 1ull;
                 u64 base = (idx & ~f_bit) | (b_f << to);
-                CV2Complex vb = lds_v[base], vf = lds_v[base | f_bit];
+                CV2Complex vb = v[base], vf = v[base | f_bit];
                 lp += cnorm(cadd(vb, vf)); lm += cnorm(csub(vb, vf));
             }
             double pp, pm; coop_reduce2(t, lp, lm, &pp, &pm);
@@ -702,11 +702,11 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             for (u64 idx = t; idx < half; idx += 256u) {
                 u64 b_f = (idx >> from) & 1ull;
                 u64 base = (idx & ~f_bit) | (b_f << to);
-                CV2Complex vb = lds_v[base], vf = lds_v[base | f_bit];
-                lds_red_scratch[idx] = cscale((lds_branch == 0) ? cadd(vb, vf) : csub(vb, vf), V2_INV_SQRT2);
+                CV2Complex vb = v[base], vf = v[base | f_bit];
+                scratch[idx] = cscale((lds_branch == 0) ? cadd(vb, vf) : csub(vb, vf), V2_INV_SQRT2);
             }
             barrier();
-            for (u64 idx = t; idx < half; idx += 256u) lds_v[idx] = lds_red_scratch[idx];
+            for (u64 idx = t; idx < half; idx += 256u) v[idx] = scratch[idx];
             barrier();
             if (t == 0) {
                 lds_active_k -= 1;
@@ -753,7 +753,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             double imag = (ins.opcode == OP_ARRAY_T_DAG) ? -V2_INV_SQRT2 : V2_INV_SQRT2;
             if (px) imag = -imag;
             CV2Complex phase; phase.re = (float)V2_INV_SQRT2; phase.im = (float)imag;
-            coop_apply_phase(t, ins.axis_1, phase);
+            coop_apply_phase(t, v, ins.axis_1, phase);
             break;
         }
         case OP_OBSERVABLE:
@@ -806,5 +806,91 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 }
             }
         }
+    }
+}
+
+// =============================================================================
+// COOP tier kernel (rank <= 10). One workgroup per shot; amplitudes in LDS.
+// =============================================================================
+__attribute__((amdgpu_kernel, visibility("default")))
+void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
+                    u32 total_meas_slots, u32 num_observables,
+                    u64 seed, u64 shot_offset, u64 shots,
+                    CV2BlockCounts* block_counts,
+                    const CV2FusedU2Entry* fused_u2,
+                    const CV2FusedU4Entry* fused_u4,
+                    const u32* observable_offsets,
+                    const u32* observable_targets,
+                    const CV2NoiseSite* noise_sites,
+                    const CV2Channel* noise_channels,
+                    const double* noise_hazards,
+                    u32 num_noise_sites,
+                    const CV2Mask* pauli_masks,
+                    const CV2ReadoutNoise* readout_noise,
+                    const u32* detector_offsets,
+                    const u32* detector_targets) {
+    (void)peak_rank;
+    u64 shot_id = shot_offset + (u64)bid();
+    if (shot_id >= shots) return;
+    // LDS globals decay to flat pointers; execute_shot addresses them generically.
+    execute_shot((CV2Complex*)lds_v, (CV2Complex*)lds_red_scratch, V2_MAX_AMP,
+                 shot_id, instrs, num_instrs, total_meas_slots, num_observables,
+                 seed, block_counts, fused_u2, fused_u4,
+                 observable_offsets, observable_targets,
+                 noise_sites, noise_channels, noise_hazards, num_noise_sites,
+                 pauli_masks, readout_noise, detector_offsets, detector_targets);
+}
+
+// =============================================================================
+// GLOBAL tier kernel (rank 11-19). Amplitudes in HBM (one slice per workgroup);
+// XCD-aware work-stealing so a fixed grid drains all shots. Interpreter body is
+// identical (execute_shot). global_v/global_scratch are sized peak-rank amps.
+// =============================================================================
+#define V2_NUM_XCDS 8u
+__attribute__((amdgpu_kernel, visibility("default")))
+void clifft_v2_global(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
+                      u32 total_meas_slots, u32 num_observables,
+                      u64 seed, u64 shot_offset, u64 shots,
+                      CV2BlockCounts* block_counts,
+                      const CV2FusedU2Entry* fused_u2,
+                      const CV2FusedU4Entry* fused_u4,
+                      const u32* observable_offsets,
+                      const u32* observable_targets,
+                      const CV2NoiseSite* noise_sites,
+                      const CV2Channel* noise_channels,
+                      const double* noise_hazards,
+                      u32 num_noise_sites,
+                      const CV2Mask* pauli_masks,
+                      const CV2ReadoutNoise* readout_noise,
+                      const u32* detector_offsets,
+                      const u32* detector_targets,
+                      CV2Complex* global_v,
+                      CV2Complex* global_scratch,
+                      u64* work_counter) {
+    u32 t = tid();
+    u32 slot = bid();
+    u64 amp_capacity = 1ull << peak_rank;
+    CV2Complex* v = global_v + (u64)slot * amp_capacity;
+    CV2Complex* scratch = global_scratch + (u64)slot * (amp_capacity >> 1);
+
+    // Correctness-first work queue: a SINGLE global atomic counter hands out
+    // shot ids. Every shot is processed exactly once regardless of XCD topology.
+    // (The per-XCD interleaved variant is a P2 perf optimization; it requires
+    // all XCDs be populated to cover the shot space and is topology-fragile.)
+    (void)V2_NUM_XCDS; (void)lds_xcd;
+    for (;;) {
+        if (t == 0) {
+            lds_shot = __atomic_fetch_add(&work_counter[0], 1UL, __ATOMIC_RELAXED);
+        }
+        barrier();
+        u64 batch_shot = lds_shot;
+        if (batch_shot >= shots) return;
+        execute_shot(v, scratch, (u32)amp_capacity,
+                     shot_offset + batch_shot, instrs, num_instrs,
+                     total_meas_slots, num_observables, seed, block_counts,
+                     fused_u2, fused_u4, observable_offsets, observable_targets,
+                     noise_sites, noise_channels, noise_hazards, num_noise_sites,
+                     pauli_masks, readout_noise, detector_offsets, detector_targets);
+        barrier();
     }
 }

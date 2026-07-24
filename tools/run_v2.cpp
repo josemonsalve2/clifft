@@ -70,6 +70,7 @@ int main(int argc, char** argv) {
     if (!circuit.empty()) {
         auto program = compile_program(circuit, postselect);
         if (getenv("V2_DUMP_OPCODES")) {
+            std::cerr << "PEAK_RANK " << program.peak_rank << "\n";
             std::cerr << "OPCODES(" << program.bytecode.size() << "):";
             for (auto& in : program.bytecode)
                 std::cerr << " " << static_cast<int>(in.opcode);

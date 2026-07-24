@@ -7,6 +7,8 @@
 #include "clifft/gpu/gpu_types.h"        // GpuInstr, BlockCounts, kMaxObs
 
 #include <cstring>
+#include <cstddef>
+#include <cstdlib>
 #include <stdexcept>
 
 #ifndef CLIFFT_V2_PROBE_HSACO
@@ -45,8 +47,19 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     auto& rt = hsa_runtime();
     if (!rt.init()) throw std::runtime_error("v2_sample: HSA init failed");
 
-    HsaLoadedKernel kernel = hsa_load_kernel(hsaco_path, "clifft_v2_coop", 0);
-    if (!kernel.valid) throw std::runtime_error("v2_sample: coop kernel load failed");
+    // Tier selection by peak_rank: coop (<=10, amplitudes in LDS) vs global
+    // (11-19, amplitudes in HBM + XCD work-stealing). Both share execute_shot.
+    constexpr uint32_t kCoopMaxRank = 10;
+    constexpr uint32_t kGlobalMaxRank = 19;
+    constexpr uint32_t kNumXCDs = 8;
+    const bool use_global = flat.peak_rank > kCoopMaxRank;
+    if (flat.peak_rank > kGlobalMaxRank)
+        throw std::runtime_error("v2_sample: peak_rank " + std::to_string(flat.peak_rank) +
+                                 " exceeds global tier max (" + std::to_string(kGlobalMaxRank) + ")");
+
+    const char* sym = use_global ? "clifft_v2_global" : "clifft_v2_coop";
+    HsaLoadedKernel kernel = hsa_load_kernel(hsaco_path, sym, 0);
+    if (!kernel.valid) throw std::runtime_error(std::string("v2_sample: kernel load failed: ") + sym);
 
     // Upload device buffers (reuse flatten_program output — no second lowering).
     uint64_t d_instrs = upload(rt, flat.instrs);
@@ -66,6 +79,31 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     BlockCounts* d_counts = static_cast<BlockCounts*>(rt.device_malloc(sizeof(BlockCounts)));
     rt.memset_device(d_counts, 0, sizeof(BlockCounts) / sizeof(uint32_t));
 
+    // Global tier: one HBM amplitude slice per resident workgroup + per-XCD work
+    // counters. Grid = fixed pool of persistent workgroups (not one-per-shot).
+    uint64_t d_global_v = 0, d_global_scratch = 0, d_work_counter = 0;
+    uint32_t global_grid_wgs = 0;
+    if (use_global) {
+        // Resident pool sized to a fixed HBM budget: each workgroup owns one
+        // amplitude slice (1<<peak_rank) + a half-size scratch. At rank 19 a
+        // slice is 2^19*8 = 4MB, so cap total amplitude memory ~8GB.
+        const uint64_t amp = 1ull << flat.peak_rank;
+        const uint64_t bytes_per_wg = amp * sizeof(GpuComplex) + (amp / 2) * sizeof(GpuComplex);
+        const uint64_t budget = 8ull << 30;  // 8 GB
+        global_grid_wgs = static_cast<uint32_t>(budget / bytes_per_wg);
+        if (global_grid_wgs < kNumXCDs) global_grid_wgs = kNumXCDs;
+        if (global_grid_wgs > 2048) global_grid_wgs = 2048;
+        if (const char* e = getenv("V2_GLOBAL_WGS")) global_grid_wgs = std::atoi(e);
+        d_global_v = reinterpret_cast<uint64_t>(
+            rt.device_malloc((size_t)global_grid_wgs * amp * sizeof(GpuComplex)));
+        d_global_scratch = reinterpret_cast<uint64_t>(
+            rt.device_malloc((size_t)global_grid_wgs * (amp / 2) * sizeof(GpuComplex)));
+        d_work_counter = reinterpret_cast<uint64_t>(rt.device_malloc(kNumXCDs * sizeof(uint64_t)));
+        if (!d_global_v || !d_global_scratch || !d_work_counter)
+            throw std::runtime_error("v2_sample: global-tier HBM alloc failed");
+        rt.memset_device(reinterpret_cast<void*>(d_work_counter), 0, kNumXCDs * (sizeof(uint64_t)/sizeof(uint32_t)));
+    }
+
     // Kernarg layout MUST match clifft_v2_coop's signature (device_abi.h order).
     struct __attribute__((packed)) {
         uint64_t instrs; uint32_t num_instrs; uint32_t peak_rank;
@@ -77,6 +115,7 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
         uint32_t num_noise_sites; uint32_t _pad_align;
         uint64_t pauli_masks;
         uint64_t readout_noise; uint64_t detector_offsets; uint64_t detector_targets;
+        uint64_t global_v; uint64_t global_scratch; uint64_t work_counter;
     } kargs;
     kargs.instrs = d_instrs;
     kargs.num_instrs = flat.instrs.size();
@@ -100,10 +139,17 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     kargs.readout_noise = d_readout_noise;
     kargs.detector_offsets = d_det_off;
     kargs.detector_targets = d_det_tgt;
+    kargs.global_v = d_global_v;
+    kargs.global_scratch = d_global_scratch;
+    kargs.work_counter = d_work_counter;
 
     const uint32_t block = 256;
-    const uint32_t grid = shots * block;  // one workgroup per shot
-    double ks = hsa_dispatch_and_wait(kernel, 0, grid, block, &kargs, sizeof(kargs));
+    // Coop: one workgroup per shot. Global: fixed resident pool, each drains
+    // many shots via work-stealing. kargs size differs by tier (global adds 3
+    // pointers); a coop kernel with fewer kernargs still reads a prefix safely.
+    const uint32_t grid = use_global ? (global_grid_wgs * block) : (shots * block);
+    const size_t karg_bytes = use_global ? sizeof(kargs) : offsetof(decltype(kargs), global_v);
+    double ks = hsa_dispatch_and_wait(kernel, 0, grid, block, &kargs, karg_bytes);
     if (kernel_seconds) *kernel_seconds = ks;
 
     BlockCounts h_counts;
@@ -126,6 +172,9 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     if (d_noise_hazards) rt.device_free(reinterpret_cast<void*>(d_noise_hazards));
     if (d_pauli_masks) rt.device_free(reinterpret_cast<void*>(d_pauli_masks));
     if (d_readout_noise) rt.device_free(reinterpret_cast<void*>(d_readout_noise));
+    if (d_global_v) rt.device_free(reinterpret_cast<void*>(d_global_v));
+    if (d_global_scratch) rt.device_free(reinterpret_cast<void*>(d_global_scratch));
+    if (d_work_counter) rt.device_free(reinterpret_cast<void*>(d_work_counter));
     if (d_det_off) rt.device_free(reinterpret_cast<void*>(d_det_off));
     if (d_det_tgt) rt.device_free(reinterpret_cast<void*>(d_det_tgt));
     hsa_free_kernel(kernel);
