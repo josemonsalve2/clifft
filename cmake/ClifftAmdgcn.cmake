@@ -57,7 +57,7 @@ function(clifft_add_amdgcn_hsaco tgt)
             OUTPUT "${_hsaco}"
             # 1) C -> amdgcn bitcode (freestanding, no HIP; ocml provides math)
             COMMAND "${CLIFFT_AMDGCN_CLANG}" --target=amdgcn-amd-amdhsa -mcpu=${CLIFFT_AMDGPU_ARCH}
-                    -ffreestanding -nostdlib -nogpulib -std=c23 -O2 ${A_EXTRA_FLAGS}
+                    -ffreestanding -nostdlib -nogpulib -std=c23 -O2 -ffp-contract=off ${A_EXTRA_FLAGS}
                     -emit-llvm -c -o "${_bc}" "${_src}"
             # 2) link ocml + oclc controls (wavefront64, daz/finite/unsafe off, isa)
             COMMAND "${CLIFFT_AMDGCN_LINK}" -o "${_linked}" "${_bc}"
@@ -84,7 +84,7 @@ function(clifft_add_amdgcn_hsaco tgt)
             OUTPUT "${_hsaco}"
             # 1) plain C -> amdgcn LLVM-IR (freestanding, NO HIP, NO gpulib)
             COMMAND "${CLIFFT_AMDGCN_CLANG}" --target=amdgcn-amd-amdhsa -mcpu=${CLIFFT_AMDGPU_ARCH}
-                    -ffreestanding -nostdlib -nogpulib -std=c23 -O2 ${A_EXTRA_FLAGS}
+                    -ffreestanding -nostdlib -nogpulib -std=c23 -O2 -ffp-contract=off ${A_EXTRA_FLAGS}
                     -emit-llvm -S -o "${_ll}" "${_src}"
             # 2) IR -> object
             COMMAND "${CLIFFT_AMDGCN_LLC}" -mtriple=amdgcn-amd-amdhsa -mcpu=${CLIFFT_AMDGPU_ARCH}
