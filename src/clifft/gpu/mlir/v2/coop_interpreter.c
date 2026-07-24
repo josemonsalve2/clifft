@@ -50,6 +50,7 @@ extern __attribute__((address_space(3))) u32  lds_active_k;
 extern __attribute__((address_space(3))) u8   lds_discarded;
 extern __attribute__((address_space(3))) u64  lds_rng[4];   // tid0-owned RNG state
 extern __attribute__((address_space(3))) u8   lds_branch;   // sampled branch broadcast
+extern __attribute__((address_space(3))) u32  lds_next_noise;// next scheduled noise site
 extern __attribute__((address_space(3))) double lds_red0[256];
 extern __attribute__((address_space(3))) double lds_red1[256];
 
@@ -164,6 +165,45 @@ static inline u8 sample_branch(double p0, double p1, double total) {
     return (rng_uniform(lds_rng) * total < p0) ? 0u : 1u;
 }
 
+// ROCm device-library transcendental (linked from ocml.bc). SVM's log() lowers
+// to this same symbol, so calling it directly keeps V2 byte-exact.
+extern double __ocml_log_f64(double);
+static inline double ocml_log_f64(double x) { return __ocml_log_f64(x); }
+
+// tid0-only: advance lds_next_noise via exponential-hazard sampling (byte-exact
+// with SVM coop_draw_next_noise). Binary-searches the cumulative-hazard table.
+static inline void draw_next_noise(const double* hazards, u32 num_sites) {
+    if (num_sites == 0u || lds_next_noise >= num_sites) { lds_next_noise = 0xffffffffu; return; }
+    double current_hazard = (lds_next_noise == 0u) ? 0.0 : hazards[lds_next_noise - 1u];
+    double target = current_hazard + (-ocml_log_f64(1.0 - rng_uniform(lds_rng)));
+    u32 lo = 0u, hi = num_sites;
+    while (lo < hi) {
+        u32 mid = lo + ((hi - lo) >> 1);
+        if (hazards[mid] <= target) lo = mid + 1u; else hi = mid;
+    }
+    lds_next_noise = (lo >= num_sites) ? 0xffffffffu : lo;
+}
+
+// tid0-only: apply the Pauli channel drawn at noise site `site_idx` into the
+// frame (matches SVM coop OP_NOISE body).
+static inline void apply_noise_site(const CV2NoiseSite* sites, const CV2Channel* channels,
+                                    u32 site_idx) {
+    CV2NoiseSite site = sites[site_idx];
+    double roll = rng_uniform(lds_rng) * site.prob_sum;
+    double cumulative = 0.0;
+    for (u32 k = 0; k < site.count; ++k) {
+        const CV2Channel* ch = &channels[site.offset + k];
+        cumulative += ch->prob;
+        if (roll < cumulative) {
+            for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) {
+                lds_px[w] ^= ch->x[w];
+                lds_pz[w] ^= ch->z[w];
+            }
+            break;
+        }
+    }
+}
+
 // =============================================================================
 // The coop interpreter kernel. One workgroup = one shot.
 //   args: packed CV2KernArgs (see device_abi.h).
@@ -179,7 +219,11 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                     const CV2FusedU2Entry* fused_u2,
                     const CV2FusedU4Entry* fused_u4,
                     const u32* observable_offsets,
-                    const u32* observable_targets) {
+                    const u32* observable_targets,
+                    const CV2NoiseSite* noise_sites,
+                    const CV2Channel* noise_channels,
+                    const double* noise_hazards,
+                    u32 num_noise_sites) {
     (void)peak_rank; (void)fused_u2; (void)fused_u4;
     u64 shot_id = shot_offset + (u64)bid();
     if (shot_id >= shots) return;
@@ -196,7 +240,9 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
         lds_v[0].re = 1.0f; lds_v[0].im = 0.0f;
         for (u32 i = 0; i < num_observables; ++i) lds_obs[i] = 0;
         for (u32 i = 0; i < total_meas_slots && i < V2_MAX_MEAS; ++i) lds_meas[i] = 0;
+        lds_next_noise = 0;
         rng_seed(lds_rng, seed, shot_id);
+        draw_next_noise(noise_hazards, num_noise_sites);
     }
     barrier();
 
@@ -362,6 +408,26 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             barrier();
             break;
         }
+        case OP_NOISE:
+            if (t == 0 && ins.a == lds_next_noise) {
+                apply_noise_site(noise_sites, noise_channels, ins.a);
+                lds_next_noise = ins.a + 1u;
+                draw_next_noise(noise_hazards, num_noise_sites);
+            }
+            barrier();
+            break;
+        case OP_NOISE_BLOCK:
+            if (t == 0) {
+                u32 end = ins.a + ins.b;
+                while (lds_next_noise >= ins.a && lds_next_noise < end) {
+                    u32 site_idx = lds_next_noise;
+                    apply_noise_site(noise_sites, noise_channels, site_idx);
+                    lds_next_noise = site_idx + 1u;
+                    draw_next_noise(noise_hazards, num_noise_sites);
+                }
+            }
+            barrier();
+            break;
         case OP_ARRAY_T:
         case OP_ARRAY_T_DAG: {
             // Diagonal T phase on an active axis. No-op if axis is dormant.

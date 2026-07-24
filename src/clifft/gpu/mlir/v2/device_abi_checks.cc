@@ -33,6 +33,8 @@ using clifft::gpu::GpuComplex;
 using clifft::gpu::GpuFusedU2Entry;
 using clifft::gpu::GpuFusedU4Entry;
 using clifft::gpu::BlockCounts;
+using clifft::gpu::GpuChannel;
+using clifft::gpu::GpuNoiseSite;
 using clifft::gpu::kMaxObs;
 using clifft::gpu::kMaxExpVals;
 using clifft::gpu::kPauliWords;
@@ -73,6 +75,16 @@ static_assert(sizeof(CV2FusedU4Entry) == sizeof(GpuFusedU4Entry), "CV2FusedU4Ent
 // entries[] element stride must match
 static_assert(sizeof(((CV2FusedU4Entry*)0)->entries[0]) ==
               sizeof(((GpuFusedU4Entry*)0)->entries[0]), "u4 entry stride");
+
+// --- Noise channel / site ---
+static_assert(sizeof(CV2Channel) == sizeof(GpuChannel), "CV2Channel size");
+static_assert(offsetof(CV2Channel, x)    == offsetof(GpuChannel, x),    "channel.x");
+static_assert(offsetof(CV2Channel, z)    == offsetof(GpuChannel, z),    "channel.z");
+static_assert(offsetof(CV2Channel, prob) == offsetof(GpuChannel, prob), "channel.prob");
+static_assert(sizeof(CV2NoiseSite) == sizeof(GpuNoiseSite), "CV2NoiseSite size");
+static_assert(offsetof(CV2NoiseSite, offset)   == offsetof(GpuNoiseSite, offset),   "site.offset");
+static_assert(offsetof(CV2NoiseSite, count)    == offsetof(GpuNoiseSite, count),    "site.count");
+static_assert(offsetof(CV2NoiseSite, prob_sum) == offsetof(GpuNoiseSite, prob_sum), "site.prob_sum");
 
 // --- BlockCounts (result aggregation) ---
 static_assert(sizeof(CV2BlockCounts) == sizeof(BlockCounts), "CV2BlockCounts size");

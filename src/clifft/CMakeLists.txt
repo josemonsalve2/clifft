@@ -176,6 +176,7 @@ if(CLIFFT_ENABLE_MLIR_V2)
     clifft_add_amdgcn_hsaco(clifft_v2_coop_hsaco
         SOURCE gpu/mlir/v2/coop_interpreter.c
         OUTPUT clifft_v2_coop.hsaco
+        OCML
         EXTRA_FLAGS -I${CMAKE_CURRENT_SOURCE_DIR}/..)
     add_dependencies(clifft_core clifft_v2_coop_hsaco)
     target_compile_definitions(clifft_core PRIVATE

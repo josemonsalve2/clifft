@@ -14,7 +14,7 @@
 
 #include <stdint.h>
 
-#define CLIFFT_V2_ABI_VERSION 1u
+#define CLIFFT_V2_ABI_VERSION 2u
 
 // Frame width in 64-bit words (mirrors host kPauliWords). Config-driven per R4;
 // pinned to the host value at build time. If the host changes kPauliWords the
@@ -63,6 +63,20 @@ typedef struct {
     } entries[16];                       // indexed by 4-bit in_state
 } CV2FusedU4Entry;
 
+// ---- Noise channel (mirrors GpuChannel: x[W], z[W], prob) ------------------
+typedef struct {
+    uint64_t x[CLIFFT_V2_PAULI_WORDS];
+    uint64_t z[CLIFFT_V2_PAULI_WORDS];
+    double   prob;
+} CV2Channel;
+
+// ---- Noise site (mirrors GpuNoiseSite: offset, count, prob_sum) ------------
+typedef struct {
+    uint32_t offset;
+    uint32_t count;
+    double   prob_sum;
+} CV2NoiseSite;
+
 // ---- Kernel arguments for the coop interpreter -----------------------------
 // Packed in this exact order into the AQL kernarg region. The device kernel
 // signature must match. Pointers are 64-bit device addresses.
@@ -80,6 +94,11 @@ typedef struct {
     uint64_t fused_u4;            // const GpuFusedU4Entry*
     uint64_t observable_offsets;  // const uint32_t*
     uint64_t observable_targets;  // const uint32_t*
+    uint64_t noise_sites;         // const CV2NoiseSite*
+    uint64_t noise_channels;      // const CV2Channel*
+    uint64_t noise_hazards;       // const double*
+    uint32_t num_noise_sites;
+    uint32_t _pad0;
 } CV2KernArgs;
 
 // ---- Per-workgroup result accumulator (mirrors BlockCounts) ----------------
