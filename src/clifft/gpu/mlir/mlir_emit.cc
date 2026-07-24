@@ -2982,12 +2982,21 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     out << "  %bidx_i32 = llvm.call @llvm.amdgcn.workgroup.id.x() : () -> i32\n";
     out << "  %bidx = llvm.zext %bidx_i32 : i32 to i64\n";
 
-    // Compute v_ptr = global_v + BIDX * hbm_stride
+    // Compute v_ptr = global_v + BIDX * hbm_stride (full-size slot per workgroup)
     std::string v_off = fresh_ssa();
     out << "  " << v_off << " = llvm.mul %bidx, %hbm_stride : i64\n";
     out << "  %v_ptr = llvm.getelementptr inbounds %global_v[" << v_off
         << "] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
-    out << "  %scratch_ptr = llvm.getelementptr inbounds %global_scratch[" << v_off
+    // scratch_ptr = global_scratch + BIDX * (hbm_stride/2). The host allocates
+    // the scratch buffer at HALF the per-slot amplitude count
+    // (global_worker_blocks * kGlobalMaxAmplitudes/2), matching the Hybrid
+    // kernel (hip_sampler.hip). Using the full stride here walked past the
+    // half-sized allocation for every bidx>=1 -> GPU memory access fault at
+    // N>=2 shots.
+    std::string scratch_stride = emit_const_i64(out, (uint64_t)(1u << kGlobalMaxPeakRank) / 2);
+    std::string scr_off = fresh_ssa();
+    out << "  " << scr_off << " = llvm.mul %bidx, " << scratch_stride << " : i64\n";
+    out << "  %scratch_ptr = llvm.getelementptr inbounds %global_scratch[" << scr_off
         << "] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";
 
     // XCD work-stealing: get XCD ID, compute my_counter pointer
