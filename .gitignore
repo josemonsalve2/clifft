@@ -72,3 +72,5 @@ GEAK
 build-gpu-*/
 .claude/worktrees/
 docs/v2/ir_reference/
+build-v2-nohip/
+build-v2-deps/
