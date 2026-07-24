@@ -481,8 +481,10 @@ void emit_apply_phase_static(std::ostringstream& out, uint32_t axis,
 // -----------------------------------------------------------------------
 
 void emit_log_function_def(std::ostringstream& out);  // defined below
+void emit_draw_next_noise_function_def(std::ostringstream& out,
+                                       const FlattenedProgram& flat);  // defined below
 
-void emit_gpu_intrinsic_decls(std::ostringstream& out) {
+void emit_gpu_intrinsic_decls(std::ostringstream& out) {  // fwd-used helpers
     out << "llvm.func @llvm.amdgcn.workitem.id.x() -> i32\n";
     out << "llvm.func @llvm.amdgcn.workgroup.id.x() -> i32\n";
     // No llvm.log.f64 — AMDGCN needs device math library. Use inline approx instead.
@@ -1431,7 +1433,11 @@ void emit_inline_log(std::ostringstream& out, const std::string& x, std::string&
     out << "  " << result << " = llvm.call @clifft_log(" << x << ") : (f64) -> f64\n";
 }
 
-void emit_draw_next_noise(std::ostringstream& out,
+// Straight-line body of draw_next_noise. References the kernel state pointers
+// by name (%nni_ptr, %rng_ptr, %noise_hazards_ptr, %num_noise_sites) — these
+// are supplied either as kernel-scope values (legacy inline) or as function
+// arguments of @clifft_draw_next_noise (shared-function path).
+void emit_draw_next_noise_body(std::ostringstream& out,
                            const FlattenedProgram& flat) {
     uint32_t n = flat.noise_sites.size();
     if (n == 0) {
@@ -1546,6 +1552,40 @@ void emit_draw_next_noise(std::ostringstream& out,
     out << "  llvm.store " << final_nni << ", %nni_ptr : i32, !llvm.ptr\n";
     out << "  llvm.br ^" << dn_end << "\n";
     out << "^" << dn_end << ":\n";
+}
+
+// Emit @clifft_draw_next_noise ONCE per module (only when the circuit has
+// noise). Takes the kernel state pointers as arguments so all three tiers
+// (register/coop/global) share one definition instead of inlining ~110 lines
+// at every noise draw (surface_d9_t5 had 1444 draws). The body references the
+// arg names %nni_ptr/%rng_ptr/%noise_hazards_ptr/%num_noise_sites verbatim.
+void emit_draw_next_noise_function_def(std::ostringstream& out,
+                                       const FlattenedProgram& flat) {
+    if (flat.noise_sites.empty()) return;
+    out << "llvm.func @clifft_draw_next_noise("
+        << "%nni_ptr: !llvm.ptr, %rng_ptr: !llvm.ptr, "
+        << "%noise_hazards_ptr: !llvm.ptr, %num_noise_sites: i64) {\n";
+    // MLIR functions are isolated regions — re-declare the kernel-scope
+    // constants the body references by literal name.
+    out << "  %c0_i32 = llvm.mlir.constant(0 : i32) : i32\n";
+    out << "  %c0_i64 = llvm.mlir.constant(0 : i64) : i64\n";
+    out << "  %c1_i64 = llvm.mlir.constant(1 : i64) : i64\n";
+    emit_draw_next_noise_body(out, flat);
+    out << "  llvm.return\n";
+    out << "}\n\n";
+}
+
+// Call site: invoke the shared @clifft_draw_next_noise with the kernel's state.
+void emit_draw_next_noise(std::ostringstream& out,
+                           const FlattenedProgram& flat) {
+    if (flat.noise_sites.empty()) {
+        std::string sentinel = emit_const_i32(out, 0xFFFFFFFFu);
+        out << "  llvm.store " << sentinel << ", %nni_ptr : i32, !llvm.ptr\n";
+        return;
+    }
+    out << "  llvm.call @clifft_draw_next_noise(%nni_ptr, %rng_ptr, "
+        << "%noise_hazards_ptr, %num_noise_sites) "
+        << ": (!llvm.ptr, !llvm.ptr, !llvm.ptr, i64) -> ()\n";
 }
 
 // -----------------------------------------------------------------------
@@ -2123,6 +2163,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
 
     out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
     emit_gpu_intrinsic_decls(out);
+    emit_draw_next_noise_function_def(out, flat);
 
     // LDS for warp shuffle inter-wavefront reduction (4 wavefronts × values)
     emit_lds_global(out, "lds_red_passed", "i64", 4);
@@ -2592,6 +2633,7 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     // Module header + intrinsic declarations
     out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
     emit_gpu_intrinsic_decls(out);
+    emit_draw_next_noise_function_def(out, flat);
 
     // LDS globals (address space 3)
     emit_lds_global(out, "lds_v", "!llvm.struct<(f32, f32)>", num_amps);
@@ -2954,6 +2996,7 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     // Module header + intrinsic declarations
     out << "module attributes {llvm.target_triple = \"amdgcn-amd-amdhsa\"} {\n\n";
     emit_gpu_intrinsic_decls(out);
+    emit_draw_next_noise_function_def(out, flat);
 
     // LDS globals for frame/classical state (amplitudes are in HBM)
     emit_lds_global(out, "lds_px", "i64", kPauliWords);
