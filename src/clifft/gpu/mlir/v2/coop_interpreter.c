@@ -117,8 +117,14 @@ static inline CV2Complex cadd(CV2Complex a, CV2Complex b) {
 static inline CV2Complex csub(CV2Complex a, CV2Complex b) {
     CV2Complex r; r.re = a.re - b.re; r.im = a.im - b.im; return r;
 }
-static inline CV2Complex cscale(CV2Complex a, float s) {
-    CV2Complex r; r.re = a.re * s; r.im = a.im * s; return r;
+// NOTE: scalar multiply happens in f64 then narrows to f32 — byte-exact with
+// SVM cscale (static_cast<float>(static_cast<double>(a.re) * s)). Do NOT
+// simplify to an f32 multiply; that desyncs measurement branches vs the gold.
+static inline CV2Complex cscale(CV2Complex a, double s) {
+    CV2Complex r;
+    r.re = (float)((double)a.re * s);
+    r.im = (float)((double)a.im * s);
+    return r;
 }
 // |v|^2 accumulated in f64 (match gold cnorm: extend each component first).
 static inline double cnorm(CV2Complex v) {
@@ -156,19 +162,44 @@ static inline void coop_apply_phase(u32 t, u32 axis, CV2Complex phase) {
     barrier();
 }
 
+// Wavefront butterfly shuffle of an f64 (lane l receives lane (l^offset)'s
+// value) via ds_bpermute — the amdgcn primitive HIP's __shfl_xor lowers to.
+static inline double shfl_xor_f64(double v, u32 lane, int offset) {
+    u64 bits;
+    __builtin_memcpy(&bits, &v, 8);
+    u32 lo = (u32)bits, hi = (u32)(bits >> 32);
+    u32 addr = ((lane ^ (u32)offset) & 63u) << 2;  // ds_bpermute addr = lane*4
+    u32 rlo = __builtin_amdgcn_ds_bpermute((int)addr, (int)lo);
+    u32 rhi = __builtin_amdgcn_ds_bpermute((int)addr, (int)hi);
+    u64 rbits = ((u64)rhi << 32) | (u64)rlo;
+    double r;
+    __builtin_memcpy(&r, &rbits, 8);
+    return r;
+}
+
 // Cooperative reduction of two per-thread f64 partials across 256 threads.
-// LDS tree reduce (correctness-first; ds_bpermute optimization later). All 256
-// threads call it; result broadcast to all via lds_red[0].
+// MUST reproduce SVM coop_reduce2's exact summation order (intra-wave butterfly
+// 32..1, then a 4-warp butterfly 2..1) or f64 rounding diverges at measurement
+// branch points on reduction-heavy circuits (rank-10 QEC). All 256 threads call
+// it; result broadcast via lds_red[0].
 static inline void coop_reduce2(u32 t, double l0, double l1, double* out0, double* out1) {
-    lds_red0[t] = l0; lds_red1[t] = l1;
-    barrier();
-    for (u32 stride = 128u; stride > 0u; stride >>= 1) {
-        if (t < stride) {
-            lds_red0[t] += lds_red0[t + stride];
-            lds_red1[t] += lds_red1[t + stride];
-        }
-        barrier();
+    u32 lane = t & 63u;
+    u32 warp = t >> 6;
+    for (int off = 32; off > 0; off >>= 1) {
+        l0 += shfl_xor_f64(l0, lane, off);
+        l1 += shfl_xor_f64(l1, lane, off);
     }
+    if (lane == 0u) { lds_red0[warp] = l0; lds_red1[warp] = l1; }
+    barrier();
+    if (t < 4u) {
+        l0 = lds_red0[t]; l1 = lds_red1[t];
+        for (int off = 2; off > 0; off >>= 1) {
+            l0 += shfl_xor_f64(l0, lane, off);
+            l1 += shfl_xor_f64(l1, lane, off);
+        }
+    }
+    if (t == 0u) { lds_red0[0] = l0; lds_red1[0] = l1; }
+    barrier();
     *out0 = lds_red0[0]; *out1 = lds_red1[0];
     barrier();
 }
@@ -416,7 +447,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             for (u32 i = t; i < half; i += 256u) {
                 CV2Complex vi = lds_v[i], vh = lds_v[i + half];
                 CV2Complex folded = (lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh);
-                lds_v[i] = cscale(folded, (float)V2_INV_SQRT2);
+                lds_v[i] = cscale(folded, V2_INV_SQRT2);
             }
             barrier();
             if (t == 0) {
@@ -522,8 +553,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             for (u64 i = t; i < iters; i += 256u) {
                 u64 i0 = scatter_bits_1(i, axis), i1 = i0 | axis_bit;
                 CV2Complex a = lds_v[i0], b = lds_v[i1];
-                lds_v[i0] = cscale(cadd(a, b), (float)V2_INV_SQRT2);
-                lds_v[i1] = cscale(csub(a, b), (float)V2_INV_SQRT2);
+                lds_v[i0] = cscale(cadd(a, b), V2_INV_SQRT2);
+                lds_v[i1] = cscale(csub(a, b), V2_INV_SQRT2);
             }
             barrier();
             if (t == 0) {
@@ -638,7 +669,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 barrier();
                 for (u32 i = t; i < half; i += 256u) {
                     CV2Complex vi = lds_v[i], vh = lds_v[i + half];
-                    lds_v[i] = cscale((lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh), (float)V2_INV_SQRT2);
+                    lds_v[i] = cscale((lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh), V2_INV_SQRT2);
                 }
                 barrier();
                 if (t == 0) {
@@ -672,7 +703,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 u64 b_f = (idx >> from) & 1ull;
                 u64 base = (idx & ~f_bit) | (b_f << to);
                 CV2Complex vb = lds_v[base], vf = lds_v[base | f_bit];
-                lds_red_scratch[idx] = cscale((lds_branch == 0) ? cadd(vb, vf) : csub(vb, vf), (float)V2_INV_SQRT2);
+                lds_red_scratch[idx] = cscale((lds_branch == 0) ? cadd(vb, vf) : csub(vb, vf), V2_INV_SQRT2);
             }
             barrier();
             for (u64 idx = t; idx < half; idx += 256u) lds_v[idx] = lds_red_scratch[idx];
