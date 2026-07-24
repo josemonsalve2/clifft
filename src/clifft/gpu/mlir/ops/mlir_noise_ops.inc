@@ -5,8 +5,14 @@
 //         noise_channels_ptr → GpuChannel[m] (40 bytes each: u64 x[2], u64 z[2], f64 prob)
 
 case Opcode::OP_NOISE: {
+    // COOP: run the whole site body on tid0 only (matches gold
+    // hip_sampler.hip:1677). All coop scalar RNG draws are tid0-only, so tid0's
+    // per-thread nni + RNG stream stays aligned with SVM; the other 255 threads
+    // previously did identical redundant work (RNG + channel loop) — pure waste.
+    // The trailing barrier publishes tid0's frame writes to all threads.
     uint32_t site_idx = ins.a;
     out << "  // noise site " << site_idx << " (runtime data)\n";
+    std::string noise_t0 = cooperative_mode ? emit_tid0_guard_begin(out) : "";
     // Check if next_noise_idx == site_idx
     std::string nni_cur = fresh_ssa();
     out << "  " << nni_cur << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
@@ -87,40 +93,47 @@ case Opcode::OP_NOISE: {
     std::string lbl_skip = fresh_label("nch_skip");
     out << "  llvm.cond_br " << apply << ", ^" << lbl_apply << ", ^" << lbl_skip << "\n";
     out << "^" << lbl_apply << ":\n";
-    // Load and XOR x[0..1] into px, z[0..1] into pz
-    for (int w = 0; w < 2; ++w) {
-        std::string x_off = emit_const_i64(out, w * 8);
-        std::string x_ptr = fresh_ssa();
-        out << "  " << x_ptr << " = llvm.getelementptr " << ch_base << "["
-            << x_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-        std::string xval = fresh_ssa();
-        out << "  " << xval << " = llvm.load " << x_ptr << " : !llvm.ptr -> i64\n";
-        std::string widx = emit_const_i64(out, w);
-        std::string pw = fresh_ssa();
-        out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
-            << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-        std::string ov = fresh_ssa();
-        out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-        std::string nv = fresh_ssa();
-        out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
-        out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
-    }
-    for (int w = 0; w < 2; ++w) {
-        std::string z_off = emit_const_i64(out, 16 + w * 8);
-        std::string z_ptr = fresh_ssa();
-        out << "  " << z_ptr << " = llvm.getelementptr " << ch_base << "["
-            << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-        std::string zval = fresh_ssa();
-        out << "  " << zval << " = llvm.load " << z_ptr << " : !llvm.ptr -> i64\n";
-        std::string widx = emit_const_i64(out, w);
-        std::string pw = fresh_ssa();
-        out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
-            << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-        std::string ov = fresh_ssa();
-        out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-        std::string nv = fresh_ssa();
-        out << "  " << nv << " = llvm.xor " << ov << ", " << zval << " : i64\n";
-        out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+    // Pauli-frame XOR: tid0-only in coop (XOR is not idempotent). All threads
+    // took the identical branch here (same RNG/roll), so guarding the mutation
+    // to tid0 is safe; a barrier after makes the updated frame visible.
+    {
+        std::string xor_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
+        // Load and XOR x[0..1] into px, z[0..1] into pz
+        for (int w = 0; w < 2; ++w) {
+            std::string x_off = emit_const_i64(out, w * 8);
+            std::string x_ptr = fresh_ssa();
+            out << "  " << x_ptr << " = llvm.getelementptr " << ch_base << "["
+                << x_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+            std::string xval = fresh_ssa();
+            out << "  " << xval << " = llvm.load " << x_ptr << " : !llvm.ptr -> i64\n";
+            std::string widx = emit_const_i64(out, w);
+            std::string pw = fresh_ssa();
+            out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
+                << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+            std::string ov = fresh_ssa();
+            out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+            std::string nv = fresh_ssa();
+            out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
+            out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+        }
+        for (int w = 0; w < 2; ++w) {
+            std::string z_off = emit_const_i64(out, 16 + w * 8);
+            std::string z_ptr = fresh_ssa();
+            out << "  " << z_ptr << " = llvm.getelementptr " << ch_base << "["
+                << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+            std::string zval = fresh_ssa();
+            out << "  " << zval << " = llvm.load " << z_ptr << " : !llvm.ptr -> i64\n";
+            std::string widx = emit_const_i64(out, w);
+            std::string pw = fresh_ssa();
+            out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
+                << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+            std::string ov = fresh_ssa();
+            out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+            std::string nv = fresh_ssa();
+            out << "  " << nv << " = llvm.xor " << ov << ", " << zval << " : i64\n";
+            out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+        }
+        if (cooperative_mode) emit_tid0_guard_end_nobarrier(out, xor_guard);
     }
     out << "  llvm.br ^" << lbl_skip << "\n";
     out << "^" << lbl_skip << ":\n";
@@ -129,37 +142,68 @@ case Opcode::OP_NOISE: {
     out << "  " << nch_next << " = llvm.add " << nch_var << ", %c1_i64 : i64\n";
     out << "  llvm.br ^" << nch_hdr << "(" << nch_next << ", " << new_cum << " : i64, f64)\n";
     out << "^" << nch_done << ":\n";
-    // Advance nni and draw next
+    // Advance nni and draw next — on ALL threads to keep RNG/nni in sync.
     std::string next_si = emit_const_i32(out, site_idx + 1);
     out << "  llvm.store " << next_si << ", %nni_ptr : i32, !llvm.ptr\n";
     emit_draw_next_noise(out, flat);
     out << "  llvm.br ^" << lbl_skip_noise << "\n";
     out << "^" << lbl_skip_noise << ":\n";
+    // Close the whole-site tid0 guard (no barrier here; the uniform barrier
+    // below publishes tid0's frame writes to all threads).
+    if (cooperative_mode) emit_tid0_guard_end_nobarrier(out, noise_t0);
+    // Barrier so the tid0 frame XOR is visible to all threads before the next op.
+    if (cooperative_mode) emit_barrier(out);
     break;
 }
 case Opcode::OP_NOISE_BLOCK: {
-    // Process noise sites in [ins.a, ins.a + ins.b) with scheduling
-    // Emit a loop over the range instead of unrolling
+    // Redundant-full across coop threads (keep RNG/nni synced); only the
+    // Pauli-frame XOR is tid0-guarded (see OP_NOISE rationale).
+    // Process noise sites in [ins.a, ins.a + ins.b) with scheduling.
+    //
+    // IR-SIZE CRITICAL: emit a RUNTIME loop over the site index instead of
+    // unrolling one full site block per site. Every site block is identical
+    // except the constant `si`, and all site metadata is already loaded from
+    // %noise_sites_ptr[si*16] at runtime — so we only need `si` to be a loop
+    // variable. Unrolling produced ~100k lines / 32 MB IR for circuit_d5
+    // (~1200 sites/block), which OOM/crashed llc. All 256 coop threads run this
+    // loop in lockstep (per-thread private nni + RNG), so it stays uniform.
     uint32_t start = ins.a;
     uint32_t end_val = start + ins.b;
-    out << "  // noise_block [" << start << ", " << end_val << ") (runtime data)\n";
-    std::string nb_start = emit_const_i32(out, start);
-    std::string nb_end = emit_const_i32(out, end_val);
-    // For each site in the block, check scheduling and apply noise
-    // We still unroll the SITES (since there may be few per block), but channels are runtime-looped
-    for (uint32_t si = start; si < end_val && si < flat.noise_sites.size(); ++si) {
-        out << "  // noise_block site " << si << "\n";
+    uint32_t bound = std::min(end_val, (uint32_t)flat.noise_sites.size());
+    out << "  // noise_block [" << start << ", " << end_val << ") (runtime loop, bound=" << bound << ")\n";
+    if (bound > start) {
+        // COOP: run the WHOLE site loop on tid0 only (matches gold
+        // hip_sampler.hip:1698). All coop scalar RNG draws are tid0-only, so
+        // tid0's per-thread nni + RNG stream stays aligned with SVM; the other
+        // 255 threads did identical redundant work before — pure waste. The
+        // trailing barrier (outside this guard) publishes tid0's frame writes.
+        std::string nbl_t0 = cooperative_mode ? emit_tid0_guard_begin(out) : "";
+        std::string nb_start_c = emit_const_i64(out, start);
+        std::string nb_bound_c = emit_const_i64(out, bound);
+        std::string nbl_hdr = fresh_label("nbl_hdr");
+        std::string nbl_body = fresh_label("nbl_body");
+        std::string nbl_exit = fresh_label("nbl_exit");
+        std::string si64 = fresh_ssa();
+        out << "  llvm.br ^" << nbl_hdr << "(" << nb_start_c << " : i64)\n";
+        out << "^" << nbl_hdr << "(" << si64 << ": i64):\n";
+        std::string nbl_cond = fresh_ssa();
+        out << "  " << nbl_cond << " = llvm.icmp \"ult\" " << si64 << ", " << nb_bound_c << " : i64\n";
+        out << "  llvm.cond_br " << nbl_cond << ", ^" << nbl_body << ", ^" << nbl_exit << "\n";
+        out << "^" << nbl_body << ":\n";
+        std::string si32 = fresh_ssa();
+        out << "  " << si32 << " = llvm.trunc " << si64 << " : i64 to i32\n";
         std::string nni_cur = fresh_ssa();
         out << "  " << nni_cur << " = llvm.load %nni_ptr : !llvm.ptr -> i32\n";
-        std::string site_val = emit_const_i32(out, si);
         std::string nni_match = fresh_ssa();
-        out << "  " << nni_match << " = llvm.icmp \"eq\" " << nni_cur << ", " << site_val << " : i32\n";
+        out << "  " << nni_match << " = llvm.icmp \"eq\" " << nni_cur << ", " << si32 << " : i32\n";
         std::string lbl_do = fresh_label("nb_do");
         std::string lbl_end = fresh_label("nb_end");
         out << "  llvm.cond_br " << nni_match << ", ^" << lbl_do << ", ^" << lbl_end << "\n";
         out << "^" << lbl_do << ":\n";
-        // Load site metadata
-        std::string sb_off = emit_const_i64(out, (uint64_t)si * 16);
+        // Load site metadata at %noise_sites_ptr[si*16] (runtime si)
+        std::string sb_off = fresh_ssa();
+        { std::string c16 = emit_const_i64(out, 16);
+          out << "  " << sb_off << " = llvm.mul " << si64 << ", " << c16 << " : i64\n"; }
         std::string sb_base = fresh_ssa();
         out << "  " << sb_base << " = llvm.getelementptr %noise_sites_ptr["
             << sb_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
@@ -221,39 +265,43 @@ case Opcode::OP_NOISE_BLOCK: {
         std::string nb_lbl_skip = fresh_label("nbch_skip");
         out << "  llvm.cond_br " << nb_apply << ", ^" << nb_lbl_apply << ", ^" << nb_lbl_skip << "\n";
         out << "^" << nb_lbl_apply << ":\n";
-        for (int w = 0; w < 2; ++w) {
-            std::string x_off = emit_const_i64(out, w * 8);
-            std::string x_ptr = fresh_ssa();
-            out << "  " << x_ptr << " = llvm.getelementptr " << nb_ch_base << "["
-                << x_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-            std::string xval = fresh_ssa();
-            out << "  " << xval << " = llvm.load " << x_ptr << " : !llvm.ptr -> i64\n";
-            std::string widx = emit_const_i64(out, w);
-            std::string pw = fresh_ssa();
-            out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
-                << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-            std::string ov = fresh_ssa();
-            out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-            std::string nv = fresh_ssa();
-            out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
-            out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
-        }
-        for (int w = 0; w < 2; ++w) {
-            std::string z_off = emit_const_i64(out, 16 + w * 8);
-            std::string z_ptr = fresh_ssa();
-            out << "  " << z_ptr << " = llvm.getelementptr " << nb_ch_base << "["
-                << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-            std::string zval = fresh_ssa();
-            out << "  " << zval << " = llvm.load " << z_ptr << " : !llvm.ptr -> i64\n";
-            std::string widx = emit_const_i64(out, w);
-            std::string pw = fresh_ssa();
-            out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
-                << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-            std::string ov = fresh_ssa();
-            out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
-            std::string nv = fresh_ssa();
-            out << "  " << nv << " = llvm.xor " << ov << ", " << zval << " : i64\n";
-            out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+        {
+            std::string nb_xor_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
+            for (int w = 0; w < 2; ++w) {
+                std::string x_off = emit_const_i64(out, w * 8);
+                std::string x_ptr = fresh_ssa();
+                out << "  " << x_ptr << " = llvm.getelementptr " << nb_ch_base << "["
+                    << x_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+                std::string xval = fresh_ssa();
+                out << "  " << xval << " = llvm.load " << x_ptr << " : !llvm.ptr -> i64\n";
+                std::string widx = emit_const_i64(out, w);
+                std::string pw = fresh_ssa();
+                out << "  " << pw << " = llvm.getelementptr inbounds %px_ptr["
+                    << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+                std::string ov = fresh_ssa();
+                out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+                std::string nv = fresh_ssa();
+                out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
+                out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+            }
+            for (int w = 0; w < 2; ++w) {
+                std::string z_off = emit_const_i64(out, 16 + w * 8);
+                std::string z_ptr = fresh_ssa();
+                out << "  " << z_ptr << " = llvm.getelementptr " << nb_ch_base << "["
+                    << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+                std::string zval = fresh_ssa();
+                out << "  " << zval << " = llvm.load " << z_ptr << " : !llvm.ptr -> i64\n";
+                std::string widx = emit_const_i64(out, w);
+                std::string pw = fresh_ssa();
+                out << "  " << pw << " = llvm.getelementptr inbounds %pz_ptr["
+                    << widx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+                std::string ov = fresh_ssa();
+                out << "  " << ov << " = llvm.load " << pw << " : !llvm.ptr -> i64\n";
+                std::string nv = fresh_ssa();
+                out << "  " << nv << " = llvm.xor " << ov << ", " << zval << " : i64\n";
+                out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
+            }
+            if (cooperative_mode) emit_tid0_guard_end_nobarrier(out, nb_xor_guard);
         }
         out << "  llvm.br ^" << nb_lbl_skip << "\n";
         out << "^" << nb_lbl_skip << ":\n";
@@ -261,18 +309,35 @@ case Opcode::OP_NOISE_BLOCK: {
         out << "  " << nbch_next << " = llvm.add " << nbch_var << ", %c1_i64 : i64\n";
         out << "  llvm.br ^" << nbch_hdr << "(" << nbch_next << ", " << nb_new_cum << " : i64, f64)\n";
         out << "^" << nbch_done << ":\n";
-        std::string nb_next_si = emit_const_i32(out, si + 1);
+        std::string nb_next_si = fresh_ssa();
+        out << "  " << nb_next_si << " = llvm.add " << si32 << ", %c1_i32 : i32\n";
         out << "  llvm.store " << nb_next_si << ", %nni_ptr : i32, !llvm.ptr\n";
         emit_draw_next_noise(out, flat);
         out << "  llvm.br ^" << lbl_end << "\n";
         out << "^" << lbl_end << ":\n";
+        // loop increment + back-edge
+        std::string si_next = fresh_ssa();
+        out << "  " << si_next << " = llvm.add " << si64 << ", %c1_i64 : i64\n";
+        out << "  llvm.br ^" << nbl_hdr << "(" << si_next << " : i64)\n";
+        out << "^" << nbl_exit << ":\n";
+        // Close the whole-block tid0 guard (no barrier here; the uniform
+        // barrier below publishes tid0's frame writes to all threads).
+        if (cooperative_mode) emit_tid0_guard_end_nobarrier(out, nbl_t0);
     }
+    // Barrier so tid0 frame XORs are visible to all threads before the next op.
+    if (cooperative_mode) emit_barrier(out);
     break;
 }
 case Opcode::OP_READOUT_NOISE: {
-    // Readout noise: flip measurement bit with probability
+    // Readout noise: flip measurement bit with probability.
+    // COOP: the scalar RNG draw + meas flip MUST be tid0-only (matches gold
+    // hip_sampler.hip:1722). All coop scalar RNG draws are tid0-only so tid0's
+    // stream stays byte-aligned with the SVM single-thread stream; a
+    // redundant-full draw here desyncs tid0 vs the other 255 threads (tid0 is
+    // already ahead from tid0-only sample_branch draws) and corrupts shots >=1.
     if (ins.a < flat.readout_noise.size()) {
         const auto& rn = flat.readout_noise[ins.a];
+        std::string rn_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
         std::string u = emit_rng_uniform(out);
         std::string prob = fresh_ssa();
         char pbuf[64]; snprintf(pbuf, sizeof(pbuf), "%.17e", rn.prob);
@@ -294,6 +359,7 @@ case Opcode::OP_READOUT_NOISE: {
         out << "  llvm.store " << flipped << ", " << mptr << " : i8, !llvm.ptr\n";
         out << "  llvm.br ^" << lbl_noflip << "\n";
         out << "^" << lbl_noflip << ":\n";
+        if (cooperative_mode) emit_tid0_guard_end(out, rn_guard);
     }
     break;
 }
@@ -331,9 +397,28 @@ case Opcode::OP_POSTSELECT: {
     break;
 }
 case Opcode::OP_APPLY_PAULI: {
-    // Inline pauli mask application
+    // Classically-controlled Pauli (feedforward correction): apply the mask to
+    // the Pauli frame ONLY when the controlling measurement meas[ins.b] != 0.
+    // GPU-SVM: apply_pauli() early-returns if st.meas[condition_idx]==0
+    // (hip_sampler.hip). Applying unconditionally corrupts the frame
+    // deterministically -> wrong stabilizer measurements -> wrong observable.
     if (ins.a < flat.pauli_masks.size()) {
         const auto& mask = flat.pauli_masks[ins.a];
+        // Load controlling measurement bit meas[ins.b]
+        std::string cidx = emit_const_i64(out, ins.b);
+        std::string cptr = fresh_ssa();
+        out << "  " << cptr << " = llvm.getelementptr inbounds %meas_ptr["
+            << cidx << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
+        std::string cval = fresh_ssa();
+        out << "  " << cval << " = llvm.load " << cptr << " : !llvm.ptr -> i8\n";
+        std::string cnz = fresh_ssa();
+        out << "  " << cnz << " = llvm.icmp \"ne\" " << cval << ", %c0_i8 : i8\n";
+        std::string lbl_apply = fresh_label("ap_apply");
+        std::string lbl_done = fresh_label("ap_done");
+        out << "  llvm.cond_br " << cnz << ", ^" << lbl_apply << ", ^" << lbl_done << "\n";
+        out << "^" << lbl_apply << ":\n";
+        // Frame mutation: tid0-only in coop (shared frame); barrier after.
+        std::string ap_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
         for (int w = 0; w < 2; ++w) {
             if (mask.x[w] != 0) {
                 std::string xval = emit_const_i64(out, mask.x[w]);
@@ -360,6 +445,10 @@ case Opcode::OP_APPLY_PAULI: {
                 out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
             }
         }
+        if (cooperative_mode) emit_tid0_guard_end_nobarrier(out, ap_guard);
+        out << "  llvm.br ^" << lbl_done << "\n";
+        out << "^" << lbl_done << ":\n";
+        if (cooperative_mode) emit_barrier(out);
     }
     break;
 }
