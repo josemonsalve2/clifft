@@ -68,14 +68,14 @@ case Opcode::OP_NOISE: {
     // Channel address: noise_channels_ptr + (ch_offset + k) * 40
     std::string global_ch_idx = fresh_ssa();
     out << "  " << global_ch_idx << " = llvm.add " << ch_offset_64 << ", " << nch_var << " : i64\n";
-    std::string ch_stride = emit_const_i64(out, 40);
+    std::string ch_stride = emit_const_i64(out, sizeof(GpuChannel));
     std::string ch_byte_off = fresh_ssa();
     out << "  " << ch_byte_off << " = llvm.mul " << global_ch_idx << ", " << ch_stride << " : i64\n";
     std::string ch_base = fresh_ssa();
     out << "  " << ch_base << " = llvm.getelementptr %noise_channels_ptr["
         << ch_byte_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-    // Load ch.prob (f64 at byte 32 in GpuChannel: x[2]=16, z[2]=16, prob=8 → offset 32)
-    std::string prob_off = emit_const_i64(out, 32);
+    // Load ch.prob (f64) — offset depends on kPauliWords (x[PW], z[PW], prob).
+    std::string prob_off = emit_const_i64(out, offsetof(GpuChannel, prob));
     std::string prob_ptr = fresh_ssa();
     out << "  " << prob_ptr << " = llvm.getelementptr " << ch_base << "["
         << prob_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
@@ -99,7 +99,7 @@ case Opcode::OP_NOISE: {
     {
         std::string xor_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
         // Load and XOR x[0..1] into px, z[0..1] into pz
-        for (int w = 0; w < 2; ++w) {
+        for (int w = 0; w < (int)kPauliWords; ++w) {
             std::string x_off = emit_const_i64(out, w * 8);
             std::string x_ptr = fresh_ssa();
             out << "  " << x_ptr << " = llvm.getelementptr " << ch_base << "["
@@ -116,8 +116,8 @@ case Opcode::OP_NOISE: {
             out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
             out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
         }
-        for (int w = 0; w < 2; ++w) {
-            std::string z_off = emit_const_i64(out, 16 + w * 8);
+        for (int w = 0; w < (int)kPauliWords; ++w) {
+            std::string z_off = emit_const_i64(out, kPauliWords * 8 + w * 8);
             std::string z_ptr = fresh_ssa();
             out << "  " << z_ptr << " = llvm.getelementptr " << ch_base << "["
                 << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
@@ -241,13 +241,13 @@ case Opcode::OP_NOISE_BLOCK: {
         out << "^" << nbch_body << ":\n";
         std::string nb_gci = fresh_ssa();
         out << "  " << nb_gci << " = llvm.add " << nb_ch_off_64 << ", " << nbch_var << " : i64\n";
-        std::string nb_ch_stride = emit_const_i64(out, 40);
+        std::string nb_ch_stride = emit_const_i64(out, sizeof(GpuChannel));
         std::string nb_ch_boff = fresh_ssa();
         out << "  " << nb_ch_boff << " = llvm.mul " << nb_gci << ", " << nb_ch_stride << " : i64\n";
         std::string nb_ch_base = fresh_ssa();
         out << "  " << nb_ch_base << " = llvm.getelementptr %noise_channels_ptr["
             << nb_ch_boff << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
-        std::string nb_prob_off = emit_const_i64(out, 32);
+        std::string nb_prob_off = emit_const_i64(out, offsetof(GpuChannel, prob));
         std::string nb_prob_ptr = fresh_ssa();
         out << "  " << nb_prob_ptr << " = llvm.getelementptr " << nb_ch_base << "["
             << nb_prob_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
@@ -267,7 +267,7 @@ case Opcode::OP_NOISE_BLOCK: {
         out << "^" << nb_lbl_apply << ":\n";
         {
             std::string nb_xor_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
-            for (int w = 0; w < 2; ++w) {
+            for (int w = 0; w < (int)kPauliWords; ++w) {
                 std::string x_off = emit_const_i64(out, w * 8);
                 std::string x_ptr = fresh_ssa();
                 out << "  " << x_ptr << " = llvm.getelementptr " << nb_ch_base << "["
@@ -284,8 +284,8 @@ case Opcode::OP_NOISE_BLOCK: {
                 out << "  " << nv << " = llvm.xor " << ov << ", " << xval << " : i64\n";
                 out << "  llvm.store " << nv << ", " << pw << " : i64, !llvm.ptr\n";
             }
-            for (int w = 0; w < 2; ++w) {
-                std::string z_off = emit_const_i64(out, 16 + w * 8);
+            for (int w = 0; w < (int)kPauliWords; ++w) {
+                std::string z_off = emit_const_i64(out, kPauliWords * 8 + w * 8);
                 std::string z_ptr = fresh_ssa();
                 out << "  " << z_ptr << " = llvm.getelementptr " << nb_ch_base << "["
                     << z_off << "] : (!llvm.ptr, i64) -> !llvm.ptr, i8\n";
@@ -419,7 +419,7 @@ case Opcode::OP_APPLY_PAULI: {
         out << "^" << lbl_apply << ":\n";
         // Frame mutation: tid0-only in coop (shared frame); barrier after.
         std::string ap_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
-        for (int w = 0; w < 2; ++w) {
+        for (int w = 0; w < (int)kPauliWords; ++w) {
             if (mask.x[w] != 0) {
                 std::string xval = emit_const_i64(out, mask.x[w]);
                 std::string widx = emit_const_i64(out, w);

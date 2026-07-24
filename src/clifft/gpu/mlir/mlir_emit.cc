@@ -721,6 +721,22 @@ void emit_lds_global(std::ostringstream& out,
         << count << " x " << elem_type << ">\n";
 }
 
+// Zero all kPauliWords words of the px and pz frame rows. The frame is stored
+// as kPauliWords x i64 (one bit per qubit); zeroing only words 0/1 left the
+// high words uninitialized for circuits with >128 qubits.
+void emit_zero_frame(std::ostringstream& out) {
+    for (uint32_t w = 0; w < kPauliWords; ++w) {
+        std::string wc = emit_const_i64(out, w);
+        std::string pxw = fresh_ssa(), pzw = fresh_ssa();
+        out << "  " << pxw << " = llvm.getelementptr inbounds %px_ptr[" << wc
+            << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        out << "  llvm.store %c0_i64, " << pxw << " : i64, !llvm.ptr\n";
+        out << "  " << pzw << " = llvm.getelementptr inbounds %pz_ptr[" << wc
+            << "] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
+        out << "  llvm.store %c0_i64, " << pzw << " : i64, !llvm.ptr\n";
+    }
+}
+
 std::string emit_lds_base_ptr(std::ostringstream& out,
                                const std::string& name,
                                const std::string& elem_type,
@@ -2122,9 +2138,10 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "  %rng_ptr = llvm.addrspacecast %rng_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
     out << "  %sm_tmp_p5 = llvm.alloca %c1_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
     out << "  %sm_tmp = llvm.addrspacecast %sm_tmp_p5 : !llvm.ptr<5> to !llvm.ptr\n";
-    out << "  %px_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %cpw_i32 = llvm.mlir.constant(" << kPauliWords << " : i32) : i32\n";
+    out << "  %px_ptr_p5 = llvm.alloca %cpw_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
     out << "  %px_ptr = llvm.addrspacecast %px_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
-    out << "  %pz_ptr_p5 = llvm.alloca %c2_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
+    out << "  %pz_ptr_p5 = llvm.alloca %cpw_i32 x i64 : (i32) -> !llvm.ptr<5>\n";
     out << "  %pz_ptr = llvm.addrspacecast %pz_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
     out << "  %active_k_ptr_p5 = llvm.alloca %c1_i32 x i32 : (i32) -> !llvm.ptr<5>\n";
     out << "  %active_k_ptr = llvm.addrspacecast %active_k_ptr_p5 : !llvm.ptr<5> to !llvm.ptr\n";
@@ -2174,14 +2191,7 @@ std::string emit_mlir_text(const FlattenedProgram& flat) {
     out << "^" << lbl_run << ":\n";
 
     // Initialize state
-    out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %px1_ptr = llvm.getelementptr inbounds %px_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %pz0_ptr = llvm.getelementptr inbounds %pz_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %pz1_ptr = llvm.getelementptr inbounds %pz_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  llvm.store %c0_i64, %px0_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %px1_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %pz0_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %pz1_ptr : i64, !llvm.ptr\n";
+    emit_zero_frame(out);
     out << "  llvm.store %c0_i32, %active_k_ptr : i32, !llvm.ptr\n";
     out << "  llvm.store %c0_i8, %discarded_ptr : i8, !llvm.ptr\n";
 
@@ -2563,8 +2573,8 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     // LDS globals (address space 3)
     emit_lds_global(out, "lds_v", "!llvm.struct<(f32, f32)>", num_amps);
     emit_lds_global(out, "lds_scratch", "!llvm.struct<(f32, f32)>", num_amps);
-    emit_lds_global(out, "lds_px", "i64", 2);
-    emit_lds_global(out, "lds_pz", "i64", 2);
+    emit_lds_global(out, "lds_px", "i64", kPauliWords);
+    emit_lds_global(out, "lds_pz", "i64", kPauliWords);
     emit_lds_global(out, "lds_active_k", "i32", 1);
     emit_lds_global(out, "lds_discarded", "i8", 1);
     emit_lds_global(out, "lds_meas", "i8", kMaxMeas);
@@ -2641,11 +2651,6 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     out << "  %meas_ptr = llvm.addrspacecast %lds_meas_as3 : !llvm.ptr<3> to !llvm.ptr\n";
     out << "  %lds_obs_as3 = llvm.mlir.addressof @lds_obs : !llvm.ptr<3>\n";
     out << "  %obs_ptr = llvm.addrspacecast %lds_obs_as3 : !llvm.ptr<3> to !llvm.ptr\n";
-    out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %px1_ptr = llvm.getelementptr inbounds %px_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %pz0_ptr = llvm.getelementptr inbounds %pz_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %pz1_ptr = llvm.getelementptr inbounds %pz_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-
     // Cooperative init: zero v[] across all threads
     char ampbuf[32]; snprintf(ampbuf, sizeof(ampbuf), "%u", num_amps);
     out << "  %num_amps = llvm.mlir.constant(" << ampbuf << " : i64) : i64\n";
@@ -2677,10 +2682,7 @@ std::string emit_mlir_text_coop(const FlattenedProgram& flat) {
     out << "  " << is_t0 << " = llvm.icmp \"eq\" %tidx_i32, %c0_i32 : i32\n";
     out << "  llvm.cond_br " << is_t0 << ", ^" << t0_init << ", ^" << t0_done << "\n";
     out << "^" << t0_init << ":\n";
-    out << "  llvm.store %c0_i64, %px0_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %px1_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %pz0_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %pz1_ptr : i64, !llvm.ptr\n";
+    emit_zero_frame(out);
     out << "  llvm.store %c0_i32, %active_k_ptr : i32, !llvm.ptr\n";
     out << "  llvm.store %c0_i8, %discarded_ptr : i8, !llvm.ptr\n";
     out << "  %v0_ptr_coop = llvm.getelementptr inbounds %v_ptr[%c0_i64] : (!llvm.ptr<3>, i64) -> !llvm.ptr<3>, !llvm.struct<(f32, f32)>\n";
@@ -2931,8 +2933,8 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     emit_gpu_intrinsic_decls(out);
 
     // LDS globals for frame/classical state (amplitudes are in HBM)
-    emit_lds_global(out, "lds_px", "i64", 2);
-    emit_lds_global(out, "lds_pz", "i64", 2);
+    emit_lds_global(out, "lds_px", "i64", kPauliWords);
+    emit_lds_global(out, "lds_pz", "i64", kPauliWords);
     emit_lds_global(out, "lds_active_k", "i32", 1);
     emit_lds_global(out, "lds_discarded", "i8", 1);
     emit_lds_global(out, "lds_meas", "i8", kMaxMeas);
@@ -3028,10 +3030,6 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     out << "  %obs_ptr = llvm.addrspacecast %lds_obs_as3 : !llvm.ptr<3> to !llvm.ptr\n";
     out << "  %lds_bsi_as3 = llvm.mlir.addressof @lds_batch_shot_id : !llvm.ptr<3>\n";
     out << "  %batch_shot_id_ptr = llvm.addrspacecast %lds_bsi_as3 : !llvm.ptr<3> to !llvm.ptr\n";
-    out << "  %px0_ptr = llvm.getelementptr inbounds %px_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %px1_ptr = llvm.getelementptr inbounds %px_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %pz0_ptr = llvm.getelementptr inbounds %pz_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
-    out << "  %pz1_ptr = llvm.getelementptr inbounds %pz_ptr[%c1_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i64\n";
 
     // Private allocations for per-thread noise/RNG state (addrspace 5) — in entry block
     out << "  %c4_i32 = llvm.mlir.constant(4 : i32) : i32\n";
@@ -3111,10 +3109,7 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     out << "  " << is_t0_g << " = llvm.icmp \"eq\" %tidx_i32, %c0_i32 : i32\n";
     out << "  llvm.cond_br " << is_t0_g << ", ^" << t0_ginit << ", ^" << t0_ginit_done << "\n";
     out << "^" << t0_ginit << ":\n";
-    out << "  llvm.store %c0_i64, %px0_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %px1_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %pz0_ptr : i64, !llvm.ptr\n";
-    out << "  llvm.store %c0_i64, %pz1_ptr : i64, !llvm.ptr\n";
+    emit_zero_frame(out);
     out << "  llvm.store %c0_i32, %active_k_ptr : i32, !llvm.ptr\n";
     out << "  llvm.store %c0_i8, %discarded_ptr : i8, !llvm.ptr\n";
     out << "  %gv0_ptr = llvm.getelementptr inbounds %v_ptr[%c0_i64] : (!llvm.ptr, i64) -> !llvm.ptr, !llvm.struct<(f32, f32)>\n";

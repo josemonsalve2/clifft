@@ -11,8 +11,10 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -55,25 +57,48 @@ void copy_to_device(T*& dst, const std::vector<T>& src, const char* name) {
     check_hip(hipMemcpy(dst, src.data(), src.size() * sizeof(T), hipMemcpyHostToDevice), name);
 }
 
+template <typename T>
+void hsa_copy_to_device(T*& dst, const std::vector<T>& src, const char* name) {
+    if (src.empty()) {
+        dst = nullptr;
+        return;
+    }
+    auto& rt = hsa_runtime();
+    dst = static_cast<T*>(rt.device_malloc(src.size() * sizeof(T)));
+    if (!dst) {
+        throw std::runtime_error(std::string(name) + ": HSA device_malloc failed");
+    }
+    rt.memcpy_h2d(dst, src.data(), src.size() * sizeof(T));
+}
+
 void free_buffers(DeviceBuffers& b) {
-    hipFree(b.instrs);
-    hipFree(b.pauli_masks);
-    hipFree(b.noise_sites);
-    hipFree(b.noise_channels);
-    hipFree(b.noise_hazards);
-    hipFree(b.readout_noise);
-    hipFree(b.detector_offsets);
-    hipFree(b.detector_targets);
-    hipFree(b.observable_offsets);
-    hipFree(b.observable_targets);
-    hipFree(b.expected_observables);
-    hipFree(b.block_counts);
-    hipFree(b.global_v);
-    hipFree(b.global_scratch);
-    hipFree(b.work_counter);
-    hipFree(b.fused_u2);
-    hipFree(b.fused_u4);
-    hipFree(b.exp_val_masks);
+    if (b.hsa_allocated) {
+        // Data buffers + block_counts live in the persistent pool — don't free them.
+        // Only free global-tier buffers (separate allocations).
+        auto& rt = hsa_runtime();
+        rt.device_free(b.global_v);
+        rt.device_free(b.global_scratch);
+        rt.device_free(b.work_counter);
+    } else {
+        hipFree(b.instrs);
+        hipFree(b.pauli_masks);
+        hipFree(b.noise_sites);
+        hipFree(b.noise_channels);
+        hipFree(b.noise_hazards);
+        hipFree(b.readout_noise);
+        hipFree(b.detector_offsets);
+        hipFree(b.detector_targets);
+        hipFree(b.observable_offsets);
+        hipFree(b.observable_targets);
+        hipFree(b.expected_observables);
+        hipFree(b.block_counts);
+        hipFree(b.global_v);
+        hipFree(b.global_scratch);
+        hipFree(b.work_counter);
+        hipFree(b.fused_u2);
+        hipFree(b.fused_u4);
+        hipFree(b.exp_val_masks);
+    }
 }
 
 __device__ inline uint64_t rotl64(uint64_t x, int k) {
@@ -118,8 +143,8 @@ struct Rng {
 };
 
 struct ShotState {
-    uint64_t px[2];
-    uint64_t pz[2];
+    uint64_t px[kPauliWords];
+    uint64_t pz[kPauliWords];
     uint32_t active_k;
     uint32_t next_noise_idx;
     bool discarded;
@@ -516,10 +541,10 @@ __device__ void swap_meas_interfere(ShotState& st, Rng& rng, uint32_t from, uint
 }
 
 __device__ void apply_pauli_to_frame(ShotState& st, const uint64_t* x, const uint64_t* z) {
-    st.px[0] ^= x[0];
-    st.px[1] ^= x[1];
-    st.pz[0] ^= z[0];
-    st.pz[1] ^= z[1];
+    for (uint32_t w = 0; w < kPauliWords; ++w) {
+        st.px[w] ^= x[w];
+        st.pz[w] ^= z[w];
+    }
 }
 
 __device__ void apply_pauli(ShotState& st, const GpuProgram& program, uint32_t mask_idx,
@@ -658,14 +683,15 @@ __device__ __noinline__ void exec_exp_val(ShotState& st, const GpuProgram& progr
                              uint32_t cp_idx, uint32_t ev_idx) {
     const GpuExpValMask& mask = program.exp_val_masks[cp_idx];
     bool frame_sign = mask.sign != 0;
-    int parity = __popcll(mask.x[0] & st.pz[0]) + __popcll(mask.x[1] & st.pz[1])
-               + __popcll(mask.z[0] & st.px[0]) + __popcll(mask.z[1] & st.px[1]);
+    int parity = 0;
+    for (uint32_t w = 0; w < kPauliWords; ++w)
+        parity += __popcll(mask.x[w] & st.pz[w]) + __popcll(mask.z[w] & st.px[w]);
     if (parity & 1) frame_sign = !frame_sign;
 
     uint32_t k = st.active_k;
     uint64_t active_mask_w0 = (k >= 64) ? ~uint64_t{0} : ((k == 0) ? 0 : ((uint64_t{1} << k) - 1));
     uint64_t dormant_x = mask.x[0] & ~active_mask_w0;
-    if (k < 64) dormant_x |= mask.x[1];
+    for (uint32_t w = 1; w < kPauliWords; ++w) dormant_x |= mask.x[w];
     if (dormant_x != 0) { st.exp_vals[ev_idx] = 0.0; return; }
 
     uint64_t x_active = mask.x[0] & active_mask_w0;
@@ -1443,14 +1469,15 @@ __device__ void coop_exec_exp_val(CoopShotState& st, const GpuProgram& program,
     if (threadIdx.x == 0) {
         const GpuExpValMask& mask = program.exp_val_masks[cp_idx];
         bool frame_sign = mask.sign != 0;
-        int parity = __popcll(mask.x[0] & st.pz[0]) + __popcll(mask.x[1] & st.pz[1])
-                   + __popcll(mask.z[0] & st.px[0]) + __popcll(mask.z[1] & st.px[1]);
+        int parity = 0;
+        for (uint32_t w = 0; w < kPauliWords; ++w)
+            parity += __popcll(mask.x[w] & st.pz[w]) + __popcll(mask.z[w] & st.px[w]);
         if (parity & 1) frame_sign = !frame_sign;
 
         uint32_t k = *st.active_k;
         uint64_t active_mask_w0 = (k >= 64) ? ~uint64_t{0} : ((k == 0) ? 0 : ((uint64_t{1} << k) - 1));
         uint64_t dormant_x = mask.x[0] & ~active_mask_w0;
-        if (k < 64) dormant_x |= mask.x[1];
+        for (uint32_t w = 1; w < kPauliWords; ++w) dormant_x |= mask.x[w];
         if (dormant_x != 0) { st.exp_vals[ev_idx] = 0.0; }
         else {
             uint64_t x_active = mask.x[0] & active_mask_w0;
@@ -1641,10 +1668,10 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
             case static_cast<uint8_t>(clifft::Opcode::OP_APPLY_PAULI):
                 if (threadIdx.x == 0 && st.meas[instr.b] != 0) {
                     const GpuMask& mask = program.pauli_masks[instr.a];
-                    st.px[0] ^= mask.x[0];
-                    st.px[1] ^= mask.x[1];
-                    st.pz[0] ^= mask.z[0];
-                    st.pz[1] ^= mask.z[1];
+                    for (uint32_t w = 0; w < kPauliWords; ++w) {
+                        st.px[w] ^= mask.x[w];
+                        st.pz[w] ^= mask.z[w];
+                    }
                 }
                 __syncthreads();
                 break;
@@ -1657,10 +1684,10 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                         const GpuChannel& ch = program.noise_channels[site.offset + k];
                         cumulative += ch.prob;
                         if (roll < cumulative) {
-                            st.px[0] ^= ch.x[0];
-                            st.px[1] ^= ch.x[1];
-                            st.pz[0] ^= ch.z[0];
-                            st.pz[1] ^= ch.z[1];
+                            for (uint32_t w = 0; w < kPauliWords; ++w) {
+                                st.px[w] ^= ch.x[w];
+                                st.pz[w] ^= ch.z[w];
+                            }
                             break;
                         }
                     }
@@ -1681,10 +1708,10 @@ __device__ void execute_shot_coop(const GpuProgram& program, Rng& rng, CoopShotS
                             const GpuChannel& ch = program.noise_channels[site.offset + k];
                             cumulative += ch.prob;
                             if (roll < cumulative) {
-                                st.px[0] ^= ch.x[0];
-                                st.px[1] ^= ch.x[1];
-                                st.pz[0] ^= ch.z[0];
-                                st.pz[1] ^= ch.z[1];
+                                for (uint32_t w = 0; w < kPauliWords; ++w) {
+                                    st.px[w] ^= ch.x[w];
+                                    st.pz[w] ^= ch.z[w];
+                                }
                                 break;
                             }
                         }
@@ -1770,10 +1797,7 @@ __global__ void sample_kernel(GpuProgram program, uint64_t shot_offset, uint64_t
         rng.seed(seed, shot_id);
 
         ShotState st;
-        st.px[0] = 0;
-        st.px[1] = 0;
-        st.pz[0] = 0;
-        st.pz[1] = 0;
+        for (uint32_t w = 0; w < kPauliWords; ++w) { st.px[w] = 0; st.pz[w] = 0; }
         st.active_k = 0;
         st.next_noise_idx = 0;
         st.discarded = false;
@@ -1845,8 +1869,8 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     __shared__ GpuComplex scratch[kSharedMaxAmplitudes / 2];
     __shared__ uint8_t meas[kMaxMeas];
     __shared__ uint8_t obs[kMaxObs];
-    __shared__ uint64_t px[2];
-    __shared__ uint64_t pz[2];
+    __shared__ uint64_t px[kPauliWords];
+    __shared__ uint64_t pz[kPauliWords];
     __shared__ uint32_t active_k;
     __shared__ uint32_t next_noise_idx;
     __shared__ uint8_t discarded;
@@ -1861,10 +1885,7 @@ __global__ void sample_kernel_coop(GpuProgram program, uint64_t shot_offset, uin
     __shared__ uint32_t cached_lut_mode;
 
     if (threadIdx.x == 0) {
-        px[0] = 0;
-        px[1] = 0;
-        pz[0] = 0;
-        pz[1] = 0;
+        for (uint32_t w = 0; w < kPauliWords; ++w) { px[w] = 0; pz[w] = 0; }
         active_k = 0;
         next_noise_idx = 0;
         discarded = 0;
@@ -1924,8 +1945,8 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
 
     __shared__ uint8_t meas[kMaxMeas];
     __shared__ uint8_t obs[kMaxObs];
-    __shared__ uint64_t px[2];
-    __shared__ uint64_t pz[2];
+    __shared__ uint64_t px[kPauliWords];
+    __shared__ uint64_t pz[kPauliWords];
     __shared__ uint32_t active_k;
     __shared__ uint32_t next_noise_idx;
     __shared__ uint8_t discarded;
@@ -1959,10 +1980,7 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
         }
 
         if (threadIdx.x == 0) {
-            px[0] = 0;
-            px[1] = 0;
-            pz[0] = 0;
-            pz[1] = 0;
+            for (uint32_t w = 0; w < kPauliWords; ++w) { px[w] = 0; pz[w] = 0; }
             active_k = 0;
             next_noise_idx = 0;
             discarded = 0;
@@ -2015,7 +2033,9 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
 
 SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shots,
                                     const GpuSamplerOptions& options) {
+    auto wall_t0 = std::chrono::steady_clock::now();
     auto flat = flatten_program(program);
+    auto wall_flatten = std::chrono::steady_clock::now();
 
     uint32_t block_size = options.block_size == 0 ? 256 : options.block_size;
     if ((block_size & (block_size - 1)) != 0 || block_size > 1024) {
@@ -2035,36 +2055,101 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                                                       block_size)
                               : 1u;
     uint32_t global_worker_blocks = 0;
-    if (use_global_coop_kernel) {
-        int device = 0;
-        hipDeviceProp_t prop{};
-        check_hip(hipGetDevice(&device), "get HIP device");
-        check_hip(hipGetDeviceProperties(&prop, device), "get HIP device properties");
-        global_worker_blocks = std::max(1, prop.multiProcessorCount * 2);
+    if (use_global_coop_kernel || (options.mlir && flat.peak_rank > kSharedMaxPeakRank)) {
+        if (options.mlir || options.hybrid) {
+            auto& rt = hsa_runtime();
+            global_worker_blocks = std::max(1u, rt.device(0).cu_count * 2);
+        } else {
+            int device = 0;
+            hipDeviceProp_t prop{};
+            check_hip(hipGetDevice(&device), "get HIP device");
+            check_hip(hipGetDeviceProperties(&prop, device), "get HIP device properties");
+            global_worker_blocks = std::max(1, prop.multiProcessorCount * 2);
+        }
         if (max_batch_shots < global_worker_blocks) {
             global_worker_blocks = static_cast<uint32_t>(max_batch_shots);
         }
     }
 
+    auto wall_setup = std::chrono::steady_clock::now();
+
     DeviceBuffers buffers;
     try {
-        copy_to_device(buffers.instrs, flat.instrs, "copy instrs");
-        copy_to_device(buffers.pauli_masks, flat.pauli_masks, "copy pauli masks");
-        copy_to_device(buffers.noise_sites, flat.noise_sites, "copy noise sites");
-        copy_to_device(buffers.noise_channels, flat.noise_channels, "copy noise channels");
-        copy_to_device(buffers.noise_hazards, flat.noise_hazards, "copy noise hazards");
-        copy_to_device(buffers.readout_noise, flat.readout_noise, "copy readout noise");
-        copy_to_device(buffers.detector_offsets, flat.detector_offsets, "copy detector offsets");
-        copy_to_device(buffers.detector_targets, flat.detector_targets, "copy detector targets");
-        copy_to_device(buffers.observable_offsets, flat.observable_offsets, "copy observable offsets");
-        copy_to_device(buffers.observable_targets, flat.observable_targets, "copy observable targets");
-        copy_to_device(buffers.expected_observables, flat.expected_observables, "copy expected observables");
-        copy_to_device(buffers.fused_u2, flat.fused_u2, "copy fused u2");
-        copy_to_device(buffers.fused_u4, flat.fused_u4, "copy fused u4");
-        copy_to_device(buffers.exp_val_masks, flat.exp_val_masks, "copy exp val masks");
-        check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.block_counts),
-                              static_cast<size_t>(max_blocks) * sizeof(BlockCounts)),
-                   "allocate block counts");
+        if (options.mlir || options.hybrid) {
+            // Persistent device buffer pool — allocate ONCE, reuse across calls.
+            // This eliminates the 49ms per-call overhead from 14× device_malloc
+            // + 14× hsa_amd_agents_allow_access (each ~3ms).
+            // Layout: all data packed into one contiguous allocation.
+            auto& rt = hsa_runtime();
+            buffers.hsa_allocated = true;
+
+            auto pack_size = [](const auto& v) -> size_t {
+                return v.empty() ? 0 : ((v.size() * sizeof(typename std::remove_reference<decltype(v)>::type::value_type) + 255) & ~255ULL);
+            };
+            size_t bc_bytes = ((static_cast<size_t>(max_blocks) * sizeof(BlockCounts)) + 255) & ~255ULL;
+            size_t total = pack_size(flat.instrs) + pack_size(flat.pauli_masks)
+                + pack_size(flat.noise_sites) + pack_size(flat.noise_channels)
+                + pack_size(flat.noise_hazards) + pack_size(flat.readout_noise)
+                + pack_size(flat.detector_offsets) + pack_size(flat.detector_targets)
+                + pack_size(flat.observable_offsets) + pack_size(flat.observable_targets)
+                + pack_size(flat.expected_observables) + pack_size(flat.fused_u2)
+                + pack_size(flat.fused_u4) + pack_size(flat.exp_val_masks) + bc_bytes;
+
+            static void* persistent_pool = nullptr;
+            static size_t persistent_pool_size = 0;
+            if (!persistent_pool || persistent_pool_size < total) {
+                if (persistent_pool) rt.device_free(persistent_pool);
+                persistent_pool = rt.device_malloc(total);
+                persistent_pool_size = total;
+                if (!persistent_pool) throw std::runtime_error("HSA device_malloc failed for persistent pool");
+            }
+
+            // Pack data into the pool using direct memcpy (CPU+GPU access
+            // was granted at device_malloc time).
+            auto pack = [&](auto*& dst, const auto& src, size_t& offset) {
+                if (src.empty()) { dst = nullptr; return; }
+                size_t bytes = src.size() * sizeof(typename std::remove_reference<decltype(src)>::type::value_type);
+                dst = reinterpret_cast<std::remove_reference_t<decltype(dst)>>(
+                    static_cast<char*>(persistent_pool) + offset);
+                std::memcpy(dst, src.data(), bytes);
+                offset += (bytes + 255) & ~255ULL;
+            };
+            size_t off = 0;
+            pack(buffers.instrs, flat.instrs, off);
+            pack(buffers.pauli_masks, flat.pauli_masks, off);
+            pack(buffers.noise_sites, flat.noise_sites, off);
+            pack(buffers.noise_channels, flat.noise_channels, off);
+            pack(buffers.noise_hazards, flat.noise_hazards, off);
+            pack(buffers.readout_noise, flat.readout_noise, off);
+            pack(buffers.detector_offsets, flat.detector_offsets, off);
+            pack(buffers.detector_targets, flat.detector_targets, off);
+            pack(buffers.observable_offsets, flat.observable_offsets, off);
+            pack(buffers.observable_targets, flat.observable_targets, off);
+            pack(buffers.expected_observables, flat.expected_observables, off);
+            pack(buffers.fused_u2, flat.fused_u2, off);
+            pack(buffers.fused_u4, flat.fused_u4, off);
+            pack(buffers.exp_val_masks, flat.exp_val_masks, off);
+            buffers.block_counts = reinterpret_cast<BlockCounts*>(
+                static_cast<char*>(persistent_pool) + off);
+        } else {
+            copy_to_device(buffers.instrs, flat.instrs, "copy instrs");
+            copy_to_device(buffers.pauli_masks, flat.pauli_masks, "copy pauli masks");
+            copy_to_device(buffers.noise_sites, flat.noise_sites, "copy noise sites");
+            copy_to_device(buffers.noise_channels, flat.noise_channels, "copy noise channels");
+            copy_to_device(buffers.noise_hazards, flat.noise_hazards, "copy noise hazards");
+            copy_to_device(buffers.readout_noise, flat.readout_noise, "copy readout noise");
+            copy_to_device(buffers.detector_offsets, flat.detector_offsets, "copy detector offsets");
+            copy_to_device(buffers.detector_targets, flat.detector_targets, "copy detector targets");
+            copy_to_device(buffers.observable_offsets, flat.observable_offsets, "copy observable offsets");
+            copy_to_device(buffers.observable_targets, flat.observable_targets, "copy observable targets");
+            copy_to_device(buffers.expected_observables, flat.expected_observables, "copy expected observables");
+            copy_to_device(buffers.fused_u2, flat.fused_u2, "copy fused u2");
+            copy_to_device(buffers.fused_u4, flat.fused_u4, "copy fused u4");
+            copy_to_device(buffers.exp_val_masks, flat.exp_val_masks, "copy exp val masks");
+            check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.block_counts),
+                                  static_cast<size_t>(max_blocks) * sizeof(BlockCounts)),
+                       "allocate block counts");
+        }
         bool need_global_buffers =
             use_global_coop_kernel ||
             (options.hybrid && flat.peak_rank > kSharedMaxPeakRank &&
@@ -2075,17 +2160,28 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
             size_t v_count = static_cast<size_t>(global_worker_blocks) * kGlobalMaxAmplitudes;
             size_t scratch_count =
                 static_cast<size_t>(global_worker_blocks) * (kGlobalMaxAmplitudes / 2);
-            check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.global_v),
-                                  v_count * sizeof(GpuComplex)),
-                       "allocate global cooperative state");
-            check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.global_scratch),
-                                  scratch_count * sizeof(GpuComplex)),
-                       "allocate global cooperative scratch");
-            check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.work_counter),
-                                  kNumXCDs * sizeof(uint64_t)),
-                       "allocate per-XCD work counters");
+            if (buffers.hsa_allocated) {
+                auto& rt = hsa_runtime();
+                buffers.global_v = static_cast<GpuComplex*>(
+                    rt.device_malloc(v_count * sizeof(GpuComplex)));
+                buffers.global_scratch = static_cast<GpuComplex*>(
+                    rt.device_malloc(scratch_count * sizeof(GpuComplex)));
+                buffers.work_counter = static_cast<uint64_t*>(
+                    rt.device_malloc(kNumXCDs * sizeof(uint64_t)));
+            } else {
+                check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.global_v),
+                                      v_count * sizeof(GpuComplex)),
+                           "allocate global cooperative state");
+                check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.global_scratch),
+                                      scratch_count * sizeof(GpuComplex)),
+                           "allocate global cooperative scratch");
+                check_hip(hipMalloc(reinterpret_cast<void**>(&buffers.work_counter),
+                                      kNumXCDs * sizeof(uint64_t)),
+                           "allocate per-XCD work counters");
+            }
         }
 
+        auto wall_alloc = std::chrono::steady_clock::now();
         GpuProgram gpu_program{};
         gpu_program.instrs = buffers.instrs;
         gpu_program.num_instrs = static_cast<uint32_t>(flat.instrs.size());
@@ -2111,8 +2207,11 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
 
         hipEvent_t start{};
         hipEvent_t stop{};
-        check_hip(hipEventCreate(&start), "create start event");
-        check_hip(hipEventCreate(&stop), "create stop event");
+        bool need_hip_events = !(options.mlir || options.hybrid);
+        if (need_hip_events) {
+            check_hip(hipEventCreate(&start), "create start event");
+            check_hip(hipEventCreate(&stop), "create stop event");
+        }
 
         size_t shared_bytes = static_cast<size_t>(block_size) * (2 + kMaxObs) * sizeof(uint64_t);
         std::vector<BlockCounts> host_counts(max_blocks);
@@ -2122,6 +2221,36 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         std::vector<double> exp_val_sums(flat.num_exp_vals, 0.0);
         uint64_t exp_val_count = 0;
         double kernel_seconds = 0.0;
+
+        // Pre-load MLIR/hybrid kernels BEFORE the dispatch loop so compile_or_load
+        // cost is excluded from sample_seconds. The PersistentDispatcher is also
+        // bound here — subsequent dispatches are just kernarg memcpy + AQL write.
+#ifdef CLIFFT_ENABLE_MLIR
+        static HsaLoadedKernel hsa_ck_mlir{};
+        static PersistentDispatcher pd_mlir;
+        static HsaLoadedKernel hsa_ck_mlir_coop{};
+        static PersistentDispatcher pd_mlir_coop;
+        static HsaLoadedKernel hsa_ck_mlir_global{};
+        static PersistentDispatcher pd_mlir_global;
+        if (options.mlir) {
+            auto t_load = std::chrono::steady_clock::now();
+            if (flat.peak_rank <= kThreadMaxPeakRank && !hsa_ck_mlir.valid) {
+                hsa_ck_mlir = compile_or_load_mlir_kernel(flat);
+                if (hsa_ck_mlir.valid && !pd_mlir.is_bound()) pd_mlir.bind(hsa_ck_mlir, 0);
+            } else if (flat.peak_rank <= kSharedMaxPeakRank && !hsa_ck_mlir_coop.valid) {
+                hsa_ck_mlir_coop = compile_or_load_mlir_kernel_coop(flat);
+                if (hsa_ck_mlir_coop.valid && !pd_mlir_coop.is_bound()) pd_mlir_coop.bind(hsa_ck_mlir_coop, 0);
+            } else if (flat.peak_rank <= kGlobalMaxPeakRank && !hsa_ck_mlir_global.valid) {
+                hsa_ck_mlir_global = compile_or_load_mlir_kernel_global(flat);
+                if (hsa_ck_mlir_global.valid && !pd_mlir_global.is_bound()) pd_mlir_global.bind(hsa_ck_mlir_global, 0);
+            }
+            auto t_load_done = std::chrono::steady_clock::now();
+            std::cerr << "[clifft-timing] mlir_preload: "
+                      << std::chrono::duration<double, std::milli>(t_load_done - t_load).count() << " ms\n";
+        }
+#endif
+
+        auto wall_pre_loop = std::chrono::steady_clock::now();
 
         for (uint64_t shot_offset = 0; shot_offset < shots; shot_offset += kMaxBatchShots) {
             uint64_t batch_shots = std::min<uint64_t>(kMaxBatchShots, shots - shot_offset);
@@ -2175,8 +2304,8 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     std::abort();
                 }
                 if (!pd_coop.is_bound()) pd_coop.bind(hsa_ck_coop, 0);
-                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
-                           "clear coop compiled counts");
+                hsa_runtime().memset_device(buffers.block_counts, 0,
+                    sizeof(BlockCounts) / sizeof(uint32_t));
                 struct { uint64_t so; uint64_t bs; uint64_t sd;
                          BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs;
                 kargs.so = shot_offset; kargs.bs = batch_shots;
@@ -2199,10 +2328,10 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     std::abort();
                 }
                 if (!pd_global.is_bound()) pd_global.bind(hsa_ck_global, 0);
-                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
-                           "clear global compiled counts");
-                check_hip(hipMemset(buffers.work_counter, 0, kNumXCDs * sizeof(uint64_t)),
-                           "clear per-XCD work counters compiled");
+                hsa_runtime().memset_device(buffers.block_counts, 0,
+                    sizeof(BlockCounts) / sizeof(uint32_t));
+                hsa_runtime().memset_device(buffers.work_counter, 0,
+                    kNumXCDs * sizeof(uint64_t) / sizeof(uint32_t));
                 struct { uint64_t so; uint64_t bs; uint64_t sd;
                          GpuComplex* gv; GpuComplex* gs; uint64_t* wc;
                          BlockCounts* bc; uint32_t nobs; uint32_t nexp; } kargs;
@@ -2217,14 +2346,8 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     &kargs, sizeof(kargs));
             } else if (options.mlir && flat.peak_rank <= kThreadMaxPeakRank) {
 #ifdef CLIFFT_ENABLE_MLIR
-                // MLIR→LLVM-IR megakernel via PersistentDispatcher (register tier)
-                static HsaLoadedKernel hsa_ck_mlir{};
-                static PersistentDispatcher pd_mlir;
-                if (!hsa_ck_mlir.valid) {
-                    hsa_ck_mlir = compile_or_load_mlir_kernel(flat);
-                }
+                // MLIR register tier — kernel already pre-loaded above
                 if (hsa_ck_mlir.valid) {
-                    if (!pd_mlir.is_bound()) pd_mlir.bind(hsa_ck_mlir, 0);
                     struct { uint64_t so; uint64_t bs; uint64_t sd;
                              BlockCounts* bc;
                              double* nhaz; void* nsites; void* nchans; uint64_t nsites_n;
@@ -2249,19 +2372,13 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
 #endif
             } else if (options.mlir && flat.peak_rank <= kSharedMaxPeakRank) {
 #ifdef CLIFFT_ENABLE_MLIR
-                // MLIR→LLVM-IR megakernel via HSA dispatch (coop tier, rank 5-10)
-                static HsaLoadedKernel hsa_ck_mlir_coop{};
-                static PersistentDispatcher pd_mlir_coop;
-                if (!hsa_ck_mlir_coop.valid) {
-                    hsa_ck_mlir_coop = compile_or_load_mlir_kernel_coop(flat);
-                }
+                // MLIR coop tier — kernel already pre-loaded above
                 if (!hsa_ck_mlir_coop.valid) {
                     std::cerr << "[clifft-gpu] FATAL: MLIR coop kernel failed — aborting\n";
                     std::abort();
                 }
-                if (!pd_mlir_coop.is_bound()) pd_mlir_coop.bind(hsa_ck_mlir_coop, 0);
-                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
-                           "clear coop MLIR counts");
+                hsa_runtime().memset_device(buffers.block_counts, 0,
+                    sizeof(BlockCounts) / sizeof(uint32_t));
                 struct { uint64_t so; uint64_t bs; uint64_t sd;
                          BlockCounts* bc;
                          double* nhaz; void* nsites; void* nchans; uint64_t nsites_n;
@@ -2283,21 +2400,15 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
 #endif
             } else if (options.mlir && flat.peak_rank <= kGlobalMaxPeakRank) {
 #ifdef CLIFFT_ENABLE_MLIR
-                // MLIR→LLVM-IR megakernel via PersistentDispatcher (global tier, rank 11-19)
-                static HsaLoadedKernel hsa_ck_mlir_global{};
-                static PersistentDispatcher pd_mlir_global;
-                if (!hsa_ck_mlir_global.valid) {
-                    hsa_ck_mlir_global = compile_or_load_mlir_kernel_global(flat);
-                }
+                // MLIR global tier — kernel already pre-loaded above
                 if (!hsa_ck_mlir_global.valid) {
                     std::cerr << "[clifft-gpu] FATAL: MLIR global kernel failed — aborting\n";
                     std::abort();
                 }
-                if (!pd_mlir_global.is_bound()) pd_mlir_global.bind(hsa_ck_mlir_global, 0);
-                check_hip(hipMemset(buffers.block_counts, 0, sizeof(BlockCounts)),
-                           "clear global MLIR counts");
-                check_hip(hipMemset(buffers.work_counter, 0, kNumXCDs * sizeof(uint64_t)),
-                           "clear MLIR work counters");
+                hsa_runtime().memset_device(buffers.block_counts, 0,
+                    sizeof(BlockCounts) / sizeof(uint32_t));
+                hsa_runtime().memset_device(buffers.work_counter, 0,
+                    kNumXCDs * sizeof(uint64_t) / sizeof(uint32_t));
                 struct { uint64_t so; uint64_t bs; uint64_t sd;
                          GpuComplex* gv; GpuComplex* gs; uint64_t* wc;
                          BlockCounts* bc;
@@ -2360,10 +2471,17 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
             }
 
             uint32_t copy_blocks = use_thread_kernel ? batch_blocks : 1u;
-            check_hip(hipMemcpy(host_counts.data(), buffers.block_counts,
-                                  static_cast<size_t>(copy_blocks) * sizeof(BlockCounts),
-                                  hipMemcpyDeviceToHost),
-                       "copy block counts");
+            if (options.mlir || options.hybrid) {
+                // HSA async copy — works on HIP-allocated memory since it's
+                // HSA memory under the hood. Avoids HIP runtime overhead.
+                hsa_runtime().memcpy_d2h(host_counts.data(), buffers.block_counts,
+                    static_cast<size_t>(copy_blocks) * sizeof(BlockCounts));
+            } else {
+                check_hip(hipMemcpy(host_counts.data(), buffers.block_counts,
+                                      static_cast<size_t>(copy_blocks) * sizeof(BlockCounts),
+                                      hipMemcpyDeviceToHost),
+                           "copy block counts");
+            }
 
             for (uint32_t block = 0; block < copy_blocks; ++block) {
                 const auto& bc = host_counts[block];
@@ -2384,8 +2502,27 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                           << ", kernel_seconds=" << kernel_seconds << "\n";
             }
         }
-        hipEventDestroy(start);
-        hipEventDestroy(stop);
+        if (need_hip_events) {
+            hipEventDestroy(start);
+            hipEventDestroy(stop);
+        }
+
+        auto wall_post_loop = std::chrono::steady_clock::now();
+
+        // Host overhead breakdown
+        {
+            auto ms = [](auto a, auto b) {
+                return std::chrono::duration<double, std::milli>(b - a).count();
+            };
+            std::cerr << "[clifft-timing] flatten_program: " << ms(wall_t0, wall_flatten) << " ms\n"
+                      << "[clifft-timing] setup+config:     " << ms(wall_flatten, wall_setup) << " ms\n"
+                      << "[clifft-timing] buffer_alloc:     " << ms(wall_setup, wall_alloc) << " ms\n"
+                      << "[clifft-timing] pre_loop_setup:   " << ms(wall_alloc, wall_pre_loop) << " ms\n"
+                      << "[clifft-timing] dispatch_loop:    " << ms(wall_pre_loop, wall_post_loop) << " ms\n"
+                      << "[clifft-timing]   kernel_seconds: " << (kernel_seconds * 1000.0) << " ms\n"
+                      << "[clifft-timing]   host_in_loop:   " << (ms(wall_pre_loop, wall_post_loop) - kernel_seconds * 1000.0) << " ms\n"
+                      << "[clifft-timing] TOTAL wall:       " << ms(wall_t0, wall_post_loop) << " ms\n";
+        }
 
         SurvivorResult result;
         result.total_shots = static_cast<uint32_t>(std::min<uint64_t>(shots, UINT32_MAX));

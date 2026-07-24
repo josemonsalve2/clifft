@@ -24,10 +24,10 @@ constexpr double kDustEpsilon = 1e-18;
 constexpr uint32_t kNumXCDs = 8;   // MI300X has 8 XCDs
 // kPauliWords: number of 64-bit words per Pauli frame row (x or z).
 // kMaxQubits: maximum qubit count supported by the GPU backend.
-// Currently set to 2 words = 128 qubits. Increase kPauliWords to 4
-// for 256-qubit support (requires updating GpuMask, GpuChannel, GpuExpValMask
-// struct fields and ShotState px/pz arrays in hip_sampler.hip).
-constexpr uint32_t kPauliWords = 2;
+// 5 words = 320 qubits (covers surface_d11 = 274 qubits). All Pauli-frame
+// storage (GpuMask, GpuChannel, GpuExpValMask, ShotState px/pz, coop/global
+// LDS frame) and all per-word operations loop over kPauliWords.
+constexpr uint32_t kPauliWords = 5;
 constexpr uint32_t kMaxQubits = kPauliWords * 64;
 
 struct __attribute__((aligned(8))) GpuComplex {
@@ -36,14 +36,14 @@ struct __attribute__((aligned(8))) GpuComplex {
 };
 
 struct GpuMask {
-    uint64_t x[2];
-    uint64_t z[2];
+    uint64_t x[kPauliWords];
+    uint64_t z[kPauliWords];
     uint8_t sign;
 };
 
 struct GpuChannel {
-    uint64_t x[2];
-    uint64_t z[2];
+    uint64_t x[kPauliWords];
+    uint64_t z[kPauliWords];
     double prob;
 };
 
@@ -74,8 +74,8 @@ struct GpuFusedU4Entry {
 };
 
 struct GpuExpValMask {
-    uint64_t x[2];
-    uint64_t z[2];
+    uint64_t x[kPauliWords];
+    uint64_t z[kPauliWords];
     uint8_t sign;
 };
 
@@ -142,6 +142,8 @@ struct DeviceBuffers {
     GpuFusedU2Entry* fused_u2 = nullptr;
     GpuFusedU4Entry* fused_u4 = nullptr;
     GpuExpValMask* exp_val_masks = nullptr;
+    bool hsa_allocated = false;
+    bool block_counts_fine_grained = false;
 };
 
 }  // namespace gpu
