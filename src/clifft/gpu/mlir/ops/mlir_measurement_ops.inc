@@ -37,6 +37,13 @@ case Opcode::OP_OBSERVABLE: {
         uint32_t ob_start = flat.observable_offsets[ins.a];
         uint32_t ob_end = flat.observable_offsets[ins.a + 1];
         char bidx_buf[32]; snprintf(bidx_buf, sizeof(bidx_buf), "%u", ins.b);
+        // COOP: obs[b] ^= parity is a non-idempotent read-modify-write on a
+        // SHARED LDS byte. Without a tid0 guard all 256 threads XOR the same
+        // parity into obs[b] -> 256 XORs cancel (even count) instead of one,
+        // silently zeroing the observable contribution. Gold guards this
+        // tid0-only (hip_sampler.hip:1752). This directly corrupted the
+        // logical observable on coop circuits with OP_OBSERVABLE.
+        std::string obs_guard = cooperative_mode ? emit_tid0_guard_begin(out) : "";
         std::string obs_idx = fresh_ssa();
         out << "  " << obs_idx << " = llvm.mlir.constant(" << bidx_buf << " : i64) : i64\n";
         std::string obs_elem_ptr = fresh_ssa();
@@ -61,6 +68,7 @@ case Opcode::OP_OBSERVABLE: {
         std::string new_obs = fresh_ssa();
         out << "  " << new_obs << " = llvm.xor " << cur_obs << ", " << parity << " : i8\n";
         out << "  llvm.store " << new_obs << ", " << obs_elem_ptr << " : i8, !llvm.ptr\n";
+        if (cooperative_mode) emit_tid0_guard_end(out, obs_guard);
     }
     break;
 }
@@ -79,8 +87,7 @@ case Opcode::OP_MEAS_ACTIVE_INTERFERE: {
     break;
 }
 case Opcode::OP_SWAP_MEAS_INTERFERE: {
-    out << "  // swap_meas_interfere — discard (needs frame_swap + interfere)\n";
-    out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
+    emit_swap_meas_interfere(out, ins.axis_1, ins.axis_2, ins.a, sign);
     break;
 }
 case Opcode::OP_MEAS_DORMANT_STATIC_FORCED:

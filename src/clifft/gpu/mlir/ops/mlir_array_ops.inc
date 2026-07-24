@@ -103,6 +103,7 @@ case Opcode::OP_ARRAY_T: {
     out << "  " << i_next << " = llvm.add " << lv_t << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
+    if (cooperative_mode) emit_barrier(out);
     break;
 }
 case Opcode::OP_ARRAY_T_DAG: {
@@ -162,6 +163,7 @@ case Opcode::OP_ARRAY_T_DAG: {
     out << "  " << i_next << " = llvm.add " << lv_td << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
+    if (cooperative_mode) emit_barrier(out);
     break;
 }
 case Opcode::OP_ARRAY_CNOT:
@@ -358,6 +360,7 @@ case Opcode::OP_ARRAY_ROT: {
     out << "  " << i_next << " = llvm.add " << lv_rot << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
+    if (cooperative_mode) emit_barrier(out);
     break;
 }
 case Opcode::OP_ARRAY_MULTI_CNOT: {
@@ -389,52 +392,60 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
     out << "  " << cond << " = llvm.icmp \"ult\" " << lv_mcn << ", " << iters << " : i64\n";
     out << "  llvm.cond_br " << cond << ", ^" << body_lbl << ", ^" << exit_lbl << "\n";
     out << "^" << body_lbl << ":\n";
-    std::string scat = emit_scatter_bits_1(lv_mcn, axis64);
-    std::string base = fresh_ssa();
-    out << "  " << base << " = llvm.or " << scat << ", " << axis_bit << " : i64\n";
-    // popcount(base & mask)
+    // MULTI_CNOT is a controlled-X (SWAP), not a controlled-Z (negate).
+    // SVM ref (exec_array_multi_cnot, svm_kernels.inl:68-75):
+    //   actual = scatter_bits_1(idx, ~t_bit, target)   [target bit CLEAR]
+    //   parity = popcount(actual & ctrl_mask) & 1
+    //   swap v[actual] <-> v[actual | t_bit] when parity is odd
+    std::string actual = emit_scatter_bits_1(lv_mcn, axis64);  // target bit clear
+    std::string actual_hi = fresh_ssa();
+    out << "  " << actual_hi << " = llvm.or " << actual << ", " << axis_bit << " : i64\n";
+    // popcount(actual & mask) parity
     std::string masked = fresh_ssa();
-    out << "  " << masked << " = llvm.and " << base << ", " << mask_c << " : i64\n";
+    out << "  " << masked << " = llvm.and " << actual << ", " << mask_c << " : i64\n";
     std::string pc = fresh_ssa();
     out << "  " << pc << " = llvm.intr.ctpop(" << masked << ") : (i64) -> i64\n";
     std::string pc_odd = fresh_ssa();
     out << "  " << pc_odd << " = llvm.and " << pc << ", %c1_i64 : i64\n";
     std::string is_odd = fresh_ssa();
     out << "  " << is_odd << " = llvm.icmp \"ne\" " << pc_odd << ", %c0_i64 : i64\n";
-    // If odd popcount, negate v[base]
+    // If odd parity, swap v[actual] and v[actual|t_bit]
     std::string then_lbl = fresh_label("mcn_then"), merge_lbl = fresh_label("mcn_merge");
     out << "  llvm.cond_br " << is_odd << ", ^" << then_lbl << ", ^" << merge_lbl << "\n";
     out << "^" << then_lbl << ":\n";
-    std::string vc = emit_load_v(base);
-    std::string vc_re = fresh_ssa(), vc_im = fresh_ssa();
-    out << "  " << vc_re << " = llvm.extractvalue " << vc << "[0] : !llvm.struct<(f32, f32)>\n";
-    out << "  " << vc_im << " = llvm.extractvalue " << vc << "[1] : !llvm.struct<(f32, f32)>\n";
-    std::string neg_re = fresh_ssa(), neg_im = fresh_ssa();
-    out << "  " << neg_re << " = llvm.fneg " << vc_re << " : f32\n";
-    out << "  " << neg_im << " = llvm.fneg " << vc_im << " : f32\n";
-    std::string r0 = fresh_ssa(), r1 = fresh_ssa(), res = fresh_ssa();
-    out << "  " << r0 << " = llvm.mlir.undef : !llvm.struct<(f32, f32)>\n";
-    out << "  " << r1 << " = llvm.insertvalue " << neg_re << ", " << r0 << "[0] : !llvm.struct<(f32, f32)>\n";
-    out << "  " << res << " = llvm.insertvalue " << neg_im << ", " << r1 << "[1] : !llvm.struct<(f32, f32)>\n";
-    emit_store_v(base, res);
+    std::string v_lo = emit_load_v(actual);
+    std::string v_hi = emit_load_v(actual_hi);
+    emit_store_v(actual, v_hi);
+    emit_store_v(actual_hi, v_lo);
     out << "  llvm.br ^" << merge_lbl << "\n";
     out << "^" << merge_lbl << ":\n";
     std::string i_next = fresh_ssa();
     out << "  " << i_next << " = llvm.add " << lv_mcn << ", " << coop_step << " : i64\n";
     out << "  llvm.br ^" << hdr << "(" << i_next << " : i64)\n";
     out << "^" << exit_lbl << ":\n";
+    // Frame update = one exec_frame_cnot(c, target) per control c in the mask:
+    //   px[target] ^= px[c]   (accumulate each control's px into target's px)
+    //   pz[c]      ^= pz[target]
+    // SVM ref exec_array_multi_cnot -> exec_frame_cnot (svm_kernels.inl:502/exec_frame_cnot).
+    // NOTE: read pz[target] ONCE up front — the per-control pz[c] ^= pz[target]
+    // never touches pz[target] (target is not a control), so it stays stable;
+    // likewise accumulate Σ px[c] before writing px[target]. (The previous
+    // emission had px/pz swapped here, corrupting the frame for controlled
+    // measurements that follow — the circuit_d5 coop MX bug.)
     { auto g = emit_tid0_guard_begin(out);
         std::string ax_i32 = fresh_ssa();
         out << "  " << ax_i32 << " = llvm.mlir.constant(" << abuf << " : i32) : i32\n";
-        std::string px_ax = emit_bit_get("%px_ptr", ax_i32);
+        std::string pz_ax = emit_bit_get("%pz_ptr", ax_i32);
+        // pz[c] ^= pz[target] for each control c
         for (uint32_t j = 0; j < 64; ++j) {
             if (mask_val & (1ULL << j)) {
                 char jbuf[32]; snprintf(jbuf, sizeof(jbuf), "%u", j);
                 std::string j_i32 = fresh_ssa();
                 out << "  " << j_i32 << " = llvm.mlir.constant(" << jbuf << " : i32) : i32\n";
-                emit_bit_xor("%pz_ptr", j_i32, px_ax);
+                emit_bit_xor("%pz_ptr", j_i32, pz_ax);
             }
         }
+        // px[target] ^= Σ px[c]
         std::string zero_i1 = fresh_ssa();
         out << "  " << zero_i1 << " = llvm.mlir.constant(false) : i1\n";
         std::string accum = zero_i1;
@@ -443,9 +454,9 @@ case Opcode::OP_ARRAY_MULTI_CNOT: {
                 char jbuf[32]; snprintf(jbuf, sizeof(jbuf), "%u", j);
                 std::string j_i32 = fresh_ssa();
                 out << "  " << j_i32 << " = llvm.mlir.constant(" << jbuf << " : i32) : i32\n";
-                std::string pz_j = emit_bit_get("%pz_ptr", j_i32);
+                std::string px_j = emit_bit_get("%px_ptr", j_i32);
                 std::string new_accum = fresh_ssa();
-                out << "  " << new_accum << " = llvm.xor " << accum << ", " << pz_j << " : i1\n";
+                out << "  " << new_accum << " = llvm.xor " << accum << ", " << px_j << " : i1\n";
                 accum = new_accum;
             }
         }
@@ -532,9 +543,11 @@ case Opcode::OP_ARRAY_MULTI_CZ: {
     emit_tid0_guard_end(out, g); }
     break;
 }
-case Opcode::OP_ARRAY_U2:
+case Opcode::OP_ARRAY_U2: {
+    emit_array_u2(out, flat, ins.axis_1, ins.a);
+    break;
+}
 case Opcode::OP_ARRAY_U4: {
-    out << "  // U2/U4 requires constant pool — not available in MLIR path, discard\n";
-    out << "  llvm.store %c1_i8, %discarded_ptr : i8, !llvm.ptr\n";
+    emit_array_u4(out, flat, ins.axis_1, ins.axis_2, ins.a);
     break;
 }
