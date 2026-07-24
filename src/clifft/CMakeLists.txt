@@ -136,6 +136,44 @@ else()
     )
 endif()
 
+# ---------------------------------------------------------------------------
+# MLIR backend V2 — HIP-FREE HSA path (independent of CLIFFT_ENABLE_HIP).
+# Adds the HSA runtime + V2 host sources and links hsa-runtime64 WITHOUT
+# enable_language(HIP) or hip::host. The referenced HSA/device_program files are
+# already HIP-free (their only "HIP" mentions are comments). This block never
+# modifies the SVM/Hybrid (HIP) build above. See docs/v2/V2.md P0(a).
+# ---------------------------------------------------------------------------
+if(CLIFFT_ENABLE_MLIR_V2)
+    # HSA runtime files: add them ONLY if the HIP branch above didn't already.
+    if(NOT CLIFFT_ENABLE_HIP)
+        target_sources(clifft_core PRIVATE
+            gpu/runtime/hsa_runtime.cc
+            gpu/runtime/hsa_kernel_dispatch.cc
+            gpu/runtime/hsa_persistent_dispatch.cc
+        )
+        find_package(hsa-runtime64 REQUIRED)
+        target_link_libraries(clifft_core PRIVATE hsa-runtime64::hsa-runtime64)
+        target_compile_definitions(clifft_core PUBLIC CLIFFT_ENABLE_GPU)
+    endif()
+    # V2 host sources (kernel load/dispatch + host codegen driver).
+    target_sources(clifft_core PRIVATE
+        gpu/mlir/v2/v2_kernel.cc
+    )
+    target_compile_definitions(clifft_core PRIVATE CLIFFT_ENABLE_MLIR_V2)
+
+    # Compile the P0(a) probe device kernel to a .hsaco (plain C -> amdgcn, no HIP)
+    # and hand its path to the host driver via a compile definition.
+    include(ClifftAmdgcn)
+    clifft_add_amdgcn_hsaco(clifft_v2_probe_hsaco
+        SOURCE gpu/mlir/v2/probe_kernel.c
+        OUTPUT clifft_v2_probe.hsaco)
+    add_dependencies(clifft_core clifft_v2_probe_hsaco)
+    target_compile_definitions(clifft_core PRIVATE
+        CLIFFT_V2_PROBE_HSACO="${CMAKE_BINARY_DIR}/clifft_v2_probe.hsaco")
+
+    message(STATUS "CLIFFT_ENABLE_MLIR_V2=ON: HIP-free HSA path, arch=${CLIFFT_AMDGPU_ARCH}")
+endif()
+
 # Code coverage instrumentation (only for Clifft code, not dependencies)
 if(CLIFFT_COVERAGE)
     target_compile_options(clifft_core PRIVATE --coverage -fprofile-arcs -ftest-coverage)

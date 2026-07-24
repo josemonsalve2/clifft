@@ -9,7 +9,18 @@ endif()
 
 option(CLIFFT_ENABLE_HIP "Build GPU sampler with AMD HIP (ROCm)" OFF)
 
+# MLIR backend V2: a HIP-FREE GPU path. Device code is authored in plain C /
+# LLVM-IR / MLIR, compiled to amdgcn via clang/llc/ld.lld (NO -x hip, NO HIP
+# runtime), and dispatched via the HSA runtime. Independent of CLIFFT_ENABLE_HIP
+# so the SVM/Hybrid (HIP) build path is never touched. See docs/v2/V2.md.
+option(CLIFFT_ENABLE_MLIR_V2 "Build the HIP-free MLIR-V2 GPU backend (HSA-only)" OFF)
+set(CLIFFT_AMDGPU_ARCH "gfx950" CACHE STRING "AMDGPU target for MLIR-V2 device code")
+set(CLIFFT_LLVM_PREFIX "" CACHE STRING "LLVM toolchain prefix (clang/llc/ld.lld) for MLIR-V2")
+
 project(clifft LANGUAGES CXX)
+
+# Make cmake/ modules includable by bare name from subdirectories.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Version: derived from git tags (or VERSION file in sdists)
 include(cmake/ClifftVersion.cmake)
@@ -188,6 +199,16 @@ else()
         add_executable(run_gpu tools/run_gpu.cpp)
         target_link_libraries(run_gpu PRIVATE clifft_core)
         target_include_directories(run_gpu PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_BINARY_DIR}/generated
+        )
+    endif()
+
+    # MLIR-V2 CLI (HIP-free). Independent of CLIFFT_ENABLE_HIP.
+    if(CLIFFT_ENABLE_MLIR_V2)
+        add_executable(run_v2 tools/run_v2.cpp)
+        target_link_libraries(run_v2 PRIVATE clifft_core)
+        target_include_directories(run_v2 PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
             ${CMAKE_CURRENT_BINARY_DIR}/generated
         )
