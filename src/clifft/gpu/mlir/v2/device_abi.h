@@ -63,6 +63,19 @@ typedef struct {
     } entries[16];                       // indexed by 4-bit in_state
 } CV2FusedU4Entry;
 
+// ---- Pauli mask (mirrors GpuMask: x[W], z[W], sign) ------------------------
+typedef struct {
+    uint64_t x[CLIFFT_V2_PAULI_WORDS];
+    uint64_t z[CLIFFT_V2_PAULI_WORDS];
+    uint8_t  sign;
+} CV2Mask;
+
+// ---- Readout noise (mirrors GpuReadoutNoise: meas_idx, prob) ---------------
+typedef struct {
+    uint32_t meas_idx;
+    double   prob;
+} CV2ReadoutNoise;
+
 // ---- Noise channel (mirrors GpuChannel: x[W], z[W], prob) ------------------
 typedef struct {
     uint64_t x[CLIFFT_V2_PAULI_WORDS];
@@ -98,7 +111,10 @@ typedef struct {
     uint64_t noise_channels;      // const CV2Channel*
     uint64_t noise_hazards;       // const double*
     uint32_t num_noise_sites;
-    uint32_t _pad0;
+    uint64_t pauli_masks;         // const CV2Mask*
+    uint64_t readout_noise;       // const CV2ReadoutNoise*
+    uint64_t detector_offsets;    // const uint32_t*
+    uint64_t detector_targets;    // const uint32_t*
 } CV2KernArgs;
 
 // ---- Per-workgroup result accumulator (mirrors BlockCounts) ----------------

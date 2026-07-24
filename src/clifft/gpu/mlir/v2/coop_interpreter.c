@@ -42,6 +42,7 @@ enum { FLAG_SIGN = 1u << 0, FLAG_IDENTITY = 1u << 2, FLAG_EXPECTED_ONE = 1u << 3
 #define V2_MAX_AMP  1024
 #define V2_MAX_MEAS 4096
 extern __attribute__((address_space(3))) CV2Complex lds_v[V2_MAX_AMP];
+extern __attribute__((address_space(3))) CV2Complex lds_red_scratch[V2_MAX_AMP];
 extern __attribute__((address_space(3))) u8   lds_meas[V2_MAX_MEAS];
 extern __attribute__((address_space(3))) u8   lds_obs[CLIFFT_V2_MAX_OBS];
 extern __attribute__((address_space(3))) u64  lds_px[CLIFFT_V2_PAULI_WORDS];
@@ -95,6 +96,10 @@ static inline void fset(__attribute__((address_space(3))) u64* w, u32 i, int v) 
 static inline void fxor(__attribute__((address_space(3))) u64* w, u32 i, int v) {
     if (v) w[i >> 6] ^= 1UL << (i & 63u);
 }
+static inline void fswap(__attribute__((address_space(3))) u64* w, u32 a, u32 b) {
+    int va = fget(w, a), vb = fget(w, b);
+    fset(w, a, vb); fset(w, b, va);
+}
 
 // ----- complex + amplitude helpers -------------------------------------------
 #define V2_INV_SQRT2 0.70710678118654752440
@@ -126,6 +131,17 @@ static inline u64 insert_zero_bit(u64 val, u32 pos) {
     u64 lo = val & ((1ull << pos) - 1ull);
     u64 hi = (val & ~((1ull << pos) - 1ull)) << 1;
     return lo | hi;
+}
+
+// Scatter i over one zeroed bit slot at `pos` — mirrors SVM scatter_bits_1.
+static inline u64 scatter_bits_1(u64 val, u32 pos) { return insert_zero_bit(val, pos); }
+
+// Scatter i over two zeroed bit slots (lo first, then hi) — mirrors SVM.
+static inline u64 scatter_bits_2(u64 val, u32 b1, u32 b2) {
+    u32 lo = b1 < b2 ? b1 : b2;
+    u32 hi = b1 < b2 ? b2 : b1;
+    val = insert_zero_bit(val, lo);
+    return insert_zero_bit(val, hi);
 }
 
 // Cooperative diagonal phase on an active axis: v[idx | axis_bit] *= phase,
@@ -223,7 +239,11 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                     const CV2NoiseSite* noise_sites,
                     const CV2Channel* noise_channels,
                     const double* noise_hazards,
-                    u32 num_noise_sites) {
+                    u32 num_noise_sites,
+                    const CV2Mask* pauli_masks,
+                    const CV2ReadoutNoise* readout_noise,
+                    const u32* detector_offsets,
+                    const u32* detector_targets) {
     (void)peak_rank; (void)fused_u2; (void)fused_u4;
     u64 shot_id = shot_offset + (u64)bid();
     if (shot_id >= shots) return;
@@ -408,6 +428,272 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             barrier();
             break;
         }
+        case OP_ARRAY_CNOT: {
+            u32 c = ins.axis_1, tg = ins.axis_2;
+            u64 c_bit = 1ull << c, t_bit = 1ull << tg;
+            u64 iters = 1ull << (lds_active_k - 2u);
+            for (u64 i = t; i < iters; i += 256u) {
+                u64 base = scatter_bits_2(i, c, tg) | c_bit;
+                CV2Complex a = lds_v[base], b = lds_v[base | t_bit];
+                lds_v[base] = b; lds_v[base | t_bit] = a;
+            }
+            barrier();
+            if (t == 0) {
+                int px_c = fget(lds_px, c), pz_t = fget(lds_pz, tg);
+                fxor(lds_px, tg, px_c); fxor(lds_pz, c, pz_t);
+            }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_CZ: {
+            u32 a = ins.axis_1, b = ins.axis_2;
+            u64 both = (1ull << a) | (1ull << b);
+            u64 iters = 1ull << (lds_active_k - 2u);
+            for (u64 i = t; i < iters; i += 256u) {
+                u64 idx = scatter_bits_2(i, a, b) | both;
+                CV2Complex c = lds_v[idx]; c.re = -c.re; c.im = -c.im; lds_v[idx] = c;
+            }
+            barrier();
+            if (t == 0) {
+                int px_a = fget(lds_px, a), px_b = fget(lds_px, b);
+                fxor(lds_pz, b, px_a); fxor(lds_pz, a, px_b);
+            }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_SWAP: {
+            u32 a = ins.axis_1, b = ins.axis_2;
+            u64 a_bit = 1ull << a, b_bit = 1ull << b;
+            u64 iters = 1ull << (lds_active_k - 2u);
+            for (u64 i = t; i < iters; i += 256u) {
+                u64 base = scatter_bits_2(i, a, b);
+                CV2Complex ta = lds_v[base | a_bit], tb = lds_v[base | b_bit];
+                lds_v[base | a_bit] = tb; lds_v[base | b_bit] = ta;
+            }
+            barrier();
+            if (t == 0) { fswap(lds_px, a, b); fswap(lds_pz, a, b); }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_MULTI_CNOT: {
+            u32 tg = ins.axis_1; u64 ctrl_mask = ins.mask;
+            u64 t_bit = 1ull << tg;
+            u64 half = 1ull << (lds_active_k - 1u);
+            for (u64 idx = t; idx < half; idx += 256u) {
+                u64 actual = scatter_bits_1(idx, tg);
+                if (__builtin_popcountll(actual & ctrl_mask) & 1) {
+                    CV2Complex a = lds_v[actual], b = lds_v[actual | t_bit];
+                    lds_v[actual] = b; lds_v[actual | t_bit] = a;
+                }
+            }
+            barrier();
+            if (t == 0) {
+                for (u32 c = 0; c < lds_active_k; ++c) if ((ctrl_mask >> c) & 1ull) {
+                    int px_c = fget(lds_px, c), pz_t = fget(lds_pz, tg);
+                    fxor(lds_px, tg, px_c); fxor(lds_pz, c, pz_t);
+                }
+            }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_MULTI_CZ: {
+            u32 ctrl = ins.axis_1; u64 target_mask = ins.mask;
+            u64 c_bit = 1ull << ctrl;
+            u64 half = 1ull << (lds_active_k - 1u);
+            for (u64 idx = t; idx < half; idx += 256u) {
+                u64 actual = scatter_bits_1(idx, ctrl) | c_bit;
+                if (__builtin_popcountll(actual & target_mask) & 1) {
+                    CV2Complex v = lds_v[actual]; v.re = -v.re; v.im = -v.im; lds_v[actual] = v;
+                }
+            }
+            barrier();
+            if (t == 0) {
+                for (u32 tg = 0; tg < lds_active_k; ++tg) if ((target_mask >> tg) & 1ull) {
+                    int px_c = fget(lds_px, ctrl), px_t = fget(lds_px, tg);
+                    fxor(lds_pz, tg, px_c); fxor(lds_pz, ctrl, px_t);
+                }
+            }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_H: {
+            u32 axis = ins.axis_1; u64 axis_bit = 1ull << axis;
+            u64 iters = 1ull << (lds_active_k - 1u);
+            for (u64 i = t; i < iters; i += 256u) {
+                u64 i0 = scatter_bits_1(i, axis), i1 = i0 | axis_bit;
+                CV2Complex a = lds_v[i0], b = lds_v[i1];
+                lds_v[i0] = cscale(cadd(a, b), (float)V2_INV_SQRT2);
+                lds_v[i1] = cscale(csub(a, b), (float)V2_INV_SQRT2);
+            }
+            barrier();
+            if (t == 0) {
+                int px = fget(lds_px, axis), pz = fget(lds_pz, axis);
+                fset(lds_px, axis, pz); fset(lds_pz, axis, px);
+            }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_S:
+        case OP_ARRAY_S_DAG: {
+            u32 axis = ins.axis_1;
+            CV2Complex ph; ph.re = 0.0f;
+            ph.im = (ins.opcode == OP_ARRAY_S_DAG) ? -1.0f : 1.0f;
+            coop_apply_phase(t, axis, ph);
+            if (t == 0) { int px = fget(lds_px, axis); fxor(lds_pz, axis, px); }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_ROT: {
+            u32 axis = ins.axis_1;
+            if (axis < lds_active_k) {
+                int px = fget(lds_px, axis);
+                double im = px ? -ins.weight_im : ins.weight_im;
+                CV2Complex phase; phase.re = (float)ins.weight_re; phase.im = (float)im;
+                coop_apply_phase(t, axis, phase);
+            } else barrier();
+            break;
+        }
+        case OP_EXPAND_ROT: {
+            u32 half = 1u << lds_active_k;
+            int px = fget(lds_px, ins.axis_1);
+            double im = px ? -ins.weight_im : ins.weight_im;
+            CV2Complex phase; phase.re = (float)ins.weight_re; phase.im = (float)im;
+            for (u32 i = t; i < half; i += 256u) lds_v[i + half] = cmul(lds_v[i], phase);
+            barrier();
+            if (t == 0) lds_active_k += 1;
+            barrier();
+            break;
+        }
+        case OP_ARRAY_U2: {
+            u32 axis = ins.axis_1;
+            int in_state = (fget(lds_pz, axis) ? 2 : 0) | (fget(lds_px, axis) ? 1 : 0);
+            const CV2Complex* mat = fused_u2[ins.a].matrices[in_state];
+            if (axis < lds_active_k) {
+                u64 axis_bit = 1ull << axis;
+                u64 iters = 1ull << (lds_active_k - 1u);
+                for (u64 i = t; i < iters; i += 256u) {
+                    u64 i0 = scatter_bits_1(i, axis), i1 = i0 | axis_bit;
+                    CV2Complex a = lds_v[i0], b = lds_v[i1];
+                    lds_v[i0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
+                    lds_v[i1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
+                }
+            }
+            barrier();
+            if (t == 0) {
+                u8 out = fused_u2[ins.a].out_states[in_state];
+                fset(lds_px, axis, (out & 1) != 0);
+                fset(lds_pz, axis, (out & 2) != 0);
+            }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_U4: {
+            u32 lo = ins.axis_1, hi = ins.axis_2;
+            int in_state = (fget(lds_pz, hi) << 3) | (fget(lds_px, hi) << 2)
+                         | (fget(lds_pz, lo) << 1) | fget(lds_px, lo);
+            const CV2Complex (*mat)[4] = fused_u4[ins.a].entries[in_state].matrix;
+            if (hi < lds_active_k) {
+                u64 lo_bit = 1ull << lo, hi_bit = 1ull << hi;
+                u64 iters = 1ull << (lds_active_k - 2u);
+                for (u64 i = t; i < iters; i += 256u) {
+                    u64 base = scatter_bits_2(i, lo, hi);
+                    CV2Complex v0 = lds_v[base], v1 = lds_v[base | lo_bit];
+                    CV2Complex v2 = lds_v[base | hi_bit], v3 = lds_v[base | lo_bit | hi_bit];
+                    lds_v[base] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
+                                       cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3])));
+                    lds_v[base | lo_bit] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
+                                       cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3])));
+                    lds_v[base | hi_bit] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
+                                       cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3])));
+                    lds_v[base | lo_bit | hi_bit] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
+                                       cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
+                }
+            }
+            barrier();
+            if (t == 0) {
+                u8 out = fused_u4[ins.a].entries[in_state].out_state;
+                fset(lds_px, lo, (out & 1) != 0); fset(lds_pz, lo, (out & 2) != 0);
+                fset(lds_px, hi, (out & 4) != 0); fset(lds_pz, hi, (out & 8) != 0);
+            }
+            barrier();
+            break;
+        }
+        case OP_SWAP_MEAS_INTERFERE: {
+            u32 from = ins.axis_1, to = ins.axis_2;
+            if (from == to) {
+                // degenerate: identical to MEAS_ACTIVE_INTERFERE on `to`
+                u32 half = 1u << (lds_active_k - 1u);
+                int pz = fget(lds_pz, to);
+                double lp = 0.0, lm = 0.0;
+                for (u32 i = t; i < half; i += 256u) {
+                    CV2Complex vi = lds_v[i], vh = lds_v[i + half];
+                    lp += cnorm(cadd(vi, vh)); lm += cnorm(csub(vi, vh));
+                }
+                double pp, pm; coop_reduce2(t, lp, lm, &pp, &pm);
+                if (t == 0) {
+                    u8 bb = sample_branch(pp, pm, pp + pm); lds_branch = bb;
+                    u8 m_abs = bb ^ (u8)pz;
+                    if (ins.a < V2_MAX_MEAS) lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                }
+                barrier();
+                for (u32 i = t; i < half; i += 256u) {
+                    CV2Complex vi = lds_v[i], vh = lds_v[i + half];
+                    lds_v[i] = cscale((lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh), (float)V2_INV_SQRT2);
+                }
+                barrier();
+                if (t == 0) {
+                    lds_active_k -= 1;
+                    u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                    fset(lds_px, to, m_abs != 0); fset(lds_pz, to, 0);
+                }
+                barrier();
+                break;
+            }
+            if (t == 0) { fswap(lds_px, from, to); fswap(lds_pz, from, to); }
+            barrier();
+            int pz = fget(lds_pz, to);
+            u64 half = 1ull << to, f_bit = 1ull << from;
+            double lp = 0.0, lm = 0.0;
+            for (u64 idx = t; idx < half; idx += 256u) {
+                u64 b_f = (idx >> from) & 1ull;
+                u64 base = (idx & ~f_bit) | (b_f << to);
+                CV2Complex vb = lds_v[base], vf = lds_v[base | f_bit];
+                lp += cnorm(cadd(vb, vf)); lm += cnorm(csub(vb, vf));
+            }
+            double pp, pm; coop_reduce2(t, lp, lm, &pp, &pm);
+            if (t == 0) {
+                u8 bb = sample_branch(pp, pm, pp + pm); lds_branch = bb;
+                u8 m_abs = bb ^ (u8)pz;
+                if (ins.a < V2_MAX_MEAS) lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+            }
+            barrier();
+            // fold into contiguous lower half (write to [idx], read strided)
+            for (u64 idx = t; idx < half; idx += 256u) {
+                u64 b_f = (idx >> from) & 1ull;
+                u64 base = (idx & ~f_bit) | (b_f << to);
+                CV2Complex vb = lds_v[base], vf = lds_v[base | f_bit];
+                lds_red_scratch[idx] = cscale((lds_branch == 0) ? cadd(vb, vf) : csub(vb, vf), (float)V2_INV_SQRT2);
+            }
+            barrier();
+            for (u64 idx = t; idx < half; idx += 256u) lds_v[idx] = lds_red_scratch[idx];
+            barrier();
+            if (t == 0) {
+                lds_active_k -= 1;
+                u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                fset(lds_px, to, m_abs != 0); fset(lds_pz, to, 0);
+            }
+            barrier();
+            break;
+        }
+        case OP_APPLY_PAULI:
+            if (t == 0 && lds_meas[ins.b] != 0) {
+                const CV2Mask* m = &pauli_masks[ins.a];
+                for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) {
+                    lds_px[w] ^= m->x[w]; lds_pz[w] ^= m->z[w];
+                }
+            }
+            barrier();
+            break;
         case OP_NOISE:
             if (t == 0 && ins.a == lds_next_noise) {
                 apply_noise_site(noise_sites, noise_channels, ins.a);
@@ -448,6 +734,24 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                 if (ins.b < CLIFFT_V2_MAX_OBS) lds_obs[ins.b] ^= parity;
             }
             barrier();
+            break;
+        case OP_READOUT_NOISE:
+            if (t == 0) {
+                CV2ReadoutNoise r = readout_noise[ins.a];
+                if (rng_uniform(lds_rng) < r.prob) lds_meas[r.meas_idx] ^= 1u;
+            }
+            barrier();
+            break;
+        case OP_POSTSELECT:
+            if (t == 0) {
+                u32 s0 = detector_offsets[ins.a];
+                u32 e0 = detector_offsets[ins.a + 1];
+                u8 parity = (ins.flags & FLAG_EXPECTED_ONE) ? 1u : 0u;
+                for (u32 k = s0; k < e0; ++k) parity ^= lds_meas[detector_targets[k]];
+                if (parity != 0) lds_discarded = 1;
+            }
+            barrier();
+            if (lds_discarded) return;
             break;
         case OP_DETECTOR:
             barrier();

@@ -57,6 +57,10 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     uint64_t d_noise_sites = upload(rt, flat.noise_sites);
     uint64_t d_noise_channels = upload(rt, flat.noise_channels);
     uint64_t d_noise_hazards = upload(rt, flat.noise_hazards);
+    uint64_t d_pauli_masks = upload(rt, flat.pauli_masks);
+    uint64_t d_readout_noise = upload(rt, flat.readout_noise);
+    uint64_t d_det_off = upload(rt, flat.detector_offsets);
+    uint64_t d_det_tgt = upload(rt, flat.detector_targets);
 
     // One BlockCounts, zeroed; kernel atomic-adds into it.
     BlockCounts* d_counts = static_cast<BlockCounts*>(rt.device_malloc(sizeof(BlockCounts)));
@@ -70,7 +74,9 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
         uint64_t block_counts; uint64_t fused_u2; uint64_t fused_u4;
         uint64_t obs_off; uint64_t obs_tgt;
         uint64_t noise_sites; uint64_t noise_channels; uint64_t noise_hazards;
-        uint32_t num_noise_sites;
+        uint32_t num_noise_sites; uint32_t _pad_align;
+        uint64_t pauli_masks;
+        uint64_t readout_noise; uint64_t detector_offsets; uint64_t detector_targets;
     } kargs;
     kargs.instrs = d_instrs;
     kargs.num_instrs = flat.instrs.size();
@@ -89,6 +95,11 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     kargs.noise_channels = d_noise_channels;
     kargs.noise_hazards = d_noise_hazards;
     kargs.num_noise_sites = static_cast<uint32_t>(flat.noise_sites.size());
+    kargs._pad_align = 0;
+    kargs.pauli_masks = d_pauli_masks;
+    kargs.readout_noise = d_readout_noise;
+    kargs.detector_offsets = d_det_off;
+    kargs.detector_targets = d_det_tgt;
 
     const uint32_t block = 256;
     const uint32_t grid = shots * block;  // one workgroup per shot
@@ -113,6 +124,10 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     if (d_noise_sites) rt.device_free(reinterpret_cast<void*>(d_noise_sites));
     if (d_noise_channels) rt.device_free(reinterpret_cast<void*>(d_noise_channels));
     if (d_noise_hazards) rt.device_free(reinterpret_cast<void*>(d_noise_hazards));
+    if (d_pauli_masks) rt.device_free(reinterpret_cast<void*>(d_pauli_masks));
+    if (d_readout_noise) rt.device_free(reinterpret_cast<void*>(d_readout_noise));
+    if (d_det_off) rt.device_free(reinterpret_cast<void*>(d_det_off));
+    if (d_det_tgt) rt.device_free(reinterpret_cast<void*>(d_det_tgt));
     hsa_free_kernel(kernel);
     return result;
 }

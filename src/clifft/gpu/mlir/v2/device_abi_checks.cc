@@ -35,6 +35,8 @@ using clifft::gpu::GpuFusedU4Entry;
 using clifft::gpu::BlockCounts;
 using clifft::gpu::GpuChannel;
 using clifft::gpu::GpuNoiseSite;
+using clifft::gpu::GpuMask;
+using clifft::gpu::GpuReadoutNoise;
 using clifft::gpu::kMaxObs;
 using clifft::gpu::kMaxExpVals;
 using clifft::gpu::kPauliWords;
@@ -75,6 +77,17 @@ static_assert(sizeof(CV2FusedU4Entry) == sizeof(GpuFusedU4Entry), "CV2FusedU4Ent
 // entries[] element stride must match
 static_assert(sizeof(((CV2FusedU4Entry*)0)->entries[0]) ==
               sizeof(((GpuFusedU4Entry*)0)->entries[0]), "u4 entry stride");
+
+// --- Pauli mask ---
+static_assert(sizeof(CV2Mask) == sizeof(GpuMask), "CV2Mask size");
+static_assert(offsetof(CV2Mask, x)    == offsetof(GpuMask, x),    "mask.x");
+static_assert(offsetof(CV2Mask, z)    == offsetof(GpuMask, z),    "mask.z");
+static_assert(offsetof(CV2Mask, sign) == offsetof(GpuMask, sign), "mask.sign");
+
+// --- Readout noise ---
+static_assert(sizeof(CV2ReadoutNoise) == sizeof(GpuReadoutNoise), "CV2ReadoutNoise size");
+static_assert(offsetof(CV2ReadoutNoise, meas_idx) == offsetof(GpuReadoutNoise, meas_idx), "readout.meas_idx");
+static_assert(offsetof(CV2ReadoutNoise, prob)     == offsetof(GpuReadoutNoise, prob),     "readout.prob");
 
 // --- Noise channel / site ---
 static_assert(sizeof(CV2Channel) == sizeof(GpuChannel), "CV2Channel size");
