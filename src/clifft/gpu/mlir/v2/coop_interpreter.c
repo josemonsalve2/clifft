@@ -105,6 +105,15 @@ static inline CV2Complex cmul(CV2Complex a, CV2Complex b) {
     r.im = a.re * b.im + a.im * b.re;
     return r;
 }
+static inline CV2Complex cadd(CV2Complex a, CV2Complex b) {
+    CV2Complex r; r.re = a.re + b.re; r.im = a.im + b.im; return r;
+}
+static inline CV2Complex csub(CV2Complex a, CV2Complex b) {
+    CV2Complex r; r.re = a.re - b.re; r.im = a.im - b.im; return r;
+}
+static inline CV2Complex cscale(CV2Complex a, float s) {
+    CV2Complex r; r.re = a.re * s; r.im = a.im * s; return r;
+}
 // |v|^2 accumulated in f64 (match gold cnorm: extend each component first).
 static inline double cnorm(CV2Complex v) {
     double re = (double)v.re, im = (double)v.im;
@@ -307,6 +316,41 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             barrier();
             if (lds_branch != 0) {
                 for (u32 i = t; i < half; i += 256u) lds_v[i] = lds_v[i + half];
+            }
+            barrier();
+            if (t == 0) {
+                lds_active_k -= 1;
+                u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                fset(lds_px, ins.axis_1, m_abs != 0);
+                fset(lds_pz, ins.axis_1, 0);
+            }
+            barrier();
+            break;
+        }
+        case OP_MEAS_ACTIVE_INTERFERE: {
+            // X-basis fold of an active axis: (v[i]+-v[i+half])/sqrt2, k -> k-1.
+            u32 half = 1u << (lds_active_k - 1u);
+            int pz = fget(lds_pz, ins.axis_1);
+            double lp = 0.0, lm = 0.0;
+            for (u32 i = t; i < half; i += 256u) {
+                CV2Complex vi = lds_v[i], vh = lds_v[i + half];
+                lp += cnorm(cadd(vi, vh));
+                lm += cnorm(csub(vi, vh));
+            }
+            double p_plus, p_minus;
+            coop_reduce2(t, lp, lm, &p_plus, &p_minus);
+            if (t == 0) {
+                u8 b = sample_branch(p_plus, p_minus, p_plus + p_minus);
+                lds_branch = b;
+                u8 m_abs = b ^ (u8)pz;
+                if (ins.a < V2_MAX_MEAS)
+                    lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+            }
+            barrier();
+            for (u32 i = t; i < half; i += 256u) {
+                CV2Complex vi = lds_v[i], vh = lds_v[i + half];
+                CV2Complex folded = (lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh);
+                lds_v[i] = cscale(folded, (float)V2_INV_SQRT2);
             }
             barrier();
             if (t == 0) {
