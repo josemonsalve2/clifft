@@ -183,8 +183,24 @@ bool HsaRuntime::init() {
     return true;
 }
 
+void HsaRuntime::ensure_copy_signal() {
+    if (copy_signal_valid_) return;
+    hsa_status_t s = hsa_amd_signal_create(1, 0, nullptr,
+                                            HSA_AMD_SIGNAL_AMD_GPU_ONLY,
+                                            &copy_signal_);
+    if (s != HSA_STATUS_SUCCESS) {
+        s = hsa_signal_create(1, 0, nullptr, &copy_signal_);
+    }
+    check_hsa(s, "create persistent copy signal");
+    copy_signal_valid_ = true;
+}
+
 void HsaRuntime::shutdown() {
     if (!initialized) return;
+    if (copy_signal_valid_) {
+        hsa_signal_destroy(copy_signal_);
+        copy_signal_valid_ = false;
+    }
     for (auto& dev : devices) {
         if (dev.queue) {
             hsa_queue_destroy(dev.queue);
@@ -225,6 +241,11 @@ void* HsaRuntime::device_malloc(size_t bytes, int device_idx) {
     if (!check_hsa(hsa_amd_memory_pool_allocate(dev.device_pool, bytes, 0, &ptr),
                    "device_malloc"))
         return nullptr;
+    // Grant both GPU and CPU access at allocation time so subsequent
+    // memcpy_h2d / memcpy_d2h can use direct std::memcpy without
+    // per-call hsa_amd_agents_allow_access (which is a KFD ioctl, ~1ms).
+    hsa_agent_t agents[] = {dev.agent, cpu_agent};
+    hsa_amd_agents_allow_access(2, agents, nullptr, ptr);
     return ptr;
 }
 
@@ -246,29 +267,15 @@ void HsaRuntime::host_free(void* ptr) {
 }
 
 void HsaRuntime::memcpy_h2d(void* dst, const void* src, size_t bytes, int device_idx) {
-    auto& dev = devices.at(device_idx);
-    hsa_signal_t signal;
-    hsa_signal_create(1, 0, nullptr, &signal);
-    check_hsa(hsa_amd_memory_async_copy(dst, dev.agent,
-                                         src, cpu_agent,
-                                         bytes, 0, nullptr, signal),
-              "memcpy_h2d");
-    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
-                               UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-    hsa_signal_destroy(signal);
+    // CPU writes directly to device memory. allow_gpu_access must have
+    // been called at allocation time (hsa_copy_to_device does this).
+    std::memcpy(dst, src, bytes);
 }
 
 void HsaRuntime::memcpy_d2h(void* dst, const void* src, size_t bytes, int device_idx) {
-    auto& dev = devices.at(device_idx);
-    hsa_signal_t signal;
-    hsa_signal_create(1, 0, nullptr, &signal);
-    check_hsa(hsa_amd_memory_async_copy(dst, cpu_agent,
-                                         src, dev.agent,
-                                         bytes, 0, nullptr, signal),
-              "memcpy_d2h");
-    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
-                               UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-    hsa_signal_destroy(signal);
+    // CPU reads directly from device memory. allow_gpu_access must have
+    // been called at allocation time (hsa_copy_to_device does this).
+    std::memcpy(dst, src, bytes);
 }
 
 void HsaRuntime::memset_device(void* dst, uint32_t value, size_t count) {
@@ -278,8 +285,12 @@ void HsaRuntime::memset_device(void* dst, uint32_t value, size_t count) {
 void HsaRuntime::allow_gpu_access(void* ptr, size_t bytes, int device_idx) {
     auto& dev = devices.at(device_idx);
     hsa_agent_t agents[] = {dev.agent};
-    check_hsa(hsa_amd_agents_allow_access(1, agents, nullptr, ptr),
-              "allow_gpu_access");
+    hsa_status_t s = hsa_amd_agents_allow_access(1, agents, nullptr, ptr);
+    if (s != HSA_STATUS_SUCCESS) {
+        std::cerr << "[clifft-hsa] allow_gpu_access FAILED for " << ptr
+                  << " (" << bytes << " bytes)\n";
+    }
+    check_hsa(s, "allow_gpu_access");
 }
 
 void* HsaRuntime::alloc_kernarg(size_t bytes, int device_idx) {

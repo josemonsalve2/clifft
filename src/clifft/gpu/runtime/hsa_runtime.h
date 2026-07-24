@@ -61,6 +61,11 @@ struct HsaRuntime {
     uint64_t timestamp_frequency() const;
     uint64_t timestamp_now() const;
     double elapsed_seconds(uint64_t start, uint64_t end) const;
+
+private:
+    hsa_signal_t copy_signal_ = {0};
+    bool copy_signal_valid_ = false;
+    void ensure_copy_signal();
 };
 
 // Global runtime instance (initialized once, used throughout process lifetime)
