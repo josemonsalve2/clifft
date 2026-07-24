@@ -66,6 +66,12 @@ int main(int argc, char** argv) {
 
     if (!circuit.empty()) {
         auto program = compile_program(circuit);
+        if (getenv("V2_DUMP_OPCODES")) {
+            std::cerr << "OPCODES(" << program.bytecode.size() << "):";
+            for (auto& in : program.bytecode)
+                std::cerr << " " << static_cast<int>(in.opcode);
+            std::cerr << "\n";
+        }
         // CPU reference (f64 gold).
         auto cpu = clifft::sample_survivors(program, shots, seed, false);
         // V2 GPU (HIP-free HSA).

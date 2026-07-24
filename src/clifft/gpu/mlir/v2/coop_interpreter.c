@@ -49,6 +49,9 @@ extern __attribute__((address_space(3))) u64  lds_pz[CLIFFT_V2_PAULI_WORDS];
 extern __attribute__((address_space(3))) u32  lds_active_k;
 extern __attribute__((address_space(3))) u8   lds_discarded;
 extern __attribute__((address_space(3))) u64  lds_rng[4];   // tid0-owned RNG state
+extern __attribute__((address_space(3))) u8   lds_branch;   // sampled branch broadcast
+extern __attribute__((address_space(3))) double lds_red0[256];
+extern __attribute__((address_space(3))) double lds_red1[256];
 
 // ----- intrinsics ------------------------------------------------------------
 static inline u32 tid(void)  { return __builtin_amdgcn_workitem_id_x(); }
@@ -90,6 +93,66 @@ static inline void fset(__attribute__((address_space(3))) u64* w, u32 i, int v) 
 }
 static inline void fxor(__attribute__((address_space(3))) u64* w, u32 i, int v) {
     if (v) w[i >> 6] ^= 1UL << (i & 63u);
+}
+
+// ----- complex + amplitude helpers -------------------------------------------
+#define V2_INV_SQRT2 0.70710678118654752440
+#define V2_DUST_EPS  1e-18
+
+static inline CV2Complex cmul(CV2Complex a, CV2Complex b) {
+    CV2Complex r;
+    r.re = a.re * b.re - a.im * b.im;
+    r.im = a.re * b.im + a.im * b.re;
+    return r;
+}
+// |v|^2 accumulated in f64 (match gold cnorm: extend each component first).
+static inline double cnorm(CV2Complex v) {
+    double re = (double)v.re, im = (double)v.im;
+    return re * re + im * im;
+}
+
+// Insert a 0 bit at position `pos`: bits below stay, bits >=pos shift up by one.
+static inline u64 insert_zero_bit(u64 val, u32 pos) {
+    u64 lo = val & ((1ull << pos) - 1ull);
+    u64 hi = (val & ~((1ull << pos) - 1ull)) << 1;
+    return lo | hi;
+}
+
+// Cooperative diagonal phase on an active axis: v[idx | axis_bit] *= phase,
+// strided over the 2^(active_k-1) lower half. Matches SVM coop_apply_phase.
+static inline void coop_apply_phase(u32 t, u32 axis, CV2Complex phase) {
+    u64 axis_bit = 1ull << axis;
+    u64 iters = 1ull << (lds_active_k - 1u);
+    for (u64 i = t; i < iters; i += 256u) {
+        u64 idx = insert_zero_bit(i, axis) | axis_bit;
+        lds_v[idx] = cmul(lds_v[idx], phase);
+    }
+    barrier();
+}
+
+// Cooperative reduction of two per-thread f64 partials across 256 threads.
+// LDS tree reduce (correctness-first; ds_bpermute optimization later). All 256
+// threads call it; result broadcast to all via lds_red[0].
+static inline void coop_reduce2(u32 t, double l0, double l1, double* out0, double* out1) {
+    lds_red0[t] = l0; lds_red1[t] = l1;
+    barrier();
+    for (u32 stride = 128u; stride > 0u; stride >>= 1) {
+        if (t < stride) {
+            lds_red0[t] += lds_red0[t + stride];
+            lds_red1[t] += lds_red1[t + stride];
+        }
+        barrier();
+    }
+    *out0 = lds_red0[0]; *out1 = lds_red1[0];
+    barrier();
+}
+
+// sample_branch — byte-exact with SVM (dust clamp + rng draw only when needed).
+static inline u8 sample_branch(double p0, double p1, double total) {
+    double eps = V2_DUST_EPS * total;
+    if (p1 <= eps) return 0;
+    if (p0 <= eps) return 1;
+    return (rng_uniform(lds_rng) * total < p0) ? 0u : 1u;
 }
 
 // =============================================================================
@@ -199,6 +262,73 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
             }
             barrier();
             break;
+        case OP_EXPAND: {
+            // Virtual H on a dormant axis: duplicate v[0,half) -> v[half,2half).
+            u32 half = 1u << lds_active_k;
+            for (u32 i = t; i < half; i += 256u) lds_v[i + half] = lds_v[i];
+            barrier();
+            if (t == 0) lds_active_k += 1;
+            barrier();
+            break;
+        }
+        case OP_EXPAND_T:
+        case OP_EXPAND_T_DAG: {
+            // Fused EXPAND + T phase. v[i+half] = v[i] * (1/sqrt2, +-1/sqrt2).
+            u32 half = 1u << lds_active_k;
+            int px = fget(lds_px, ins.axis_1);
+            double imag = (ins.opcode == OP_EXPAND_T_DAG) ? -V2_INV_SQRT2 : V2_INV_SQRT2;
+            if (px) imag = -imag;
+            CV2Complex phase; phase.re = (float)V2_INV_SQRT2; phase.im = (float)imag;
+            for (u32 i = t; i < half; i += 256u) lds_v[i + half] = cmul(lds_v[i], phase);
+            barrier();
+            if (t == 0) lds_active_k += 1;
+            barrier();
+            break;
+        }
+        case OP_MEAS_ACTIVE_DIAGONAL: {
+            // Z-basis measurement of an active axis (top axis). Cooperative norm
+            // reduction -> tid0 sample -> conditional compaction -> active_k--.
+            u32 half = 1u << (lds_active_k - 1u);
+            int px = fget(lds_px, ins.axis_1);
+            double l0 = 0.0, l1 = 0.0;
+            for (u32 i = t; i < half; i += 256u) {
+                l0 += cnorm(lds_v[i]);
+                l1 += cnorm(lds_v[i + half]);
+            }
+            double p0, p1;
+            coop_reduce2(t, l0, l1, &p0, &p1);
+            if (t == 0) {
+                u8 b = sample_branch(p0, p1, p0 + p1);
+                lds_branch = b;
+                u8 m_abs = b ^ (u8)px;
+                if (ins.a < V2_MAX_MEAS)
+                    lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+            }
+            barrier();
+            if (lds_branch != 0) {
+                for (u32 i = t; i < half; i += 256u) lds_v[i] = lds_v[i + half];
+            }
+            barrier();
+            if (t == 0) {
+                lds_active_k -= 1;
+                u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                fset(lds_px, ins.axis_1, m_abs != 0);
+                fset(lds_pz, ins.axis_1, 0);
+            }
+            barrier();
+            break;
+        }
+        case OP_ARRAY_T:
+        case OP_ARRAY_T_DAG: {
+            // Diagonal T phase on an active axis. No-op if axis is dormant.
+            if (ins.axis_1 >= lds_active_k) { barrier(); break; }
+            int px = fget(lds_px, ins.axis_1);
+            double imag = (ins.opcode == OP_ARRAY_T_DAG) ? -V2_INV_SQRT2 : V2_INV_SQRT2;
+            if (px) imag = -imag;
+            CV2Complex phase; phase.re = (float)V2_INV_SQRT2; phase.im = (float)imag;
+            coop_apply_phase(t, ins.axis_1, phase);
+            break;
+        }
         case OP_OBSERVABLE:
             if (t == 0) {
                 u32 s0 = observable_offsets[ins.a];
