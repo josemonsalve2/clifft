@@ -3,14 +3,107 @@
 
 #include "clifft/gpu/runtime/hsa_runtime.h"
 #include "clifft/gpu/runtime/hsa_kernel_dispatch.h"
+#include "clifft/gpu/device_program.h"   // flatten_program, FlattenedProgram
+#include "clifft/gpu/gpu_types.h"        // GpuInstr, BlockCounts, kMaxObs
 
 #include <cstring>
+#include <stdexcept>
 
 #ifndef CLIFFT_V2_PROBE_HSACO
 #define CLIFFT_V2_PROBE_HSACO ""
 #endif
+#ifndef CLIFFT_V2_COOP_HSACO
+#define CLIFFT_V2_COOP_HSACO ""
+#endif
 
 namespace clifft::gpu::v2 {
+
+namespace {
+// Upload a host vector to device; returns device ptr (or nullptr if empty).
+template <typename T>
+uint64_t upload(HsaRuntime& rt, const std::vector<T>& v) {
+    if (v.empty()) return 0;
+    void* d = rt.device_malloc(v.size() * sizeof(T));
+    rt.memcpy_h2d(d, v.data(), v.size() * sizeof(T));
+    return reinterpret_cast<uint64_t>(d);
+}
+}  // namespace
+
+clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
+                                 uint32_t shots, uint64_t seed,
+                                 double* kernel_seconds, std::string hsaco_path) {
+    using namespace clifft::gpu;
+    clifft::SurvivorResult result;
+    result.total_shots = shots;
+    result.observable_ones.assign(program.num_observables, 0);
+
+    if (hsaco_path.empty()) hsaco_path = CLIFFT_V2_COOP_HSACO;
+    if (hsaco_path.empty()) throw std::runtime_error("v2_sample: no coop .hsaco path");
+
+    FlattenedProgram flat = flatten_program(program);
+
+    auto& rt = hsa_runtime();
+    if (!rt.init()) throw std::runtime_error("v2_sample: HSA init failed");
+
+    HsaLoadedKernel kernel = hsa_load_kernel(hsaco_path, "clifft_v2_coop", 0);
+    if (!kernel.valid) throw std::runtime_error("v2_sample: coop kernel load failed");
+
+    // Upload device buffers (reuse flatten_program output — no second lowering).
+    uint64_t d_instrs = upload(rt, flat.instrs);
+    uint64_t d_fused_u2 = upload(rt, flat.fused_u2);
+    uint64_t d_fused_u4 = upload(rt, flat.fused_u4);
+    uint64_t d_obs_off = upload(rt, flat.observable_offsets);
+    uint64_t d_obs_tgt = upload(rt, flat.observable_targets);
+
+    // One BlockCounts, zeroed; kernel atomic-adds into it.
+    BlockCounts* d_counts = static_cast<BlockCounts*>(rt.device_malloc(sizeof(BlockCounts)));
+    rt.memset_device(d_counts, 0, sizeof(BlockCounts) / sizeof(uint32_t));
+
+    // Kernarg layout MUST match clifft_v2_coop's signature (device_abi.h order).
+    struct __attribute__((packed)) {
+        uint64_t instrs; uint32_t num_instrs; uint32_t peak_rank;
+        uint32_t total_meas_slots; uint32_t num_observables;
+        uint64_t seed; uint64_t shot_offset; uint64_t shots;
+        uint64_t block_counts; uint64_t fused_u2; uint64_t fused_u4;
+        uint64_t obs_off; uint64_t obs_tgt;
+    } kargs;
+    kargs.instrs = d_instrs;
+    kargs.num_instrs = flat.instrs.size();
+    kargs.peak_rank = flat.peak_rank;
+    kargs.total_meas_slots = flat.total_meas_slots;
+    kargs.num_observables = flat.num_observables;
+    kargs.seed = seed;
+    kargs.shot_offset = 0;
+    kargs.shots = shots;
+    kargs.block_counts = reinterpret_cast<uint64_t>(d_counts);
+    kargs.fused_u2 = d_fused_u2;
+    kargs.fused_u4 = d_fused_u4;
+    kargs.obs_off = d_obs_off;
+    kargs.obs_tgt = d_obs_tgt;
+
+    const uint32_t block = 256;
+    const uint32_t grid = shots * block;  // one workgroup per shot
+    double ks = hsa_dispatch_and_wait(kernel, 0, grid, block, &kargs, sizeof(kargs));
+    if (kernel_seconds) *kernel_seconds = ks;
+
+    BlockCounts h_counts;
+    rt.memcpy_d2h(&h_counts, d_counts, sizeof(BlockCounts));
+    result.passed_shots = static_cast<uint32_t>(h_counts.passed);
+    for (uint32_t i = 0; i < program.num_observables && i < kMaxObs; ++i) {
+        if (i < result.observable_ones.size())
+            result.observable_ones[i] = h_counts.observable_ones[i];
+    }
+    result.logical_errors = static_cast<uint32_t>(h_counts.logical_errors);
+
+    rt.device_free(d_counts);
+    if (d_instrs) rt.device_free(reinterpret_cast<void*>(d_instrs));
+    if (d_fused_u2) rt.device_free(reinterpret_cast<void*>(d_fused_u2));
+    if (d_fused_u4) rt.device_free(reinterpret_cast<void*>(d_fused_u4));
+    if (d_obs_off) rt.device_free(reinterpret_cast<void*>(d_obs_off));
+    if (d_obs_tgt) rt.device_free(reinterpret_cast<void*>(d_obs_tgt));
+    hsa_free_kernel(kernel);
+    return result;
+}
 
 ProbeResult run_probe_detailed(uint32_t n, std::string hsaco_path) {
     ProbeResult r;

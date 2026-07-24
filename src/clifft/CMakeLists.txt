@@ -172,6 +172,15 @@ if(CLIFFT_ENABLE_MLIR_V2)
     target_compile_definitions(clifft_core PRIVATE
         CLIFFT_V2_PROBE_HSACO="${CMAKE_BINARY_DIR}/clifft_v2_probe.hsaco")
 
+    # The coop interpreter device kernel needs -I src to find device_abi.h.
+    clifft_add_amdgcn_hsaco(clifft_v2_coop_hsaco
+        SOURCE gpu/mlir/v2/coop_interpreter.c
+        OUTPUT clifft_v2_coop.hsaco
+        EXTRA_FLAGS -I${CMAKE_CURRENT_SOURCE_DIR}/..)
+    add_dependencies(clifft_core clifft_v2_coop_hsaco)
+    target_compile_definitions(clifft_core PRIVATE
+        CLIFFT_V2_COOP_HSACO="${CMAKE_BINARY_DIR}/clifft_v2_coop.hsaco")
+
     message(STATUS "CLIFFT_ENABLE_MLIR_V2=ON: HIP-free HSA path, arch=${CLIFFT_AMDGPU_ARCH}")
 endif()
 

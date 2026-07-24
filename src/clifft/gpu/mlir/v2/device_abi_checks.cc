@@ -5,9 +5,26 @@
 // (CODEX_REVIEW.md §8.6). This file has no runtime code.
 #include "clifft/gpu/mlir/v2/device_abi.h"
 #include "clifft/gpu/gpu_types.h"
+#include "clifft/backend/backend.h"
 
 #include <cstddef>
 #include <type_traits>
+
+// The V2 device interpreter (coop_interpreter.c) hardcodes opcode integer
+// values in a plain-C enum. Verify the anchor values match the authoritative
+// clifft::Opcode enum so a reorder in backend.h can never silently misroute the
+// device switch (this caught an off-by-one: EXPAND/MEAS were numbered -1).
+static_assert(static_cast<int>(clifft::Opcode::OP_FRAME_CNOT) == 0, "opcode FRAME_CNOT");
+static_assert(static_cast<int>(clifft::Opcode::OP_FRAME_SWAP) == 5, "opcode FRAME_SWAP");
+static_assert(static_cast<int>(clifft::Opcode::OP_ARRAY_CNOT) == 6, "opcode ARRAY_CNOT");
+static_assert(static_cast<int>(clifft::Opcode::OP_ARRAY_U4) == 18, "opcode ARRAY_U4");
+static_assert(static_cast<int>(clifft::Opcode::OP_EXPAND) == 19, "opcode EXPAND");
+static_assert(static_cast<int>(clifft::Opcode::OP_MEAS_DORMANT_STATIC) == 23, "opcode MEAS_DORMANT_STATIC");
+static_assert(static_cast<int>(clifft::Opcode::OP_SWAP_MEAS_INTERFERE) == 27, "opcode SWAP_MEAS_INTERFERE");
+static_assert(static_cast<int>(clifft::Opcode::OP_APPLY_PAULI) == 33, "opcode APPLY_PAULI");
+static_assert(static_cast<int>(clifft::Opcode::OP_DETECTOR) == 37, "opcode DETECTOR");
+static_assert(static_cast<int>(clifft::Opcode::OP_OBSERVABLE) == 39, "opcode OBSERVABLE");
+static_assert(static_cast<int>(clifft::Opcode::OP_EXP_VAL) == 40, "opcode EXP_VAL");
 
 namespace {
 
