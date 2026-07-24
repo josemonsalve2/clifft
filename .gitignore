@@ -71,3 +71,4 @@ build-gpu/
 GEAK
 build-gpu-*/
 .claude/worktrees/
+docs/v2/ir_reference/
