@@ -85,6 +85,102 @@ int run_cmd(const std::string& cmd, std::string& out) {
     return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
 }
 
+// Compile LLVM-IR text to a .hsaco with a size-adaptive optimization level.
+// Large fully-unrolled circuits (surface codes emit 40MB+ IR from U2/U4
+// inlining) make opt -O3 + llc -O3 take >300s. For large/huge IR we lower the
+// opt level (and skip the separate opt pass) so compilation completes.
+// Correctness is unaffected — only optimization aggressiveness changes.
+// Returns true on success. `tag` is used only for log messages.
+bool compile_llvmir_to_hsaco(const std::string& llvmir,
+                             const std::string& gpu_arch,
+                             const std::string& hsaco_path,
+                             const std::string& tag) {
+    std::string tmp_ll = "/tmp/clifft_" + tag + "_" + fnv1a_hex_mlir(hsaco_path) + ".ll";
+    std::string tmp_obj = tmp_ll + ".o";
+    { std::ofstream f(tmp_ll); if (!f) return false; f << llvmir; }
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    size_t ir_bytes = llvmir.size();
+    const size_t kLargeIrThreshold = 4u * 1024 * 1024;   // 4 MB
+    const size_t kHugeIrThreshold  = 16u * 1024 * 1024;  // 16 MB
+    bool large_ir = ir_bytes > kLargeIrThreshold;
+    bool huge_ir = ir_bytes > kHugeIrThreshold;
+    const char* llc_opt = huge_ir ? "-O1" : (large_ir ? "-O2" : "-O3");
+
+    // Debug override: CLIFFT_MLIR_OPT=O0|O1|O2|O3 forces the opt/llc level and
+    // skips the separate opt pass. Used to distinguish emitter-logic bugs from
+    // opt/llc miscompilations (does the bug survive at -O0?).
+    const char* opt_override = std::getenv("CLIFFT_MLIR_OPT");
+    bool force_opt = opt_override != nullptr;
+    if (force_opt) {
+        if (std::string(opt_override) == "O0") llc_opt = "-O0";
+        else if (std::string(opt_override) == "O1") llc_opt = "-O1";
+        else if (std::string(opt_override) == "O2") llc_opt = "-O2";
+        else if (std::string(opt_override) == "O3") llc_opt = "-O3";
+        huge_ir = true;  // skip the separate opt pass so llc's level is authoritative
+    }
+
+    // Separate opt pass — skipped for huge IR (llc still optimizes).
+    if (!huge_ir) {
+        std::string opt_bin = find_llc();
+        size_t pos = opt_bin.rfind("llc");
+        if (pos != std::string::npos) opt_bin.replace(pos, 3, "opt");
+        std::string tmp_opt = tmp_ll + ".opt.ll";
+        const char* opt_lvl = large_ir ? "-O1" : "-O3";
+        std::ostringstream cmd_opt;
+        cmd_opt << "\"" << opt_bin << "\" " << opt_lvl << " -S -o \"" << tmp_opt
+                << "\" \"" << tmp_ll << "\"";
+        std::string opt_out;
+        if (run_cmd(cmd_opt.str(), opt_out) == 0 && std::filesystem::exists(tmp_opt)) {
+            std::filesystem::rename(tmp_opt, tmp_ll);
+        }
+    }
+    if (large_ir) {
+        std::cerr << "[clifft-mlir-" << tag << "] large IR (" << (ir_bytes >> 20)
+                  << " MB): llc " << llc_opt << (huge_ir ? ", opt skipped" : ", opt -O1") << "\n";
+    }
+
+    std::string llc = find_llc();
+    std::ostringstream cmd_llc;
+    cmd_llc << "\"" << llc << "\" --march=amdgcn --mcpu=" << gpu_arch
+            << " -mattr=+wavefrontsize64 " << llc_opt << " -filetype=obj -o \""
+            << tmp_obj << "\" \"" << tmp_ll << "\"";
+    std::string out_llc;
+    int rc = run_cmd(cmd_llc.str(), out_llc);
+
+    if (rc == 0) {
+        std::string lld = find_lld();
+        std::ostringstream cmd_lld;
+        cmd_lld << "\"" << lld << "\" -shared -o \"" << hsaco_path << "\" \"" << tmp_obj << "\"";
+        std::string out_lld;
+        int rc_lld = run_cmd(cmd_lld.str(), out_lld);
+        std::filesystem::remove(tmp_obj);
+        if (rc_lld != 0) { std::cerr << "[clifft-mlir-" << tag << "] lld failed: " << out_lld << "\n"; rc = -1; }
+    }
+    if (rc != 0) {
+        // clang++ fallback. Match llc opt level for large IR.
+        std::string clangpp = find_clangpp_mlir();
+        std::ostringstream cmd_cl;
+        cmd_cl << "\"" << clangpp << "\" -x ir --offload-arch=" << gpu_arch << " "
+               << llc_opt << " --offload-device-only -o \"" << hsaco_path
+               << "\" \"" << tmp_ll << "\"";
+        std::string out_cl;
+        if (run_cmd(cmd_cl.str(), out_cl) != 0) {
+            std::cerr << "[clifft-mlir-" << tag << "] COMPILATION FAILED:\n"
+                      << "  llc: " << out_llc << "\n  clang++: " << out_cl << "\n";
+            std::filesystem::remove(tmp_ll);
+            return false;
+        }
+    }
+    std::filesystem::remove(tmp_ll);
+    auto t1 = std::chrono::steady_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    std::cerr << "[clifft-mlir-" << tag << "] compiled in " << ms << " ms ("
+              << (ir_bytes >> 10) << " KB IR)\n";
+    return true;
+}
+
 }  // namespace
 
 HsaLoadedKernel compile_or_load_mlir_kernel(const FlattenedProgram& flat) {
@@ -106,84 +202,9 @@ HsaLoadedKernel compile_or_load_mlir_kernel(const FlattenedProgram& flat) {
     std::string hsaco_path = dir + "/mlir_" + hash + "_" + gpu_arch + ".hsaco";
 
     if (!std::filesystem::exists(hsaco_path)) {
-        std::string tmp_ll = "/tmp/clifft_mlir_" + hash + ".ll";
-        std::string tmp_obj = "/tmp/clifft_mlir_" + hash + ".o";
-
-        {
-            std::ofstream f(tmp_ll);
-            if (!f) {
-                std::cerr << "[clifft-mlir] failed to write LLVM-IR to " << tmp_ll << "\n";
-                return lk;
-            }
-            f << llvmir;
+        if (!compile_llvmir_to_hsaco(llvmir, gpu_arch, hsaco_path, "mlir")) {
+            return lk;
         }
-
-        auto t0 = std::chrono::steady_clock::now();
-
-        // Run LLVM opt -O3 on the IR before llc
-        {
-            std::string opt_bin = find_llc();
-            // opt is in the same directory as llc
-            size_t pos = opt_bin.rfind("llc");
-            if (pos != std::string::npos) opt_bin.replace(pos, 3, "opt");
-            std::string tmp_opt = tmp_ll + ".opt.ll";
-            std::ostringstream cmd_opt;
-            cmd_opt << "\"" << opt_bin << "\" -O3 -S -o \"" << tmp_opt << "\" \"" << tmp_ll << "\"";
-            std::string opt_out;
-            if (run_cmd(cmd_opt.str(), opt_out) == 0 && std::filesystem::exists(tmp_opt)) {
-                std::filesystem::rename(tmp_opt, tmp_ll);
-            }
-        }
-
-        // Try llc → lld pipeline first
-        std::string llc = find_llc();
-        std::ostringstream cmd_llc;
-        cmd_llc << "\"" << llc << "\""
-                << " --march=amdgcn --mcpu=" << gpu_arch
-                << " -mattr=+wavefrontsize64 -O3 -filetype=obj"
-                << " -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
-
-        std::string out_llc;
-        int rc_llc = run_cmd(cmd_llc.str(), out_llc);
-
-        if (rc_llc == 0) {
-            // Link to .hsaco
-            std::string lld = find_lld();
-            std::ostringstream cmd_lld;
-            cmd_lld << "\"" << lld << "\" -shared -o \"" << hsaco_path << "\" \"" << tmp_obj << "\"";
-            std::string out_lld;
-            int rc_lld = run_cmd(cmd_lld.str(), out_lld);
-            std::filesystem::remove(tmp_obj);
-            if (rc_lld != 0) {
-                std::cerr << "[clifft-mlir] lld failed: " << out_lld << "\n";
-                // Fall through to clang++ fallback below
-                rc_llc = -1;
-            }
-        }
-
-        if (rc_llc != 0) {
-            // Fallback: clang++ -x ir
-            std::cerr << "[clifft-mlir] llc/lld failed, trying clang++ fallback\n";
-            std::string clangpp = find_clangpp_mlir();
-            std::ostringstream cmd_cl;
-            cmd_cl << "\"" << clangpp << "\" -x ir --offload-arch=" << gpu_arch
-                   << " -O3 --offload-device-only"
-                   << " -o \"" << hsaco_path << "\" \"" << tmp_ll << "\"";
-            std::string out_cl;
-            int rc_cl = run_cmd(cmd_cl.str(), out_cl);
-            if (rc_cl != 0) {
-                std::cerr << "[clifft-mlir] COMPILATION FAILED (all methods):\n"
-                          << "  llc output: " << out_llc << "\n"
-                          << "  clang++ output: " << out_cl << "\n";
-                std::filesystem::remove(tmp_ll);
-                return lk;
-            }
-        }
-
-        std::filesystem::remove(tmp_ll);
-        auto t1 = std::chrono::steady_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        std::cerr << "[clifft-mlir] compiled in " << ms << " ms, hash=" << hash << "\n";
     } else {
         std::cerr << "[clifft-mlir] cache hit, hash=" << hash << "\n";
     }
@@ -208,43 +229,9 @@ HsaLoadedKernel compile_or_load_mlir_kernel_coop(const FlattenedProgram& flat) {
     std::string hsaco_path = dir + "/mlir_coop_" + hash + "_" + gpu_arch + ".hsaco";
 
     if (!std::filesystem::exists(hsaco_path)) {
-        std::string tmp_ll = "/tmp/clifft_mlir_coop_" + hash + ".ll";
-        std::string tmp_obj = "/tmp/clifft_mlir_coop_" + hash + ".o";
-        { std::ofstream f(tmp_ll); if (!f) return lk; f << llvmir; }
-
-        auto t0 = std::chrono::steady_clock::now();
-        std::string llc = find_llc();
-        std::ostringstream cmd_llc;
-        cmd_llc << "\"" << llc << "\" --march=amdgcn --mcpu=" << gpu_arch
-                << " -mattr=+wavefrontsize64 -O3 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
-        std::string out_llc;
-        int rc_llc = run_cmd(cmd_llc.str(), out_llc);
-
-        if (rc_llc == 0) {
-            std::string lld = find_lld();
-            std::ostringstream cmd_lld;
-            cmd_lld << "\"" << lld << "\" -shared -o \"" << hsaco_path << "\" \"" << tmp_obj << "\"";
-            std::string out_lld;
-            int rc_lld = run_cmd(cmd_lld.str(), out_lld);
-            std::filesystem::remove(tmp_obj);
-            if (rc_lld != 0) { rc_llc = -1; }
+        if (!compile_llvmir_to_hsaco(llvmir, gpu_arch, hsaco_path, "coop")) {
+            return lk;
         }
-        if (rc_llc != 0) {
-            std::string clangpp = find_clangpp_mlir();
-            std::ostringstream cmd_cl;
-            cmd_cl << "\"" << clangpp << "\" -x ir --offload-arch=" << gpu_arch
-                   << " -O3 --offload-device-only -o \"" << hsaco_path << "\" \"" << tmp_ll << "\"";
-            std::string out_cl;
-            if (run_cmd(cmd_cl.str(), out_cl) != 0) {
-                std::cerr << "[clifft-mlir-coop] COMPILATION FAILED\n";
-                std::filesystem::remove(tmp_ll);
-                return lk;
-            }
-        }
-        std::filesystem::remove(tmp_ll);
-        auto t1 = std::chrono::steady_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        std::cerr << "[clifft-mlir-coop] compiled in " << ms << " ms\n";
     }
     return hsa_load_kernel(hsaco_path, "compiled_mlir_kernel_coop", 0);
 }
@@ -265,43 +252,9 @@ HsaLoadedKernel compile_or_load_mlir_kernel_global(const FlattenedProgram& flat)
     std::string hsaco_path = dir + "/mlir_global_" + hash + "_" + gpu_arch + ".hsaco";
 
     if (!std::filesystem::exists(hsaco_path)) {
-        std::string tmp_ll = "/tmp/clifft_mlir_global_" + hash + ".ll";
-        std::string tmp_obj = "/tmp/clifft_mlir_global_" + hash + ".o";
-        { std::ofstream f(tmp_ll); if (!f) return lk; f << llvmir; }
-
-        auto t0 = std::chrono::steady_clock::now();
-        std::string llc = find_llc();
-        std::ostringstream cmd_llc;
-        cmd_llc << "\"" << llc << "\" --march=amdgcn --mcpu=" << gpu_arch
-                << " -mattr=+wavefrontsize64 -O3 -filetype=obj -o \"" << tmp_obj << "\" \"" << tmp_ll << "\"";
-        std::string out_llc;
-        int rc_llc = run_cmd(cmd_llc.str(), out_llc);
-
-        if (rc_llc == 0) {
-            std::string lld = find_lld();
-            std::ostringstream cmd_lld;
-            cmd_lld << "\"" << lld << "\" -shared -o \"" << hsaco_path << "\" \"" << tmp_obj << "\"";
-            std::string out_lld;
-            int rc_lld = run_cmd(cmd_lld.str(), out_lld);
-            std::filesystem::remove(tmp_obj);
-            if (rc_lld != 0) { rc_llc = -1; }
+        if (!compile_llvmir_to_hsaco(llvmir, gpu_arch, hsaco_path, "global")) {
+            return lk;
         }
-        if (rc_llc != 0) {
-            std::string clangpp = find_clangpp_mlir();
-            std::ostringstream cmd_cl;
-            cmd_cl << "\"" << clangpp << "\" -x ir --offload-arch=" << gpu_arch
-                   << " -O3 --offload-device-only -o \"" << hsaco_path << "\" \"" << tmp_ll << "\"";
-            std::string out_cl;
-            if (run_cmd(cmd_cl.str(), out_cl) != 0) {
-                std::cerr << "[clifft-mlir-global] COMPILATION FAILED\n";
-                std::filesystem::remove(tmp_ll);
-                return lk;
-            }
-        }
-        std::filesystem::remove(tmp_ll);
-        auto t1 = std::chrono::steady_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        std::cerr << "[clifft-mlir-global] compiled in " << ms << "\n";
     }
     return hsa_load_kernel(hsaco_path, "compiled_mlir_kernel_global", 0);
 }

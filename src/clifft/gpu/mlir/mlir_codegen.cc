@@ -33,6 +33,14 @@ std::string generate_mlir_kernel_llvmir(const FlattenedProgram& flat,
         return {};
     }
 
+    // Debug: save raw MLIR text before mlir-opt
+    {
+        std::string dbg_path = "/shared/jmonsalv/quantum/clifft_rl/clifft/results/debug_raw_"
+            + std::to_string(flat.instrs.size()) + "ops.mlir";
+        std::ofstream dbg(dbg_path);
+        if (dbg) { dbg << mlir_text; std::cerr << "[clifft-mlir-debug] saved to " << dbg_path << "\n"; }
+    }
+
     std::string hash_src = mlir_text + gpu_arch;
     uint64_t h = 14695981039346656037ULL;
     for (unsigned char c : hash_src) { h ^= c; h *= 1099511628211ULL; }
@@ -141,6 +149,13 @@ std::string generate_mlir_kernel_llvmir_coop(const FlattenedProgram& flat,
         return {};
     }
 
+    {
+        std::string dbg_path = "/shared/jmonsalv/quantum/clifft_rl/clifft/results/debug_coop_"
+            + std::to_string(flat.instrs.size()) + "ops.mlir";
+        std::ofstream dbg(dbg_path);
+        if (dbg) { dbg << mlir_text; std::cerr << "[clifft-mlir-debug] saved coop to " << dbg_path << "\n"; }
+    }
+
     std::string hash_src = mlir_text + gpu_arch;
     uint64_t h = 14695981039346656037ULL;
     for (unsigned char c : hash_src) { h ^= c; h *= 1099511628211ULL; }
@@ -199,6 +214,13 @@ std::string generate_mlir_kernel_llvmir_global(const FlattenedProgram& flat,
     if (mlir_text.empty()) {
         std::cerr << "[clifft-mlir-global] MLIR text generation failed\n";
         return {};
+    }
+
+    {
+        std::string dbg_path = "/shared/jmonsalv/quantum/clifft_rl/clifft/results/debug_global_"
+            + std::to_string(flat.instrs.size()) + "ops.mlir";
+        std::ofstream dbg(dbg_path);
+        if (dbg) { dbg << mlir_text; std::cerr << "[clifft-mlir-debug] saved global to " << dbg_path << "\n"; }
     }
 
     std::string hash_src = mlir_text + gpu_arch;
