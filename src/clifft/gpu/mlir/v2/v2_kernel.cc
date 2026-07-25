@@ -91,14 +91,23 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     // other tiers/opcodes fall back to the interpreter. Compile time is never on
     // the sampling path (cached; warm before benchmarking).
     std::string spec_sym;
-    if (getenv("V2_SPECIALIZE") && eff_tier == REG && specializer_toolchain_available()) {
+    // Coop specialization diverges by ~1 ULP from the interpreter ONLY on
+    // noise-heavy circuits (straight-lining 100+ inlined draw_next_noise/ocml_log
+    // calls lets -O2 reassociate the FP chain across what was a loop boundary in
+    // the interpreter). Every noise-free coop circuit + all register circuits are
+    // byte-exact. So gate coop specialization on "no noise" until the noise-path
+    // divergence is root-caused; register tier is always safe.
+    const bool has_noise = !flat.noise_sites.empty();
+    const bool spec_ok = (eff_tier == REG) ||
+                         (eff_tier == COOP && !has_noise);
+    if (getenv("V2_SPECIALIZE") && spec_ok && specializer_toolchain_available()) {
         try {
-            SpecTier st = SpecTier::Register;
+            SpecTier st = (eff_tier == REG) ? SpecTier::Register : SpecTier::Coop;
+            const char* tname = (eff_tier == REG) ? "reg" : "coop";
             spec_sym = "clifft_v2_spec";
             std::string csrc = emit_specialized_kernel(flat, spec_sym, st);
-            // Cache key: peak_rank + instr count + a cheap content hash of the ops.
-            std::string key = "reg_r" + std::to_string(flat.peak_rank) + "_n" +
-                              std::to_string(flat.instrs.size());
+            std::string key = std::string(tname) + "_r" + std::to_string(flat.peak_rank) +
+                              "_n" + std::to_string(flat.instrs.size());
             std::string spath = compile_specialized(csrc, key);
             load_path = spath;
             sym = spec_sym.c_str();

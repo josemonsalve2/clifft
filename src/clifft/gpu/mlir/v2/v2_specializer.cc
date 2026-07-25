@@ -162,9 +162,23 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
           << "    V2State st; CV2Complex vloc[V2_REG_MAX_AMP]; CV2Complex sloc[V2_REG_MAX_AMP/2];\n"
           << "    spec_body(&st, vloc, sloc, V2_REG_MAX_AMP, shot_id, " << fwd << ");\n"
           << "}\n";
+    } else if (tier == SpecTier::Coop) {
+        // Coop tier: 1 workgroup/shot, amplitudes + classical state in LDS.
+        // Same LDS globals the interpreter's coop kernel uses.
+        o << "extern __attribute__((address_space(3))) CV2Complex lds_v[V2_MAX_AMP];\n"
+          << "extern __attribute__((address_space(3))) CV2Complex lds_red_scratch[V2_SCRATCH_AMP];\n"
+          << "extern __attribute__((address_space(3))) V2State lds_state;\n"
+          << "__attribute__((amdgpu_kernel, visibility(\"default\")))\n"
+          << "void " << kernel_name << "(" << args << ") {\n"
+          << "    (void)peak_rank; (void)num_instrs; (void)instrs; (void)total_meas_slots;\n"
+          << "    u64 shot_id = shot_offset + (u64)v2_bid();\n"
+          << "    if (shot_id >= shots) return;\n"
+          << "    spec_body((V2State*)&lds_state, (CV2Complex*)lds_v, (CV2Complex*)lds_red_scratch,\n"
+          << "              V2_MAX_AMP, shot_id, " << fwd << ");\n"
+          << "}\n";
     } else {
-        // coop/global emitted later; register tier is the first slice.
-        throw std::runtime_error("v2 specializer: only Register tier emitted so far");
+        // global emitted later.
+        throw std::runtime_error("v2 specializer: Global tier not emitted yet");
     }
     (void)tier_macro;
     return o.str();
