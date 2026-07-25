@@ -50,11 +50,14 @@ enum { FLAG_SIGN = 1u << 0, FLAG_IDENTITY = 1u << 2, FLAG_EXPECTED_ONE = 1u << 3
 // compile time; here it is a conservative static bound for the runtime tier.
 #define V2_MAX_AMP     1024
 #define V2_MAX_MEAS    4096
+#define V2_MEAS_WORDS  (V2_MAX_MEAS / 64)  // meas records bit-packed: 4096b=64 u64
 #define V2_SCRATCH_AMP 512    // coop SWAP_MEAS fold half <= 2^(10-1)
 #define V2_RED_WARPS   8      // coop_reduce2 touches only warps 0..3
 extern __attribute__((address_space(3))) CV2Complex lds_v[V2_MAX_AMP];
 extern __attribute__((address_space(3))) CV2Complex lds_red_scratch[V2_SCRATCH_AMP];
-extern __attribute__((address_space(3))) u8   lds_meas[V2_MAX_MEAS];
+// Measurement records are boolean (0/1) and every access is tid0-only, so they
+// bit-pack safely: 4096 bytes -> 512 bytes (~3.5 KB reclaimed). Accessors below.
+extern __attribute__((address_space(3))) u64  lds_meas[V2_MEAS_WORDS];
 extern __attribute__((address_space(3))) u8   lds_obs[CLIFFT_V2_MAX_OBS];
 extern __attribute__((address_space(3))) u64  lds_px[CLIFFT_V2_PAULI_WORDS];
 extern __attribute__((address_space(3))) u64  lds_pz[CLIFFT_V2_PAULI_WORDS];
@@ -113,6 +116,15 @@ static inline void fswap(__attribute__((address_space(3))) u64* w, u32 a, u32 b)
     int va = fget(w, a), vb = fget(w, b);
     fset(w, a, vb); fset(w, b, va);
 }
+// ----- measurement-record bit helpers (bit-packed lds_meas, tid0-only) -------
+static inline u8 mget(u32 i) {
+    return (u8)((lds_meas[i >> 6] >> (i & 63u)) & 1UL);
+}
+static inline void mset(u32 i, u8 v) {
+    u64 m = 1UL << (i & 63u);
+    if (v & 1u) lds_meas[i >> 6] |= m; else lds_meas[i >> 6] &= ~m;
+}
+static inline void mxor1(u32 i) { lds_meas[i >> 6] ^= 1UL << (i & 63u); }
 
 // ----- complex + amplitude helpers -------------------------------------------
 #define V2_INV_SQRT2 0.70710678118654752440
@@ -301,7 +313,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
         lds_discarded = 0;
         v[0].re = 1.0f; v[0].im = 0.0f;
         for (u32 i = 0; i < num_observables; ++i) lds_obs[i] = 0;
-        for (u32 i = 0; i < total_meas_slots && i < V2_MAX_MEAS; ++i) lds_meas[i] = 0;
+        for (u32 w = 0; w < V2_MEAS_WORDS; ++w) lds_meas[w] = 0;
         lds_next_noise = 0;
         rng_seed(lds_rng, seed, shot_id);
         draw_next_noise(noise_hazards, num_noise_sites);
@@ -363,7 +375,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                     u8 outcome = (u8)fget(lds_px, ins.axis_1);
                     mval = outcome ^ (u8)((ins.flags & FLAG_SIGN) != 0);
                 }
-                if (ins.a < V2_MAX_MEAS) lds_meas[ins.a] = mval;
+                if (ins.a < V2_MAX_MEAS) mset(ins.a, mval);
             }
             barrier();
             break;
@@ -375,7 +387,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                 fset(lds_px, ins.axis_1, m_abs != 0);
                 fset(lds_pz, ins.axis_1, 0);
                 if (ins.a < V2_MAX_MEAS)
-                    lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                    mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
             barrier();
             break;
@@ -419,7 +431,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                 lds_branch = b;
                 u8 m_abs = b ^ (u8)px;
                 if (ins.a < V2_MAX_MEAS)
-                    lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                    mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
             barrier();
             if (lds_branch != 0) {
@@ -428,7 +440,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
             barrier();
             if (t == 0) {
                 lds_active_k -= 1;
-                u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
                 fset(lds_px, ins.axis_1, m_abs != 0);
                 fset(lds_pz, ins.axis_1, 0);
             }
@@ -452,7 +464,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                 lds_branch = b;
                 u8 m_abs = b ^ (u8)pz;
                 if (ins.a < V2_MAX_MEAS)
-                    lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                    mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
             barrier();
             for (u32 i = t; i < half; i += 256u) {
@@ -463,7 +475,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
             barrier();
             if (t == 0) {
                 lds_active_k -= 1;
-                u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
                 fset(lds_px, ins.axis_1, m_abs != 0);
                 fset(lds_pz, ins.axis_1, 0);
             }
@@ -675,7 +687,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                 if (t == 0) {
                     u8 bb = sample_branch(pp, pm, pp + pm); lds_branch = bb;
                     u8 m_abs = bb ^ (u8)pz;
-                    if (ins.a < V2_MAX_MEAS) lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                    if (ins.a < V2_MAX_MEAS) mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
                 }
                 barrier();
                 for (u32 i = t; i < half; i += 256u) {
@@ -685,7 +697,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                 barrier();
                 if (t == 0) {
                     lds_active_k -= 1;
-                    u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                    u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
                     fset(lds_px, to, m_abs != 0); fset(lds_pz, to, 0);
                 }
                 barrier();
@@ -706,7 +718,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
             if (t == 0) {
                 u8 bb = sample_branch(pp, pm, pp + pm); lds_branch = bb;
                 u8 m_abs = bb ^ (u8)pz;
-                if (ins.a < V2_MAX_MEAS) lds_meas[ins.a] = m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                if (ins.a < V2_MAX_MEAS) mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
             barrier();
             // fold into contiguous lower half (write to [idx], read strided)
@@ -721,14 +733,14 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
             barrier();
             if (t == 0) {
                 lds_active_k -= 1;
-                u8 m_abs = lds_meas[ins.a] ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
                 fset(lds_px, to, m_abs != 0); fset(lds_pz, to, 0);
             }
             barrier();
             break;
         }
         case OP_APPLY_PAULI:
-            if (t == 0 && lds_meas[ins.b] != 0) {
+            if (t == 0 && mget(ins.b) != 0) {
                 const CV2Mask* m = &pauli_masks[ins.a];
                 for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) {
                     lds_px[w] ^= m->x[w]; lds_pz[w] ^= m->z[w];
@@ -772,7 +784,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                 u32 s0 = observable_offsets[ins.a];
                 u32 e0 = observable_offsets[ins.a + 1];
                 u8 parity = 0;
-                for (u32 k = s0; k < e0; ++k) parity ^= lds_meas[observable_targets[k]];
+                for (u32 k = s0; k < e0; ++k) parity ^= mget(observable_targets[k]);
                 if (ins.b < CLIFFT_V2_MAX_OBS) lds_obs[ins.b] ^= parity;
             }
             barrier();
@@ -780,7 +792,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
         case OP_READOUT_NOISE:
             if (t == 0) {
                 CV2ReadoutNoise r = readout_noise[ins.a];
-                if (rng_uniform(lds_rng) < r.prob) lds_meas[r.meas_idx] ^= 1u;
+                if (rng_uniform(lds_rng) < r.prob) mxor1(r.meas_idx);
             }
             barrier();
             break;
@@ -789,7 +801,7 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                 u32 s0 = detector_offsets[ins.a];
                 u32 e0 = detector_offsets[ins.a + 1];
                 u8 parity = (ins.flags & FLAG_EXPECTED_ONE) ? 1u : 0u;
-                for (u32 k = s0; k < e0; ++k) parity ^= lds_meas[detector_targets[k]];
+                for (u32 k = s0; k < e0; ++k) parity ^= mget(detector_targets[k]);
                 if (parity != 0) lds_discarded = 1;
             }
             barrier();
