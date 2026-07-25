@@ -204,6 +204,15 @@ static inline u8 sample_branch(u64* rng, double p0, double p1, double total) {
 extern double __ocml_log_f64(double);
 static inline double ocml_log_f64(double x) { return __ocml_log_f64(x); }
 
+// V2_NOISE_ATTR: always_inline for the interpreter/register build; the
+// specializer defines it to noinline (before including this header) so each
+// emitted noise OP is a fenced call the -O2 scheduler cannot reassociate FP
+// across — reproducing the interpreter's loop-body-per-noise-op semantics. The
+// FP-carrying helpers below stay plain static-inline (fencing at the op level is
+// what matters; fencing the helpers too was empirically worse).
+#ifndef V2_NOISE_ATTR
+#define V2_NOISE_ATTR __attribute__((always_inline))
+#endif
 static inline void draw_next_noise(V2State* st, const double* hazards, u32 num_sites) {
     if (num_sites == 0u || st->next_noise >= num_sites) { st->next_noise = 0xffffffffu; return; }
     double current_hazard = (st->next_noise == 0u) ? 0.0 : hazards[st->next_noise - 1u];

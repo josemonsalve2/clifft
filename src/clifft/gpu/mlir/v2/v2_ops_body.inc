@@ -108,7 +108,7 @@ static inline __attribute__((always_inline)) void v2_op_expand_rot(V2State* st, 
 }
 
 // ---- active measurements (shrinks k; cooperative reduction) -----------------
-static inline __attribute__((always_inline)) void v2_op_meas_active_diagonal(V2State* st, CV2Complex* v, u32 active_k,
+static inline V2_NOISE_ATTR void v2_op_meas_active_diagonal(V2State* st, CV2Complex* v, u32 active_k,
                                               u32 axis, u32 slot, u8 flags) {
     u32 t = v2_tid();
     u32 half = 1u << (active_k - 1u);
@@ -132,7 +132,7 @@ static inline __attribute__((always_inline)) void v2_op_meas_active_diagonal(V2S
     }
     v2_barrier();
 }
-static inline __attribute__((always_inline)) void v2_op_meas_active_interfere(V2State* st, CV2Complex* v, u32 active_k,
+static inline V2_NOISE_ATTR void v2_op_meas_active_interfere(V2State* st, CV2Complex* v, u32 active_k,
                                                u32 axis, u32 slot, u8 flags) {
     u32 t = v2_tid();
     u32 half = 1u << (active_k - 1u);
@@ -336,7 +336,7 @@ static inline __attribute__((always_inline)) void v2_op_array_u4(V2State* st, CV
 }
 
 // ---- swap-measure-interfere (fused swap + X-fold; shrinks k) -----------------
-static inline __attribute__((always_inline)) void v2_op_swap_meas_interfere(V2State* st, CV2Complex* v, CV2Complex* scratch,
+static inline V2_NOISE_ATTR void v2_op_swap_meas_interfere(V2State* st, CV2Complex* v, CV2Complex* scratch,
                                              u32 active_k, u32 from, u32 to, u32 slot, u8 flags) {
     u32 t = v2_tid();
     if (from == to) {
@@ -411,7 +411,17 @@ static inline __attribute__((always_inline)) void v2_op_apply_pauli(V2State* st,
     }
     v2_barrier();
 }
-static inline __attribute__((always_inline)) void v2_op_noise(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
+// NOISE ops carry scalar FP (ocml_log_f64 hazard draw + cumulative-probability
+// sums + RNG). In the INTERPRETER they share one loop-body, so the -O2 optimizer
+// cannot reassociate the FP across dynamic invocations (the pc-loop iteration is
+// the barrier). In the SPECIALIZER these were straight-lined into N inlined
+// copies, which let -O2 schedule/reassociate the FP across copies -> ~1 ULP
+// branch flips on circuit_d5 (the one circuit with READOUT_NOISE+NOISE_BLOCK).
+// V2_NOISE_ATTR (defined in v2_ops.h): always_inline for interpreter/register,
+// noinline for the specializer, so each emitted noise call is an optimization
+// barrier = the loop-body-per-invocation semantics the interpreter has. This is
+// the specializer analog of "resolve noise to a loop instead of unrolling."
+static inline V2_NOISE_ATTR void v2_op_noise(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
                                const double* hazards, u32 num_sites, u32 site) {
     u32 t = v2_tid();
     if (IS_OWNER && site == st->next_noise) {
@@ -421,7 +431,7 @@ static inline __attribute__((always_inline)) void v2_op_noise(V2State* st, const
     }
     v2_barrier();
 }
-static inline __attribute__((always_inline)) void v2_op_noise_block(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
+static inline V2_NOISE_ATTR void v2_op_noise_block(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
                                      const double* hazards, u32 num_sites, u32 start, u32 count) {
     u32 t = v2_tid();
     if (IS_OWNER) {
@@ -435,7 +445,7 @@ static inline __attribute__((always_inline)) void v2_op_noise_block(V2State* st,
     }
     v2_barrier();
 }
-static inline __attribute__((always_inline)) void v2_op_readout_noise(V2State* st, const CV2ReadoutNoise* readout_noise, u32 idx) {
+static inline V2_NOISE_ATTR void v2_op_readout_noise(V2State* st, const CV2ReadoutNoise* readout_noise, u32 idx) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         CV2ReadoutNoise r = readout_noise[idx];

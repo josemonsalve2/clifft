@@ -113,14 +113,14 @@ std::string compile_specialized(const std::string& csrc, const std::string& key)
     if (isa.rfind("gfx", 0) == 0) isa = isa.substr(3);
     const std::string inc = CLIFFT_V2_SRC_INCLUDE;
 
-    // 1) C -> amdgcn bitcode. Vectorization is DISABLED: with compile-time-
-    // constant loop trip counts the vectorizer would reassociate the f64
-    // measurement-reduction accumulation, diverging by ~1 ULP from the
-    // runtime-loop interpreter (which the vectorizer leaves scalar). Byte-
-    // exactness vs SVM/interpreter requires the identical f64 summation order.
+    // 1) C -> amdgcn bitcode. Flags are IDENTICAL to the build-time interpreter
+    // pipeline (ClifftAmdgcn.cmake) so the shared v2_op_*() bodies compile to the
+    // same code -> byte-exact. Byte-exactness comes from (a) same flags here and
+    // (b) the FP-carrying noise ops being emitted noinline (V2_NOISE_ATTR), which
+    // reproduces the interpreter's loop-body-per-noise-op fence; do NOT add
+    // vectorize/unroll flags that would diverge from the interpreter.
     run(clang + " --target=amdgcn-amd-amdhsa -mcpu=" + cpu +
         " -ffreestanding -nostdlib -nogpulib -std=c23 -O2 -ffp-contract=off"
-        " -fno-vectorize -fno-slp-vectorize -fno-unroll-loops"
         " -I" + inc + " -emit-llvm -c -o " + bc + " " + src);
     // 2) link ocml + oclc controls (identical set to ClifftAmdgcn.cmake)
     run(llvmlink + " -o " + linked + " " + bc + " " +
@@ -132,12 +132,11 @@ std::string compile_specialized(const std::string& csrc, const std::string& key)
         ctl + "/oclc_correctly_rounded_sqrt_on.bc " +
         ctl + "/oclc_abi_version_500.bc " +
         ctl + "/oclc_isa_version_" + isa + ".bc");
-    // 3) internalize + optimize (keep vectorizers off — see step 1)
-    run(opt + " -O2 -vectorize-loops=false -vectorize-slp=false -o " + linked + " " + linked);
-    // 4) bitcode -> object (vectorizers off — see step 1)
+    // 3) internalize + optimize (identical to ClifftAmdgcn.cmake)
+    run(opt + " -O2 -o " + linked + " " + linked);
+    // 4) bitcode -> object (identical to ClifftAmdgcn.cmake)
     run(llc + " -mtriple=amdgcn-amd-amdhsa -mcpu=" + cpu +
-        " -mattr=+wavefrontsize64 -filetype=obj -O2"
-        " -vectorize-loops=false -vectorize-slp=false -o " + obj + " " + linked);
+        " -mattr=+wavefrontsize64 -filetype=obj -O2 -o " + obj + " " + linked);
     // 5) object -> .hsaco
     run(lld + " -shared -o " + hsaco + " " + obj);
 

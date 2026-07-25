@@ -108,6 +108,14 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
     o.precision(17);  // exact double literals for weights
     // The register build must define V2_REGISTER BEFORE including v2_ops.h.
     if (tier == SpecTier::Register) o << "#define V2_REGISTER 1\n";
+    // Emit the FP-carrying noise ops as NON-inlined calls: each call site is an
+    // optimization barrier the -O2 FP scheduler cannot reorder across, so the N
+    // straight-lined noise ops behave like the interpreter's single loop-body
+    // (which the pc-loop iteration already fences). This is the specializer
+    // analog of resolving noise to a loop, and it restores byte-exactness on
+    // READOUT_NOISE/NOISE_BLOCK-heavy circuits (circuit_d5) without touching the
+    // interpreter/register builds (they keep always_inline).
+    o << "#define V2_NOISE_ATTR __attribute__((noinline))\n";
     o << "#include \"clifft/gpu/mlir/v2/v2_ops.h\"\n\n";
 
     // --- specialized straight-line body (shared by the tier wrapper) ---------
