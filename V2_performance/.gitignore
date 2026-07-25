@@ -1,0 +1,5 @@
+# Raw rocprofv3 CSVs are bulky and reproducible — keep on disk, out of git.
+# The digested gpu/*.json + summary.md + history/metrics.jsonl are the durable record.
+runs/*/raw/
+runs/*/sweep.log
+tools/*.log

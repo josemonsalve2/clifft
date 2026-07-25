@@ -1,0 +1,8 @@
+{
+  "run_id": "20260725T030000Z_baseline-preopt",
+  "label": "baseline-preopt",
+  "commit": "788f23b",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 8
+}

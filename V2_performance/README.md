@@ -8,18 +8,34 @@ Node: mi350x-es (gfx950 / MI355X / CDNA4). Gold: GPU-SVM (f32) per R3.
 
 ## Layout
 
-- `tools/`     — tooling availability + how-to (what profilers exist on the
-                 compute node, HSA-counter caveats, exact commands used).
-- `gpu/`       — per-circuit GPU characterization: kernel time (rocprofv3
-                 --kernel-trace), HSA dispatch overhead (--hsa-core-trace),
-                 hardware counters (SQ_WAVES/VALU/MFMA/TCC/FETCH/WRITE),
-                 rocprof-compute SoL/roofline/occupancy, llvm-objdump
-                 VGPR/SGPR/LDS/spill. One subdir/file per circuit; V2 AND SVM.
-- `cpu/`       — CPU reference (sample_survivors f64) characterization: wall
-                 time, shots/sec, rank/shot scaling, hotspots, memory.
-- `raw/`       — raw profiler artifacts (rocprofv3 csv/json, objdump, logs).
-- `analysis/`  — cross-circuit synthesis, bottleneck taxonomy, roofline plots.
-- `plans/`     — optimization plans (Codex output, Claude output, merged).
+- `runs/`      — **one timestamped slot per benchmark run** (produced by the
+                 `/benchmark-all` skill). Each `<UTC-stamp>_<label>/` holds
+                 `raw/` (rocprofv3 CSVs), `gpu/<circuit>.json` (digested), plus
+                 `summary.md`, `summary.json`, `manifest.json` (git provenance).
+                 `runs/INDEX.md` lists all runs with mean V2/SVM ratio.
+- `history/`   — `metrics.jsonl`: append-only longitudinal log, one row per
+                 (run × circuit), tagged with git commit/branch. The progressive-
+                 analysis source of truth.
+- `analysis/`  — cross-run + cross-circuit synthesis. `TRENDS.md` (regenerated)
+                 = circuit×run ratio matrix + latest-vs-previous delta.
+                 `SYNTHESIS.md` = the static root-cause analysis.
+- `gpu/` `cpu/` — STATIC characterization docs (kernel/CPU-path analysis, line-
+                 cited). Not per-run; these describe the code, not a measurement.
+- `plans/`     — optimization plans (Codex, Claude, merged UNIFIED_PLAN.md).
+- `tools/`     — tooling status + one-off harness (superseded by the skill for
+                 routine runs; kept for reference + the agentic-integration guide).
+
+## Running a new benchmark (progressive)
+
+Use the **`/benchmark-all [label]`** skill (~/.claude/skills/benchmark-all). It
+mints a run slot, submits the SLURM sweep (V2+SVM, all tiers), digests to JSON,
+appends to `history/metrics.jsonl`, and regenerates `runs/INDEX.md` +
+`analysis/TRENDS.md`. Always pass a label tied to the change under test
+(e.g. `after-P0-register-kernel`) so the trend columns are legible.
+
+Metric of record: **V2/SVM kernel-time ratio** (rocprofv3 --kernel-trace, not
+host wall). <1 = V2 faster. For low-rank circuits trust the absolute V2 µs
+column (SVM denominators are timer-noise-small).
 
 ## Key measurement recipes (from ref_amd_profiling_tools + ref_gpu_opt)
 

@@ -1,7 +1,0 @@
-Welcome to SLURM
---------------------------------------------
-current Job id 49970
---------------------------------------------
-[100%] Built target run_v2
-=== frame_h (shots=20000) ===
-[2026-07-25T02:58:55.621] error: *** JOB 49970 ON smci350-rck-g03-d13-21 CANCELLED AT 2026-07-25T02:58:55 DUE to SIGNAL Terminated ***
