@@ -17,6 +17,9 @@
 #ifndef CLIFFT_V2_COOP_HSACO
 #define CLIFFT_V2_COOP_HSACO ""
 #endif
+#ifndef CLIFFT_V2_REGISTER_HSACO
+#define CLIFFT_V2_REGISTER_HSACO ""
+#endif
 
 namespace clifft::gpu::v2 {
 
@@ -47,18 +50,37 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     auto& rt = hsa_runtime();
     if (!rt.init()) throw std::runtime_error("v2_sample: HSA init failed");
 
-    // Tier selection by peak_rank: coop (<=10, amplitudes in LDS) vs global
-    // (11-19, amplitudes in HBM + XCD work-stealing). Both share execute_shot.
+    // Tier selection by peak_rank (all three share the SAME execute_shot body):
+    //   register (<=4): 1 shot/thread, statevector in registers, no LDS/barriers.
+    //   coop (5-10): 256 threads/shot, amplitudes in LDS.
+    //   global (11-19): amplitudes in HBM + work-stealing.
+    // P0: the register tier fixes the 15-28x low-rank catastrophe (256 threads
+    // were cooperating on a 1-16 amplitude statevector).
+    constexpr uint32_t kRegMaxRank = 4;
     constexpr uint32_t kCoopMaxRank = 10;
     constexpr uint32_t kGlobalMaxRank = 19;
     constexpr uint32_t kNumXCDs = 8;
-    const bool use_global = flat.peak_rank > kCoopMaxRank;
+    enum Tier { REG, COOP, GLOBAL };
+    const Tier tier = flat.peak_rank <= kRegMaxRank ? REG
+                    : flat.peak_rank <= kCoopMaxRank ? COOP : GLOBAL;
+    const bool use_global = (tier == GLOBAL);
     if (flat.peak_rank > kGlobalMaxRank)
         throw std::runtime_error("v2_sample: peak_rank " + std::to_string(flat.peak_rank) +
                                  " exceeds global tier max (" + std::to_string(kGlobalMaxRank) + ")");
+    // Allow disabling the register tier (fall back to coop) for A/B measurement.
+    const bool reg_disabled = getenv("V2_NO_REGISTER") != nullptr;
+    const Tier eff_tier = (tier == REG && !reg_disabled) ? REG
+                        : (tier == GLOBAL ? GLOBAL : COOP);
 
-    const char* sym = use_global ? "clifft_v2_global" : "clifft_v2_coop";
-    HsaLoadedKernel kernel = hsa_load_kernel(hsaco_path, sym, 0);
+    const char* sym = eff_tier == GLOBAL ? "clifft_v2_global"
+                    : eff_tier == REG ? "clifft_v2_register" : "clifft_v2_coop";
+    // The register kernel lives in its own .hsaco (separate -DV2_REGISTER compile).
+    std::string load_path = hsaco_path;
+    if (eff_tier == REG) {
+        load_path = CLIFFT_V2_REGISTER_HSACO;
+        if (load_path.empty()) throw std::runtime_error("v2_sample: no register .hsaco path");
+    }
+    HsaLoadedKernel kernel = hsa_load_kernel(load_path, sym, 0);
     if (!kernel.valid) throw std::runtime_error(std::string("v2_sample: kernel load failed: ") + sym);
 
     // Upload device buffers (reuse flatten_program output — no second lowering).
@@ -144,10 +166,15 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     kargs.work_counter = d_work_counter;
 
     const uint32_t block = 256;
-    // Coop: one workgroup per shot. Global: fixed resident pool, each drains
-    // many shots via work-stealing. kargs size differs by tier (global adds 3
-    // pointers); a coop kernel with fewer kernargs still reads a prefix safely.
-    const uint32_t grid = use_global ? (global_grid_wgs * block) : (shots * block);
+    // Register: 1 shot/thread -> grid = ceil(shots/256)*256 threads.
+    // Coop: 1 shot/workgroup -> grid = shots*256 threads.
+    // Global: fixed resident pool, each drains many shots via work-stealing.
+    // kargs size differs by tier (global adds 3 pointers); the register/coop
+    // kernels read only the prefix (offsetof global_v).
+    uint32_t grid;
+    if (eff_tier == GLOBAL)      grid = global_grid_wgs * block;
+    else if (eff_tier == REG)    grid = ((shots + block - 1u) / block) * block;
+    else                         grid = shots * block;
     const size_t karg_bytes = use_global ? sizeof(kargs) : offsetof(decltype(kargs), global_v);
     double ks = hsa_dispatch_and_wait(kernel, 0, grid, block, &kargs, karg_bytes);
     if (kernel_seconds) *kernel_seconds = ks;

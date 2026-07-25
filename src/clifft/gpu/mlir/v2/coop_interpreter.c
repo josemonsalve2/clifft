@@ -71,10 +71,61 @@ extern __attribute__((address_space(3))) double lds_red1[V2_RED_WARPS];
 extern __attribute__((address_space(3))) u32 lds_xcd;        // global tier: XCD id
 extern __attribute__((address_space(3))) u64 lds_shot;       // global tier: claimed shot
 
-// ----- intrinsics ------------------------------------------------------------
-static inline u32 tid(void)  { return __builtin_amdgcn_workitem_id_x(); }
+// ----- per-shot classical state ----------------------------------------------
+// (struct declared below; the coop/global LDS instance is declared after it.)
+// ALL the state that is logically "one shot's" bookkeeping. For the coop/global
+// tiers this lives once in LDS (256 threads share it, tid0 mutates). For the
+// register tier (P0) each thread owns a private V2State. Routing the body
+// through a state POINTER instead of hard LDS globals is what lets the SAME
+// opcode body compile for both tiers — and is exactly the state model the MLIR
+// specializer will emit per-circuit. Amplitude buffers (v/scratch) and the
+// reduction scratch (lds_red0/1) stay separate — they are workgroup-cooperative,
+// not per-shot logical state.
+typedef struct {
+    u64 px[CLIFFT_V2_PAULI_WORDS];
+    u64 pz[CLIFFT_V2_PAULI_WORDS];
+    u64 meas[V2_MEAS_WORDS];
+    u64 rng[4];
+    u8  obs[CLIFFT_V2_MAX_OBS];
+    u32 active_k;
+    u32 next_noise;
+    u8  discarded;
+    u8  branch;
+} V2State;
+
+// The coop/global tiers keep one V2State per workgroup in LDS (extern -> no
+// initializer, llc requirement). The register tier declares its own on the
+// stack per thread. Kept out of the individual-field LDS externs above so the
+// struct is one contiguous LDS allocation.
+#ifndef V2_REGISTER
+extern __attribute__((address_space(3))) V2State lds_state;
+#endif
+
+// ----- cooperation primitives (tier-parameterized) ---------------------------
+// The ONLY places the coop and register tiers differ: thread id, loop stride,
+// barrier, and the cross-lane reduction. Everything else (the opcode arithmetic)
+// is identical. -DV2_REGISTER selects the 1-shot-per-thread instantiation.
+#ifdef V2_REGISTER
+#  define V2_STRIDE 1u
+static inline u32 v2_tid(void)  { return 0u; }
+static inline void v2_barrier(void) {}
+// register tier: the per-thread accumulation loop already computed the FULL sum
+// (stride 1), so reduce is the identity — matches SVM's thread kernel exactly.
+#  define V2_REDUCE2(T, L0, L1, O0, O1) do { *(O0) = (L0); *(O1) = (L1); } while (0)
+#else
+#  define V2_STRIDE 256u
+static inline u32 v2_tid(void)  { return __builtin_amdgcn_workitem_id_x(); }
+static inline void v2_barrier(void) { __builtin_amdgcn_s_barrier(); }
+#  define V2_REDUCE2(T, L0, L1, O0, O1) coop_reduce2((T), (L0), (L1), (O0), (O1))
+#endif
+// In register mode every thread owns its shot, so it is always the owner; in
+// coop mode only tid0 mutates the shared per-shot state.
+#ifdef V2_REGISTER
+#  define IS_OWNER 1
+#else
+#  define IS_OWNER (t == 0)
+#endif
 static inline u32 bid(void)  { return __builtin_amdgcn_workgroup_id_x(); }
-static inline void barrier(void) { __builtin_amdgcn_s_barrier(); }
 
 // ----- RNG (xoshiro256++ seeded by splitmix64), byte-exact with SVM ----------
 static inline u64 rotl64(u64 x, int k) { return (x << k) | (x >> (64 - k)); }
@@ -84,47 +135,51 @@ static inline u64 splitmix64(u64* state) {
     z = (z ^ (z >> 27)) * 0x94d049bb133111ebUL;
     return z ^ (z >> 31);
 }
-// rng state lives in LDS (tid0 only draws); s points at lds_rng.
-static inline void rng_seed(__attribute__((address_space(3))) u64* s, u64 seed, u64 shot_id) {
+// RNG + frame helpers take GENERIC pointers so both the coop kernel (LDS,
+// addrspace 3 — implicit addrspacecast at the call) and the register kernel
+// (private per-thread state) reuse the SAME byte-exact code. The values are
+// identical either way; only the backing address space differs. This tier-
+// agnostic factoring is the interpreter mirror of what the specializer emits.
+static inline void rng_seed(u64* s, u64 seed, u64 shot_id) {
     u64 z = seed ^ (0x9e3779b97f4a7c15UL * (shot_id + 1));
     s[0] = splitmix64(&z); s[1] = splitmix64(&z);
     s[2] = splitmix64(&z); s[3] = splitmix64(&z);
 }
-static inline u64 rng_next(__attribute__((address_space(3))) u64* s) {
+static inline u64 rng_next(u64* s) {
     u64 result = rotl64(s[0] + s[3], 23) + s[0];
     u64 t = s[1] << 17;
     s[2] ^= s[0]; s[3] ^= s[1]; s[1] ^= s[2]; s[0] ^= s[3];
     s[2] ^= t;    s[3] = rotl64(s[3], 45);
     return result;
 }
-static inline double rng_uniform(__attribute__((address_space(3))) u64* s) {
+static inline double rng_uniform(u64* s) {
     return (double)(rng_next(s) >> 11) * 0x1.0p-53;
 }
 
-// ----- Pauli-frame bit helpers (on LDS words) --------------------------------
-static inline int fget(__attribute__((address_space(3))) u64* w, u32 i) {
+// ----- Pauli-frame bit helpers (generic pointer; coop=LDS, register=private) --
+static inline int fget(u64* w, u32 i) {
     return (int)((w[i >> 6] >> (i & 63u)) & 1UL);
 }
-static inline void fset(__attribute__((address_space(3))) u64* w, u32 i, int v) {
+static inline void fset(u64* w, u32 i, int v) {
     u64 m = 1UL << (i & 63u);
     if (v) w[i >> 6] |= m; else w[i >> 6] &= ~m;
 }
-static inline void fxor(__attribute__((address_space(3))) u64* w, u32 i, int v) {
+static inline void fxor(u64* w, u32 i, int v) {
     if (v) w[i >> 6] ^= 1UL << (i & 63u);
 }
-static inline void fswap(__attribute__((address_space(3))) u64* w, u32 a, u32 b) {
+static inline void fswap(u64* w, u32 a, u32 b) {
     int va = fget(w, a), vb = fget(w, b);
     fset(w, a, vb); fset(w, b, va);
 }
-// ----- measurement-record bit helpers (bit-packed lds_meas, tid0-only) -------
-static inline u8 mget(u32 i) {
-    return (u8)((lds_meas[i >> 6] >> (i & 63u)) & 1UL);
+// ----- measurement-record bit helpers (bit-packed meas words, generic ptr) ---
+static inline u8 mget(u64* meas, u32 i) {
+    return (u8)((meas[i >> 6] >> (i & 63u)) & 1UL);
 }
-static inline void mset(u32 i, u8 v) {
+static inline void mset(u64* meas, u32 i, u8 v) {
     u64 m = 1UL << (i & 63u);
-    if (v & 1u) lds_meas[i >> 6] |= m; else lds_meas[i >> 6] &= ~m;
+    if (v & 1u) meas[i >> 6] |= m; else meas[i >> 6] &= ~m;
 }
-static inline void mxor1(u32 i) { lds_meas[i >> 6] ^= 1UL << (i & 63u); }
+static inline void mxor1(u64* meas, u32 i) { meas[i >> 6] ^= 1UL << (i & 63u); }
 
 // ----- complex + amplitude helpers -------------------------------------------
 #define V2_INV_SQRT2 0.70710678118654752440
@@ -177,14 +232,15 @@ static inline u64 scatter_bits_2(u64 val, u32 b1, u32 b2) {
 
 // Cooperative diagonal phase on an active axis: v[idx | axis_bit] *= phase,
 // strided over the 2^(active_k-1) lower half. Matches SVM coop_apply_phase.
-static inline void coop_apply_phase(u32 t, CV2Complex* v, u32 axis, CV2Complex phase) {
+static inline void coop_apply_phase(u32 t, CV2Complex* v, u32 active_k,
+                                    u32 axis, CV2Complex phase) {
     u64 axis_bit = 1ull << axis;
-    u64 iters = 1ull << (lds_active_k - 1u);
-    for (u64 i = t; i < iters; i += 256u) {
+    u64 iters = 1ull << (active_k - 1u);
+    for (u64 i = t; i < iters; i += V2_STRIDE) {
         u64 idx = insert_zero_bit(i, axis) | axis_bit;
         v[idx] = cmul(v[idx], phase);
     }
-    barrier();
+    v2_barrier();
 }
 
 // Wavefront butterfly shuffle of an f64 (lane l receives lane (l^offset)'s
@@ -215,7 +271,7 @@ static inline void coop_reduce2(u32 t, double l0, double l1, double* out0, doubl
         l1 += shfl_xor_f64(l1, lane, off);
     }
     if (lane == 0u) { lds_red0[warp] = l0; lds_red1[warp] = l1; }
-    barrier();
+    __builtin_amdgcn_s_barrier();
     if (t < 4u) {
         l0 = lds_red0[t]; l1 = lds_red1[t];
         for (int off = 2; off > 0; off >>= 1) {
@@ -224,17 +280,17 @@ static inline void coop_reduce2(u32 t, double l0, double l1, double* out0, doubl
         }
     }
     if (t == 0u) { lds_red0[0] = l0; lds_red1[0] = l1; }
-    barrier();
+    __builtin_amdgcn_s_barrier();
     *out0 = lds_red0[0]; *out1 = lds_red1[0];
-    barrier();
+    __builtin_amdgcn_s_barrier();
 }
 
 // sample_branch — byte-exact with SVM (dust clamp + rng draw only when needed).
-static inline u8 sample_branch(double p0, double p1, double total) {
+static inline u8 sample_branch(u64* rng, double p0, double p1, double total) {
     double eps = V2_DUST_EPS * total;
     if (p1 <= eps) return 0;
     if (p0 <= eps) return 1;
-    return (rng_uniform(lds_rng) * total < p0) ? 0u : 1u;
+    return (rng_uniform(rng) * total < p0) ? 0u : 1u;
 }
 
 // ROCm device-library transcendental (linked from ocml.bc). SVM's log() lowers
@@ -244,32 +300,32 @@ static inline double ocml_log_f64(double x) { return __ocml_log_f64(x); }
 
 // tid0-only: advance lds_next_noise via exponential-hazard sampling (byte-exact
 // with SVM coop_draw_next_noise). Binary-searches the cumulative-hazard table.
-static inline void draw_next_noise(const double* hazards, u32 num_sites) {
-    if (num_sites == 0u || lds_next_noise >= num_sites) { lds_next_noise = 0xffffffffu; return; }
-    double current_hazard = (lds_next_noise == 0u) ? 0.0 : hazards[lds_next_noise - 1u];
-    double target = current_hazard + (-ocml_log_f64(1.0 - rng_uniform(lds_rng)));
+static inline void draw_next_noise(V2State* st, const double* hazards, u32 num_sites) {
+    if (num_sites == 0u || st->next_noise >= num_sites) { st->next_noise = 0xffffffffu; return; }
+    double current_hazard = (st->next_noise == 0u) ? 0.0 : hazards[st->next_noise - 1u];
+    double target = current_hazard + (-ocml_log_f64(1.0 - rng_uniform(st->rng)));
     u32 lo = 0u, hi = num_sites;
     while (lo < hi) {
         u32 mid = lo + ((hi - lo) >> 1);
         if (hazards[mid] <= target) lo = mid + 1u; else hi = mid;
     }
-    lds_next_noise = (lo >= num_sites) ? 0xffffffffu : lo;
+    st->next_noise = (lo >= num_sites) ? 0xffffffffu : lo;
 }
 
 // tid0-only: apply the Pauli channel drawn at noise site `site_idx` into the
 // frame (matches SVM coop OP_NOISE body).
-static inline void apply_noise_site(const CV2NoiseSite* sites, const CV2Channel* channels,
-                                    u32 site_idx) {
+static inline void apply_noise_site(V2State* st, const CV2NoiseSite* sites,
+                                    const CV2Channel* channels, u32 site_idx) {
     CV2NoiseSite site = sites[site_idx];
-    double roll = rng_uniform(lds_rng) * site.prob_sum;
+    double roll = rng_uniform(st->rng) * site.prob_sum;
     double cumulative = 0.0;
     for (u32 k = 0; k < site.count; ++k) {
         const CV2Channel* ch = &channels[site.offset + k];
         cumulative += ch->prob;
         if (roll < cumulative) {
             for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) {
-                lds_px[w] ^= ch->x[w];
-                lds_pz[w] ^= ch->z[w];
+                st->px[w] ^= ch->x[w];
+                st->pz[w] ^= ch->z[w];
             }
             break;
         }
@@ -284,8 +340,8 @@ static inline void apply_noise_site(const CV2NoiseSite* sites, const CV2Channel*
 // (1<<peak_rank). Classical state (frame, meas, obs, rng) always lives in LDS.
 // Both kernels below call this; the opcode logic is written ONCE.
 // =============================================================================
-static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
-                         u64 shot_id,
+static void execute_shot(V2State* st, CV2Complex* v, CV2Complex* scratch,
+                         u32 amp_capacity, u64 shot_id,
                          const CV2Instr* instrs, u32 num_instrs,
                          u32 total_meas_slots, u32 num_observables,
                          u64 seed,
@@ -302,289 +358,289 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                          const CV2ReadoutNoise* readout_noise,
                          const u32* detector_offsets,
                          const u32* detector_targets) {
-    u32 t = tid();
+    u32 t = v2_tid();
 
     // --- cooperative init ---
-    for (u32 i = t; i < amp_capacity; i += 256u) { v[i].re = 0.0f; v[i].im = 0.0f; }
-    barrier();
-    if (t == 0) {
-        for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) { lds_px[w] = 0; lds_pz[w] = 0; }
-        lds_active_k = 0;
-        lds_discarded = 0;
+    for (u32 i = t; i < amp_capacity; i += V2_STRIDE) { v[i].re = 0.0f; v[i].im = 0.0f; }
+    v2_barrier();
+    if (IS_OWNER) {
+        for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) { st->px[w] = 0; st->pz[w] = 0; }
+        st->active_k = 0;
+        st->discarded = 0;
         v[0].re = 1.0f; v[0].im = 0.0f;
-        for (u32 i = 0; i < num_observables; ++i) lds_obs[i] = 0;
-        for (u32 w = 0; w < V2_MEAS_WORDS; ++w) lds_meas[w] = 0;
-        lds_next_noise = 0;
-        rng_seed(lds_rng, seed, shot_id);
-        draw_next_noise(noise_hazards, num_noise_sites);
+        for (u32 i = 0; i < num_observables; ++i) st->obs[i] = 0;
+        for (u32 w = 0; w < V2_MEAS_WORDS; ++w) st->meas[w] = 0;
+        st->next_noise = 0;
+        rng_seed(st->rng, seed, shot_id);
+        draw_next_noise(st, noise_hazards, num_noise_sites);
     }
-    barrier();
+    v2_barrier();
 
     // --- interpreter loop (runtime, never unrolled) ---
     for (u32 pc = 0; pc < num_instrs; ++pc) {
         CV2Instr ins = instrs[pc];
         switch (ins.opcode) {
         case OP_FRAME_CNOT:
-            if (t == 0) {
-                int px_c = fget(lds_px, ins.axis_1);
-                int pz_tt = fget(lds_pz, ins.axis_2);
-                fxor(lds_px, ins.axis_2, px_c);
-                fxor(lds_pz, ins.axis_1, pz_tt);
+            if (IS_OWNER) {
+                int px_c = fget(st->px, ins.axis_1);
+                int pz_tt = fget(st->pz, ins.axis_2);
+                fxor(st->px, ins.axis_2, px_c);
+                fxor(st->pz, ins.axis_1, pz_tt);
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_FRAME_CZ:
-            if (t == 0) {
-                int px_a = fget(lds_px, ins.axis_1);
-                int px_b = fget(lds_px, ins.axis_2);
-                fxor(lds_pz, ins.axis_2, px_a);
-                fxor(lds_pz, ins.axis_1, px_b);
+            if (IS_OWNER) {
+                int px_a = fget(st->px, ins.axis_1);
+                int px_b = fget(st->px, ins.axis_2);
+                fxor(st->pz, ins.axis_2, px_a);
+                fxor(st->pz, ins.axis_1, px_b);
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_FRAME_H:
-            if (t == 0) {
-                int px = fget(lds_px, ins.axis_1);
-                int pz = fget(lds_pz, ins.axis_1);
-                fset(lds_px, ins.axis_1, pz);
-                fset(lds_pz, ins.axis_1, px);
+            if (IS_OWNER) {
+                int px = fget(st->px, ins.axis_1);
+                int pz = fget(st->pz, ins.axis_1);
+                fset(st->px, ins.axis_1, pz);
+                fset(st->pz, ins.axis_1, px);
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_FRAME_S:
         case OP_FRAME_S_DAG:
-            if (t == 0) { int px = fget(lds_px, ins.axis_1); fxor(lds_pz, ins.axis_1, px); }
-            barrier();
+            if (IS_OWNER) { int px = fget(st->px, ins.axis_1); fxor(st->pz, ins.axis_1, px); }
+            v2_barrier();
             break;
         case OP_FRAME_SWAP:
-            if (t == 0) {
-                int px_a = fget(lds_px, ins.axis_1), px_b = fget(lds_px, ins.axis_2);
-                fset(lds_px, ins.axis_1, px_b); fset(lds_px, ins.axis_2, px_a);
-                int pz_a = fget(lds_pz, ins.axis_1), pz_b = fget(lds_pz, ins.axis_2);
-                fset(lds_pz, ins.axis_1, pz_b); fset(lds_pz, ins.axis_2, pz_a);
+            if (IS_OWNER) {
+                int px_a = fget(st->px, ins.axis_1), px_b = fget(st->px, ins.axis_2);
+                fset(st->px, ins.axis_1, px_b); fset(st->px, ins.axis_2, px_a);
+                int pz_a = fget(st->pz, ins.axis_1), pz_b = fget(st->pz, ins.axis_2);
+                fset(st->pz, ins.axis_1, pz_b); fset(st->pz, ins.axis_2, pz_a);
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_MEAS_DORMANT_STATIC:
             // outcome from px[axis] (deterministic); tid0-only. flags: identity/sign.
-            if (t == 0) {
+            if (IS_OWNER) {
                 u8 mval;
                 if (ins.flags & FLAG_IDENTITY) {
                     mval = (ins.flags & FLAG_SIGN) ? 1u : 0u;
                 } else {
-                    u8 outcome = (u8)fget(lds_px, ins.axis_1);
+                    u8 outcome = (u8)fget(st->px, ins.axis_1);
                     mval = outcome ^ (u8)((ins.flags & FLAG_SIGN) != 0);
                 }
-                if (ins.a < V2_MAX_MEAS) mset(ins.a, mval);
+                if (ins.a < V2_MAX_MEAS) mset(st->meas, ins.a, mval);
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_MEAS_DORMANT_RANDOM:
             // Random outcome (qubit in superposition, dormant). tid0 draws RNG.
             // Mirrors SVM meas_dormant_random.
-            if (t == 0) {
-                u8 m_abs = (rng_uniform(lds_rng) < 0.5) ? 0u : 1u;
-                fset(lds_px, ins.axis_1, m_abs != 0);
-                fset(lds_pz, ins.axis_1, 0);
+            if (IS_OWNER) {
+                u8 m_abs = (rng_uniform(st->rng) < 0.5) ? 0u : 1u;
+                fset(st->px, ins.axis_1, m_abs != 0);
+                fset(st->pz, ins.axis_1, 0);
                 if (ins.a < V2_MAX_MEAS)
-                    mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
+                    mset(st->meas, ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_EXPAND: {
             // Virtual H on a dormant axis: duplicate v[0,half) -> v[half,2half).
-            u32 half = 1u << lds_active_k;
-            for (u32 i = t; i < half; i += 256u) v[i + half] = v[i];
-            barrier();
-            if (t == 0) lds_active_k += 1;
-            barrier();
+            u32 half = 1u << st->active_k;
+            for (u32 i = t; i < half; i += V2_STRIDE) v[i + half] = v[i];
+            v2_barrier();
+            if (IS_OWNER) st->active_k += 1;
+            v2_barrier();
             break;
         }
         case OP_EXPAND_T:
         case OP_EXPAND_T_DAG: {
             // Fused EXPAND + T phase. v[i+half] = v[i] * (1/sqrt2, +-1/sqrt2).
-            u32 half = 1u << lds_active_k;
-            int px = fget(lds_px, ins.axis_1);
+            u32 half = 1u << st->active_k;
+            int px = fget(st->px, ins.axis_1);
             double imag = (ins.opcode == OP_EXPAND_T_DAG) ? -V2_INV_SQRT2 : V2_INV_SQRT2;
             if (px) imag = -imag;
             CV2Complex phase; phase.re = (float)V2_INV_SQRT2; phase.im = (float)imag;
-            for (u32 i = t; i < half; i += 256u) v[i + half] = cmul(v[i], phase);
-            barrier();
-            if (t == 0) lds_active_k += 1;
-            barrier();
+            for (u32 i = t; i < half; i += V2_STRIDE) v[i + half] = cmul(v[i], phase);
+            v2_barrier();
+            if (IS_OWNER) st->active_k += 1;
+            v2_barrier();
             break;
         }
         case OP_MEAS_ACTIVE_DIAGONAL: {
             // Z-basis measurement of an active axis (top axis). Cooperative norm
             // reduction -> tid0 sample -> conditional compaction -> active_k--.
-            u32 half = 1u << (lds_active_k - 1u);
-            int px = fget(lds_px, ins.axis_1);
+            u32 half = 1u << (st->active_k - 1u);
+            int px = fget(st->px, ins.axis_1);
             double l0 = 0.0, l1 = 0.0;
-            for (u32 i = t; i < half; i += 256u) {
+            for (u32 i = t; i < half; i += V2_STRIDE) {
                 l0 += cnorm(v[i]);
                 l1 += cnorm(v[i + half]);
             }
             double p0, p1;
-            coop_reduce2(t, l0, l1, &p0, &p1);
-            if (t == 0) {
-                u8 b = sample_branch(p0, p1, p0 + p1);
-                lds_branch = b;
+            V2_REDUCE2(t, l0, l1, &p0, &p1);
+            if (IS_OWNER) {
+                u8 b = sample_branch(st->rng, p0, p1, p0 + p1);
+                st->branch = b;
                 u8 m_abs = b ^ (u8)px;
                 if (ins.a < V2_MAX_MEAS)
-                    mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
+                    mset(st->meas, ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
-            barrier();
-            if (lds_branch != 0) {
-                for (u32 i = t; i < half; i += 256u) v[i] = v[i + half];
+            v2_barrier();
+            if (st->branch != 0) {
+                for (u32 i = t; i < half; i += V2_STRIDE) v[i] = v[i + half];
             }
-            barrier();
-            if (t == 0) {
-                lds_active_k -= 1;
-                u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
-                fset(lds_px, ins.axis_1, m_abs != 0);
-                fset(lds_pz, ins.axis_1, 0);
+            v2_barrier();
+            if (IS_OWNER) {
+                st->active_k -= 1;
+                u8 m_abs = mget(st->meas, ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                fset(st->px, ins.axis_1, m_abs != 0);
+                fset(st->pz, ins.axis_1, 0);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_MEAS_ACTIVE_INTERFERE: {
             // X-basis fold of an active axis: (v[i]+-v[i+half])/sqrt2, k -> k-1.
-            u32 half = 1u << (lds_active_k - 1u);
-            int pz = fget(lds_pz, ins.axis_1);
+            u32 half = 1u << (st->active_k - 1u);
+            int pz = fget(st->pz, ins.axis_1);
             double lp = 0.0, lm = 0.0;
-            for (u32 i = t; i < half; i += 256u) {
+            for (u32 i = t; i < half; i += V2_STRIDE) {
                 CV2Complex vi = v[i], vh = v[i + half];
                 lp += cnorm(cadd(vi, vh));
                 lm += cnorm(csub(vi, vh));
             }
             double p_plus, p_minus;
-            coop_reduce2(t, lp, lm, &p_plus, &p_minus);
-            if (t == 0) {
-                u8 b = sample_branch(p_plus, p_minus, p_plus + p_minus);
-                lds_branch = b;
+            V2_REDUCE2(t, lp, lm, &p_plus, &p_minus);
+            if (IS_OWNER) {
+                u8 b = sample_branch(st->rng, p_plus, p_minus, p_plus + p_minus);
+                st->branch = b;
                 u8 m_abs = b ^ (u8)pz;
                 if (ins.a < V2_MAX_MEAS)
-                    mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
+                    mset(st->meas, ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
-            barrier();
-            for (u32 i = t; i < half; i += 256u) {
+            v2_barrier();
+            for (u32 i = t; i < half; i += V2_STRIDE) {
                 CV2Complex vi = v[i], vh = v[i + half];
-                CV2Complex folded = (lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh);
+                CV2Complex folded = (st->branch == 0) ? cadd(vi, vh) : csub(vi, vh);
                 v[i] = cscale(folded, V2_INV_SQRT2);
             }
-            barrier();
-            if (t == 0) {
-                lds_active_k -= 1;
-                u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
-                fset(lds_px, ins.axis_1, m_abs != 0);
-                fset(lds_pz, ins.axis_1, 0);
+            v2_barrier();
+            if (IS_OWNER) {
+                st->active_k -= 1;
+                u8 m_abs = mget(st->meas, ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                fset(st->px, ins.axis_1, m_abs != 0);
+                fset(st->pz, ins.axis_1, 0);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_ARRAY_CNOT: {
             u32 c = ins.axis_1, tg = ins.axis_2;
             u64 c_bit = 1ull << c, t_bit = 1ull << tg;
-            u64 iters = 1ull << (lds_active_k - 2u);
-            for (u64 i = t; i < iters; i += 256u) {
+            u64 iters = 1ull << (st->active_k - 2u);
+            for (u64 i = t; i < iters; i += V2_STRIDE) {
                 u64 base = scatter_bits_2(i, c, tg) | c_bit;
                 CV2Complex a = v[base], b = v[base | t_bit];
                 v[base] = b; v[base | t_bit] = a;
             }
-            barrier();
-            if (t == 0) {
-                int px_c = fget(lds_px, c), pz_t = fget(lds_pz, tg);
-                fxor(lds_px, tg, px_c); fxor(lds_pz, c, pz_t);
+            v2_barrier();
+            if (IS_OWNER) {
+                int px_c = fget(st->px, c), pz_t = fget(st->pz, tg);
+                fxor(st->px, tg, px_c); fxor(st->pz, c, pz_t);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_ARRAY_CZ: {
             u32 a = ins.axis_1, b = ins.axis_2;
             u64 both = (1ull << a) | (1ull << b);
-            u64 iters = 1ull << (lds_active_k - 2u);
-            for (u64 i = t; i < iters; i += 256u) {
+            u64 iters = 1ull << (st->active_k - 2u);
+            for (u64 i = t; i < iters; i += V2_STRIDE) {
                 u64 idx = scatter_bits_2(i, a, b) | both;
                 CV2Complex c = v[idx]; c.re = -c.re; c.im = -c.im; v[idx] = c;
             }
-            barrier();
-            if (t == 0) {
-                int px_a = fget(lds_px, a), px_b = fget(lds_px, b);
-                fxor(lds_pz, b, px_a); fxor(lds_pz, a, px_b);
+            v2_barrier();
+            if (IS_OWNER) {
+                int px_a = fget(st->px, a), px_b = fget(st->px, b);
+                fxor(st->pz, b, px_a); fxor(st->pz, a, px_b);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_ARRAY_SWAP: {
             u32 a = ins.axis_1, b = ins.axis_2;
             u64 a_bit = 1ull << a, b_bit = 1ull << b;
-            u64 iters = 1ull << (lds_active_k - 2u);
-            for (u64 i = t; i < iters; i += 256u) {
+            u64 iters = 1ull << (st->active_k - 2u);
+            for (u64 i = t; i < iters; i += V2_STRIDE) {
                 u64 base = scatter_bits_2(i, a, b);
                 CV2Complex ta = v[base | a_bit], tb = v[base | b_bit];
                 v[base | a_bit] = tb; v[base | b_bit] = ta;
             }
-            barrier();
-            if (t == 0) { fswap(lds_px, a, b); fswap(lds_pz, a, b); }
-            barrier();
+            v2_barrier();
+            if (IS_OWNER) { fswap(st->px, a, b); fswap(st->pz, a, b); }
+            v2_barrier();
             break;
         }
         case OP_ARRAY_MULTI_CNOT: {
             u32 tg = ins.axis_1; u64 ctrl_mask = ins.mask;
             u64 t_bit = 1ull << tg;
-            u64 half = 1ull << (lds_active_k - 1u);
-            for (u64 idx = t; idx < half; idx += 256u) {
+            u64 half = 1ull << (st->active_k - 1u);
+            for (u64 idx = t; idx < half; idx += V2_STRIDE) {
                 u64 actual = scatter_bits_1(idx, tg);
                 if (__builtin_popcountll(actual & ctrl_mask) & 1) {
                     CV2Complex a = v[actual], b = v[actual | t_bit];
                     v[actual] = b; v[actual | t_bit] = a;
                 }
             }
-            barrier();
-            if (t == 0) {
-                for (u32 c = 0; c < lds_active_k; ++c) if ((ctrl_mask >> c) & 1ull) {
-                    int px_c = fget(lds_px, c), pz_t = fget(lds_pz, tg);
-                    fxor(lds_px, tg, px_c); fxor(lds_pz, c, pz_t);
+            v2_barrier();
+            if (IS_OWNER) {
+                for (u32 c = 0; c < st->active_k; ++c) if ((ctrl_mask >> c) & 1ull) {
+                    int px_c = fget(st->px, c), pz_t = fget(st->pz, tg);
+                    fxor(st->px, tg, px_c); fxor(st->pz, c, pz_t);
                 }
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_ARRAY_MULTI_CZ: {
             u32 ctrl = ins.axis_1; u64 target_mask = ins.mask;
             u64 c_bit = 1ull << ctrl;
-            u64 half = 1ull << (lds_active_k - 1u);
-            for (u64 idx = t; idx < half; idx += 256u) {
+            u64 half = 1ull << (st->active_k - 1u);
+            for (u64 idx = t; idx < half; idx += V2_STRIDE) {
                 u64 actual = scatter_bits_1(idx, ctrl) | c_bit;
                 if (__builtin_popcountll(actual & target_mask) & 1) {
                     CV2Complex vv = v[actual]; vv.re = -vv.re; vv.im = -vv.im; v[actual] = vv;
                 }
             }
-            barrier();
-            if (t == 0) {
-                for (u32 tg = 0; tg < lds_active_k; ++tg) if ((target_mask >> tg) & 1ull) {
-                    int px_c = fget(lds_px, ctrl), px_t = fget(lds_px, tg);
-                    fxor(lds_pz, tg, px_c); fxor(lds_pz, ctrl, px_t);
+            v2_barrier();
+            if (IS_OWNER) {
+                for (u32 tg = 0; tg < st->active_k; ++tg) if ((target_mask >> tg) & 1ull) {
+                    int px_c = fget(st->px, ctrl), px_t = fget(st->px, tg);
+                    fxor(st->pz, tg, px_c); fxor(st->pz, ctrl, px_t);
                 }
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_ARRAY_H: {
             u32 axis = ins.axis_1; u64 axis_bit = 1ull << axis;
-            u64 iters = 1ull << (lds_active_k - 1u);
-            for (u64 i = t; i < iters; i += 256u) {
+            u64 iters = 1ull << (st->active_k - 1u);
+            for (u64 i = t; i < iters; i += V2_STRIDE) {
                 u64 i0 = scatter_bits_1(i, axis), i1 = i0 | axis_bit;
                 CV2Complex a = v[i0], b = v[i1];
                 v[i0] = cscale(cadd(a, b), V2_INV_SQRT2);
                 v[i1] = cscale(csub(a, b), V2_INV_SQRT2);
             }
-            barrier();
-            if (t == 0) {
-                int px = fget(lds_px, axis), pz = fget(lds_pz, axis);
-                fset(lds_px, axis, pz); fset(lds_pz, axis, px);
+            v2_barrier();
+            if (IS_OWNER) {
+                int px = fget(st->px, axis), pz = fget(st->pz, axis);
+                fset(st->px, axis, pz); fset(st->pz, axis, px);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_ARRAY_S:
@@ -592,64 +648,64 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
             u32 axis = ins.axis_1;
             CV2Complex ph; ph.re = 0.0f;
             ph.im = (ins.opcode == OP_ARRAY_S_DAG) ? -1.0f : 1.0f;
-            coop_apply_phase(t, v, axis, ph);
-            if (t == 0) { int px = fget(lds_px, axis); fxor(lds_pz, axis, px); }
-            barrier();
+            coop_apply_phase(t, v, st->active_k, axis, ph);
+            if (IS_OWNER) { int px = fget(st->px, axis); fxor(st->pz, axis, px); }
+            v2_barrier();
             break;
         }
         case OP_ARRAY_ROT: {
             u32 axis = ins.axis_1;
-            if (axis < lds_active_k) {
-                int px = fget(lds_px, axis);
+            if (axis < st->active_k) {
+                int px = fget(st->px, axis);
                 double im = px ? -ins.weight_im : ins.weight_im;
                 CV2Complex phase; phase.re = (float)ins.weight_re; phase.im = (float)im;
-                coop_apply_phase(t, v, axis, phase);
-            } else barrier();
+                coop_apply_phase(t, v, st->active_k, axis, phase);
+            } else v2_barrier();
             break;
         }
         case OP_EXPAND_ROT: {
-            u32 half = 1u << lds_active_k;
-            int px = fget(lds_px, ins.axis_1);
+            u32 half = 1u << st->active_k;
+            int px = fget(st->px, ins.axis_1);
             double im = px ? -ins.weight_im : ins.weight_im;
             CV2Complex phase; phase.re = (float)ins.weight_re; phase.im = (float)im;
-            for (u32 i = t; i < half; i += 256u) v[i + half] = cmul(v[i], phase);
-            barrier();
-            if (t == 0) lds_active_k += 1;
-            barrier();
+            for (u32 i = t; i < half; i += V2_STRIDE) v[i + half] = cmul(v[i], phase);
+            v2_barrier();
+            if (IS_OWNER) st->active_k += 1;
+            v2_barrier();
             break;
         }
         case OP_ARRAY_U2: {
             u32 axis = ins.axis_1;
-            int in_state = (fget(lds_pz, axis) ? 2 : 0) | (fget(lds_px, axis) ? 1 : 0);
+            int in_state = (fget(st->pz, axis) ? 2 : 0) | (fget(st->px, axis) ? 1 : 0);
             const CV2Complex* mat = fused_u2[ins.a].matrices[in_state];
-            if (axis < lds_active_k) {
+            if (axis < st->active_k) {
                 u64 axis_bit = 1ull << axis;
-                u64 iters = 1ull << (lds_active_k - 1u);
-                for (u64 i = t; i < iters; i += 256u) {
+                u64 iters = 1ull << (st->active_k - 1u);
+                for (u64 i = t; i < iters; i += V2_STRIDE) {
                     u64 i0 = scatter_bits_1(i, axis), i1 = i0 | axis_bit;
                     CV2Complex a = v[i0], b = v[i1];
                     v[i0] = cadd(cmul(a, mat[0]), cmul(b, mat[1]));
                     v[i1] = cadd(cmul(a, mat[2]), cmul(b, mat[3]));
                 }
             }
-            barrier();
-            if (t == 0) {
+            v2_barrier();
+            if (IS_OWNER) {
                 u8 out = fused_u2[ins.a].out_states[in_state];
-                fset(lds_px, axis, (out & 1) != 0);
-                fset(lds_pz, axis, (out & 2) != 0);
+                fset(st->px, axis, (out & 1) != 0);
+                fset(st->pz, axis, (out & 2) != 0);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_ARRAY_U4: {
             u32 lo = ins.axis_1, hi = ins.axis_2;
-            int in_state = (fget(lds_pz, hi) << 3) | (fget(lds_px, hi) << 2)
-                         | (fget(lds_pz, lo) << 1) | fget(lds_px, lo);
+            int in_state = (fget(st->pz, hi) << 3) | (fget(st->px, hi) << 2)
+                         | (fget(st->pz, lo) << 1) | fget(st->px, lo);
             const CV2Complex (*mat)[4] = fused_u4[ins.a].entries[in_state].matrix;
-            if (hi < lds_active_k) {
+            if (hi < st->active_k) {
                 u64 lo_bit = 1ull << lo, hi_bit = 1ull << hi;
-                u64 iters = 1ull << (lds_active_k - 2u);
-                for (u64 i = t; i < iters; i += 256u) {
+                u64 iters = 1ull << (st->active_k - 2u);
+                for (u64 i = t; i < iters; i += V2_STRIDE) {
                     u64 base = scatter_bits_2(i, lo, hi);
                     CV2Complex v0 = v[base], v1 = v[base | lo_bit];
                     CV2Complex v2 = v[base | hi_bit], v3 = v[base | lo_bit | hi_bit];
@@ -663,174 +719,179 @@ static void execute_shot(CV2Complex* v, CV2Complex* scratch, u32 amp_capacity,
                                        cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
                 }
             }
-            barrier();
-            if (t == 0) {
+            v2_barrier();
+            if (IS_OWNER) {
                 u8 out = fused_u4[ins.a].entries[in_state].out_state;
-                fset(lds_px, lo, (out & 1) != 0); fset(lds_pz, lo, (out & 2) != 0);
-                fset(lds_px, hi, (out & 4) != 0); fset(lds_pz, hi, (out & 8) != 0);
+                fset(st->px, lo, (out & 1) != 0); fset(st->pz, lo, (out & 2) != 0);
+                fset(st->px, hi, (out & 4) != 0); fset(st->pz, hi, (out & 8) != 0);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_SWAP_MEAS_INTERFERE: {
             u32 from = ins.axis_1, to = ins.axis_2;
             if (from == to) {
                 // degenerate: identical to MEAS_ACTIVE_INTERFERE on `to`
-                u32 half = 1u << (lds_active_k - 1u);
-                int pz = fget(lds_pz, to);
+                u32 half = 1u << (st->active_k - 1u);
+                int pz = fget(st->pz, to);
                 double lp = 0.0, lm = 0.0;
-                for (u32 i = t; i < half; i += 256u) {
+                for (u32 i = t; i < half; i += V2_STRIDE) {
                     CV2Complex vi = v[i], vh = v[i + half];
                     lp += cnorm(cadd(vi, vh)); lm += cnorm(csub(vi, vh));
                 }
-                double pp, pm; coop_reduce2(t, lp, lm, &pp, &pm);
-                if (t == 0) {
-                    u8 bb = sample_branch(pp, pm, pp + pm); lds_branch = bb;
+                double pp, pm; V2_REDUCE2(t, lp, lm, &pp, &pm);
+                if (IS_OWNER) {
+                    u8 bb = sample_branch(st->rng, pp, pm, pp + pm); st->branch = bb;
                     u8 m_abs = bb ^ (u8)pz;
-                    if (ins.a < V2_MAX_MEAS) mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
+                    if (ins.a < V2_MAX_MEAS) mset(st->meas, ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
                 }
-                barrier();
-                for (u32 i = t; i < half; i += 256u) {
+                v2_barrier();
+                for (u32 i = t; i < half; i += V2_STRIDE) {
                     CV2Complex vi = v[i], vh = v[i + half];
-                    v[i] = cscale((lds_branch == 0) ? cadd(vi, vh) : csub(vi, vh), V2_INV_SQRT2);
+                    v[i] = cscale((st->branch == 0) ? cadd(vi, vh) : csub(vi, vh), V2_INV_SQRT2);
                 }
-                barrier();
-                if (t == 0) {
-                    lds_active_k -= 1;
-                    u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
-                    fset(lds_px, to, m_abs != 0); fset(lds_pz, to, 0);
+                v2_barrier();
+                if (IS_OWNER) {
+                    st->active_k -= 1;
+                    u8 m_abs = mget(st->meas, ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                    fset(st->px, to, m_abs != 0); fset(st->pz, to, 0);
                 }
-                barrier();
+                v2_barrier();
                 break;
             }
-            if (t == 0) { fswap(lds_px, from, to); fswap(lds_pz, from, to); }
-            barrier();
-            int pz = fget(lds_pz, to);
+            if (IS_OWNER) { fswap(st->px, from, to); fswap(st->pz, from, to); }
+            v2_barrier();
+            int pz = fget(st->pz, to);
             u64 half = 1ull << to, f_bit = 1ull << from;
             double lp = 0.0, lm = 0.0;
-            for (u64 idx = t; idx < half; idx += 256u) {
+            for (u64 idx = t; idx < half; idx += V2_STRIDE) {
                 u64 b_f = (idx >> from) & 1ull;
                 u64 base = (idx & ~f_bit) | (b_f << to);
                 CV2Complex vb = v[base], vf = v[base | f_bit];
                 lp += cnorm(cadd(vb, vf)); lm += cnorm(csub(vb, vf));
             }
-            double pp, pm; coop_reduce2(t, lp, lm, &pp, &pm);
-            if (t == 0) {
-                u8 bb = sample_branch(pp, pm, pp + pm); lds_branch = bb;
+            double pp, pm; V2_REDUCE2(t, lp, lm, &pp, &pm);
+            if (IS_OWNER) {
+                u8 bb = sample_branch(st->rng, pp, pm, pp + pm); st->branch = bb;
                 u8 m_abs = bb ^ (u8)pz;
-                if (ins.a < V2_MAX_MEAS) mset(ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
+                if (ins.a < V2_MAX_MEAS) mset(st->meas, ins.a, m_abs ^ (u8)((ins.flags & FLAG_SIGN) != 0));
             }
-            barrier();
+            v2_barrier();
             // fold into contiguous lower half (write to [idx], read strided)
-            for (u64 idx = t; idx < half; idx += 256u) {
+            for (u64 idx = t; idx < half; idx += V2_STRIDE) {
                 u64 b_f = (idx >> from) & 1ull;
                 u64 base = (idx & ~f_bit) | (b_f << to);
                 CV2Complex vb = v[base], vf = v[base | f_bit];
-                scratch[idx] = cscale((lds_branch == 0) ? cadd(vb, vf) : csub(vb, vf), V2_INV_SQRT2);
+                scratch[idx] = cscale((st->branch == 0) ? cadd(vb, vf) : csub(vb, vf), V2_INV_SQRT2);
             }
-            barrier();
-            for (u64 idx = t; idx < half; idx += 256u) v[idx] = scratch[idx];
-            barrier();
-            if (t == 0) {
-                lds_active_k -= 1;
-                u8 m_abs = mget(ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
-                fset(lds_px, to, m_abs != 0); fset(lds_pz, to, 0);
+            v2_barrier();
+            for (u64 idx = t; idx < half; idx += V2_STRIDE) v[idx] = scratch[idx];
+            v2_barrier();
+            if (IS_OWNER) {
+                st->active_k -= 1;
+                u8 m_abs = mget(st->meas, ins.a) ^ (u8)((ins.flags & FLAG_SIGN) != 0);
+                fset(st->px, to, m_abs != 0); fset(st->pz, to, 0);
             }
-            barrier();
+            v2_barrier();
             break;
         }
         case OP_APPLY_PAULI:
-            if (t == 0 && mget(ins.b) != 0) {
+            if (IS_OWNER && mget(st->meas, ins.b) != 0) {
                 const CV2Mask* m = &pauli_masks[ins.a];
                 for (u32 w = 0; w < CLIFFT_V2_PAULI_WORDS; ++w) {
-                    lds_px[w] ^= m->x[w]; lds_pz[w] ^= m->z[w];
+                    st->px[w] ^= m->x[w]; st->pz[w] ^= m->z[w];
                 }
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_NOISE:
-            if (t == 0 && ins.a == lds_next_noise) {
-                apply_noise_site(noise_sites, noise_channels, ins.a);
-                lds_next_noise = ins.a + 1u;
-                draw_next_noise(noise_hazards, num_noise_sites);
+            if (IS_OWNER && ins.a == st->next_noise) {
+                apply_noise_site(st, noise_sites, noise_channels, ins.a);
+                st->next_noise = ins.a + 1u;
+                draw_next_noise(st, noise_hazards, num_noise_sites);
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_NOISE_BLOCK:
-            if (t == 0) {
+            if (IS_OWNER) {
                 u32 end = ins.a + ins.b;
-                while (lds_next_noise >= ins.a && lds_next_noise < end) {
-                    u32 site_idx = lds_next_noise;
-                    apply_noise_site(noise_sites, noise_channels, site_idx);
-                    lds_next_noise = site_idx + 1u;
-                    draw_next_noise(noise_hazards, num_noise_sites);
+                while (st->next_noise >= ins.a && st->next_noise < end) {
+                    u32 site_idx = st->next_noise;
+                    apply_noise_site(st, noise_sites, noise_channels, site_idx);
+                    st->next_noise = site_idx + 1u;
+                    draw_next_noise(st, noise_hazards, num_noise_sites);
                 }
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_ARRAY_T:
         case OP_ARRAY_T_DAG: {
             // Diagonal T phase on an active axis. No-op if axis is dormant.
-            if (ins.axis_1 >= lds_active_k) { barrier(); break; }
-            int px = fget(lds_px, ins.axis_1);
+            if (ins.axis_1 >= st->active_k) { v2_barrier(); break; }
+            int px = fget(st->px, ins.axis_1);
             double imag = (ins.opcode == OP_ARRAY_T_DAG) ? -V2_INV_SQRT2 : V2_INV_SQRT2;
             if (px) imag = -imag;
             CV2Complex phase; phase.re = (float)V2_INV_SQRT2; phase.im = (float)imag;
-            coop_apply_phase(t, v, ins.axis_1, phase);
+            coop_apply_phase(t, v, st->active_k, ins.axis_1, phase);
             break;
         }
         case OP_OBSERVABLE:
-            if (t == 0) {
+            if (IS_OWNER) {
                 u32 s0 = observable_offsets[ins.a];
                 u32 e0 = observable_offsets[ins.a + 1];
                 u8 parity = 0;
-                for (u32 k = s0; k < e0; ++k) parity ^= mget(observable_targets[k]);
-                if (ins.b < CLIFFT_V2_MAX_OBS) lds_obs[ins.b] ^= parity;
+                for (u32 k = s0; k < e0; ++k) parity ^= mget(st->meas, observable_targets[k]);
+                if (ins.b < CLIFFT_V2_MAX_OBS) st->obs[ins.b] ^= parity;
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_READOUT_NOISE:
-            if (t == 0) {
+            if (IS_OWNER) {
                 CV2ReadoutNoise r = readout_noise[ins.a];
-                if (rng_uniform(lds_rng) < r.prob) mxor1(r.meas_idx);
+                if (rng_uniform(st->rng) < r.prob) mxor1(st->meas, r.meas_idx);
             }
-            barrier();
+            v2_barrier();
             break;
         case OP_POSTSELECT:
-            if (t == 0) {
+            if (IS_OWNER) {
                 u32 s0 = detector_offsets[ins.a];
                 u32 e0 = detector_offsets[ins.a + 1];
                 u8 parity = (ins.flags & FLAG_EXPECTED_ONE) ? 1u : 0u;
-                for (u32 k = s0; k < e0; ++k) parity ^= mget(detector_targets[k]);
-                if (parity != 0) lds_discarded = 1;
+                for (u32 k = s0; k < e0; ++k) parity ^= mget(st->meas, detector_targets[k]);
+                if (parity != 0) st->discarded = 1;
             }
-            barrier();
-            if (lds_discarded) return;
+            v2_barrier();
+            if (st->discarded) return;
             break;
         case OP_DETECTOR:
-            barrier();
+            v2_barrier();
             break;
         default:
             // Not yet implemented in V2 — mark discarded (loud, never silent).
-            if (t == 0) lds_discarded = 1;
-            barrier();
+            if (IS_OWNER) st->discarded = 1;
+            v2_barrier();
             break;
         }
     }
 
     // --- result aggregation (tid0 -> atomic add to block_counts) ---
-    barrier();
-    if (t == 0) {
-        if (!lds_discarded) {
+    v2_barrier();
+    if (IS_OWNER) {
+        if (!st->discarded) {
             __atomic_fetch_add(&block_counts->passed, 1UL, __ATOMIC_RELAXED);
             for (u32 i = 0; i < num_observables && i < CLIFFT_V2_MAX_OBS; ++i) {
-                if (lds_obs[i] != 0) {
+                if (st->obs[i] != 0) {
                     __atomic_fetch_add(&block_counts->observable_ones[i], 1UL, __ATOMIC_RELAXED);
                 }
             }
         }
     }
 }
+
+// The coop and global tiers use LDS + workgroup barriers; they are compiled in
+// the DEFAULT (non-register) build. The register tier (below) is a separate
+// -DV2_REGISTER compile of this same file producing clifft_v2_register.
+#ifndef V2_REGISTER
 
 // =============================================================================
 // COOP tier kernel (rank <= 10). One workgroup per shot; amplitudes in LDS.
@@ -856,7 +917,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
     u64 shot_id = shot_offset + (u64)bid();
     if (shot_id >= shots) return;
     // LDS globals decay to flat pointers; execute_shot addresses them generically.
-    execute_shot((CV2Complex*)lds_v, (CV2Complex*)lds_red_scratch, V2_MAX_AMP,
+    execute_shot((V2State*)&lds_state, (CV2Complex*)lds_v,
+                 (CV2Complex*)lds_red_scratch, V2_MAX_AMP,
                  shot_id, instrs, num_instrs, total_meas_slots, num_observables,
                  seed, block_counts, fused_u2, fused_u4,
                  observable_offsets, observable_targets,
@@ -890,7 +952,7 @@ void clifft_v2_global(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                       CV2Complex* global_v,
                       CV2Complex* global_scratch,
                       u64* work_counter) {
-    u32 t = tid();
+    u32 t = v2_tid();
     u32 slot = bid();
     u64 amp_capacity = 1ull << peak_rank;
     CV2Complex* v = global_v + (u64)slot * amp_capacity;
@@ -905,15 +967,62 @@ void clifft_v2_global(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
         if (t == 0) {
             lds_shot = __atomic_fetch_add(&work_counter[0], 1UL, __ATOMIC_RELAXED);
         }
-        barrier();
+        v2_barrier();
         u64 batch_shot = lds_shot;
         if (batch_shot >= shots) return;
-        execute_shot(v, scratch, (u32)amp_capacity,
+        execute_shot((V2State*)&lds_state, v, scratch, (u32)amp_capacity,
                      shot_offset + batch_shot, instrs, num_instrs,
                      total_meas_slots, num_observables, seed, block_counts,
                      fused_u2, fused_u4, observable_offsets, observable_targets,
                      noise_sites, noise_channels, noise_hazards, num_noise_sites,
                      pauli_masks, readout_noise, detector_offsets, detector_targets);
-        barrier();
+        v2_barrier();
     }
 }
+
+#else  // V2_REGISTER
+
+// =============================================================================
+// REGISTER tier kernel (rank <= kRegPackMax, ~4). ONE shot per thread — the
+// embarrassingly-parallel topology SVM uses for low rank. No LDS amplitudes, no
+// barriers, no cooperative reduction: the shared execute_shot body compiles to
+// straight scalar code (V2_STRIDE=1, IS_OWNER=1, V2_REDUCE2=identity). This is
+// the fix for the 15-28x low-rank catastrophe (256 threads were cooperating on
+// a 1-16 amplitude statevector). The per-thread statevector + V2State live in
+// private/registers. Same opcode arithmetic as coop -> byte-exact by
+// construction, and this thread=shot topology is exactly what the specializer
+// emits for the register tier.
+// =============================================================================
+#define V2_REG_MAX_AMP 16   // 1<<kRegPackMax, kRegPackMax=4 (matches SVM thread tier)
+__attribute__((amdgpu_kernel, visibility("default")))
+void clifft_v2_register(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
+                        u32 total_meas_slots, u32 num_observables,
+                        u64 seed, u64 shot_offset, u64 shots,
+                        CV2BlockCounts* block_counts,
+                        const CV2FusedU2Entry* fused_u2,
+                        const CV2FusedU4Entry* fused_u4,
+                        const u32* observable_offsets,
+                        const u32* observable_targets,
+                        const CV2NoiseSite* noise_sites,
+                        const CV2Channel* noise_channels,
+                        const double* noise_hazards,
+                        u32 num_noise_sites,
+                        const CV2Mask* pauli_masks,
+                        const CV2ReadoutNoise* readout_noise,
+                        const u32* detector_offsets,
+                        const u32* detector_targets) {
+    (void)peak_rank;
+    u64 shot_id = shot_offset + ((u64)bid() * 256ul + (u64)__builtin_amdgcn_workitem_id_x());
+    if (shot_id >= shots) return;
+    V2State st;
+    CV2Complex vloc[V2_REG_MAX_AMP];
+    CV2Complex sloc[V2_REG_MAX_AMP / 2];   // SWAP_MEAS fold scratch: half<=2^(rank-1)
+    execute_shot(&st, vloc, sloc,
+                 V2_REG_MAX_AMP, shot_id, instrs, num_instrs,
+                 total_meas_slots, num_observables, seed, block_counts,
+                 fused_u2, fused_u4, observable_offsets, observable_targets,
+                 noise_sites, noise_channels, noise_hazards, num_noise_sites,
+                 pauli_masks, readout_noise, detector_offsets, detector_targets);
+}
+
+#endif  // V2_REGISTER
