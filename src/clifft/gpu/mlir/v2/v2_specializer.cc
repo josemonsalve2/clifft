@@ -128,7 +128,8 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
       << "                      const CV2NoiseSite* noise_sites, const CV2Channel* noise_channels,\n"
       << "                      const double* noise_hazards, u32 num_noise_sites,\n"
       << "                      const CV2Mask* pauli_masks, const CV2ReadoutNoise* readout_noise,\n"
-      << "                      const u32* detector_offsets, const u32* detector_targets) {\n"
+      << "                      const u32* detector_offsets, const u32* detector_targets,\n"
+      << "                      u32 expected_obs_mask) {\n"
       << "    v2_shot_init(st, v, amp_capacity, shot_id, num_observables, seed, noise_hazards, num_noise_sites);\n";
 
     uint32_t k = 0;
@@ -138,7 +139,7 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
                                      std::to_string((int)flat.instrs[pc].opcode) + " at pc " +
                                      std::to_string(pc));
     }
-    o << "    v2_shot_aggregate(st, block_counts, num_observables);\n"
+    o << "    v2_shot_aggregate(st, block_counts, num_observables, expected_obs_mask);\n"
       << "}\n\n";
 
     // --- tier wrapper (same shape as the interpreter kernels) ----------------
@@ -150,7 +151,7 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
         "    const CV2FusedU2Entry* fused_u2, const CV2FusedU4Entry* fused_u4,\n"
         "    const u32* observable_offsets, const u32* observable_targets,\n"
         "    const CV2NoiseSite* noise_sites, const CV2Channel* noise_channels,\n"
-        "    const double* noise_hazards, u32 num_noise_sites,\n"
+        "    const double* noise_hazards, u32 num_noise_sites, u32 expected_obs_mask,\n"
         "    const CV2Mask* pauli_masks, const CV2ReadoutNoise* readout_noise,\n"
         "    const u32* detector_offsets, const u32* detector_targets";
 
@@ -158,7 +159,7 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
         "num_observables, seed, block_counts, fused_u2, fused_u4,\n"
         "                  observable_offsets, observable_targets, noise_sites, noise_channels,\n"
         "                  noise_hazards, num_noise_sites, pauli_masks, readout_noise,\n"
-        "                  detector_offsets, detector_targets";
+        "                  detector_offsets, detector_targets, expected_obs_mask";
 
     if (tier == SpecTier::Register) {
         o << "#define V2_REG_MAX_AMP 16\n"

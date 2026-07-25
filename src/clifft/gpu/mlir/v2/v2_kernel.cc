@@ -45,7 +45,7 @@ struct __attribute__((packed)) CoopKernArgs {
     uint64_t block_counts; uint64_t fused_u2; uint64_t fused_u4;
     uint64_t obs_off; uint64_t obs_tgt;
     uint64_t noise_sites; uint64_t noise_channels; uint64_t noise_hazards;
-    uint32_t num_noise_sites; uint32_t _pad_align;
+    uint32_t num_noise_sites; uint32_t expected_obs_mask;
     uint64_t pauli_masks;
     uint64_t readout_noise; uint64_t detector_offsets; uint64_t detector_targets;
 };
@@ -54,6 +54,18 @@ struct __attribute__((packed)) GlobalKernArgs {
     CoopKernArgs base;
     uint64_t global_v; uint64_t global_scratch; uint64_t work_counter;
 };
+
+// Pack expected_observables[] into a bitmask (bit i <=> observable i's noiseless
+// reference parity). The device XORs each observable against this before
+// counting, matching GPU-SVM (hip_sampler.hip) and the CPU sampler (svm.cc).
+// kMaxObs is 8, so a u32 is ample and the mask rides in the kernarg's former
+// pad slot (no ABI size change).
+uint32_t pack_expected_obs(const clifft::gpu::FlattenedProgram& flat) {
+    uint32_t m = 0;
+    for (size_t i = 0; i < flat.expected_observables.size() && i < clifft::gpu::kMaxObs; ++i)
+        if (flat.expected_observables[i]) m |= 1u << i;
+    return m;
+}
 
 // Correctness gate: dispatch the interpreter kernel and the specialized kernel
 // on the same small shot sample and compare passed_shots + observable_ones.
@@ -65,6 +77,7 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
                                      const std::string& spec_symbol) {
     using namespace clifft::gpu;
     FlattenedProgram flat = flatten_program(program);
+    const uint32_t expected_obs_mask = pack_expected_obs(flat);
     const bool is_reg = flat.peak_rank <= 4;
     const bool is_global = flat.peak_rank > 10;
     const char* interp_sym = is_reg ? "clifft_v2_register"
@@ -125,6 +138,7 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
         ka.fused_u2 = d_u2; ka.fused_u4 = d_u4; ka.obs_off = d_oo; ka.obs_tgt = d_ot;
         ka.noise_sites = d_ns; ka.noise_channels = d_nc; ka.noise_hazards = d_nh;
         ka.num_noise_sites = (uint32_t)flat.noise_sites.size();
+        ka.expected_obs_mask = expected_obs_mask;
         ka.pauli_masks = d_pm; ka.readout_noise = d_rn;
         ka.detector_offsets = d_do; ka.detector_targets = d_dt;
         uint32_t grid; size_t ka_bytes;
@@ -176,6 +190,7 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     if (hsaco_path.empty()) throw std::runtime_error("v2_sample: no coop .hsaco path");
 
     FlattenedProgram flat = flatten_program(program);
+    const uint32_t expected_obs_mask = pack_expected_obs(flat);
 
     auto& rt = hsa_runtime();
     if (!rt.init()) throw std::runtime_error("v2_sample: HSA init failed");
@@ -188,7 +203,10 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     // were cooperating on a 1-16 amplitude statevector).
     constexpr uint32_t kRegMaxRank = 4;
     constexpr uint32_t kCoopMaxRank = 10;
-    constexpr uint32_t kGlobalMaxRank = 19;
+    // Mirrors clifft::gpu::kGlobalMaxPeakRank (gpu_types.h). The global tier's
+    // HBM slice is sized from the circuit's own peak_rank, so the cap only
+    // decides which circuits are admitted, not how much memory is reserved.
+    constexpr uint32_t kGlobalMaxRank = clifft::gpu::kGlobalMaxPeakRank;
     constexpr uint32_t kNumXCDs = 8;
     enum Tier { REG, COOP, GLOBAL };
     const Tier tier = flat.peak_rank <= kRegMaxRank ? REG
@@ -304,14 +322,19 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     uint32_t global_grid_wgs = 0;
     if (use_global) {
         // Resident pool sized to a fixed HBM budget: each workgroup owns one
-        // amplitude slice (1<<peak_rank) + a half-size scratch. At rank 19 a
-        // slice is 2^19*8 = 4MB, so cap total amplitude memory ~8GB.
+        // amplitude slice (1<<peak_rank) + a half-size scratch, i.e. 12 bytes
+        // per amplitude. At rank 19 that is 6 MB/wg; at rank 26 it is 768 MB/wg.
+        // The 32 GB budget keeps the pool sane at both ends on a 288 GB MI355X.
         const uint64_t amp = 1ull << flat.peak_rank;
         const uint64_t bytes_per_wg = amp * sizeof(GpuComplex) + (amp / 2) * sizeof(GpuComplex);
-        const uint64_t budget = 8ull << 30;  // 8 GB
-        global_grid_wgs = static_cast<uint32_t>(budget / bytes_per_wg);
-        if (global_grid_wgs < kNumXCDs) global_grid_wgs = kNumXCDs;
-        if (global_grid_wgs > 2048) global_grid_wgs = 2048;
+        const uint64_t budget = 32ull << 30;  // 32 GB
+        uint64_t wgs = budget / bytes_per_wg;
+        if (wgs < 1) wgs = 1;               // rank 26+: at least one resident wg
+        if (wgs > 2048) wgs = 2048;
+        global_grid_wgs = static_cast<uint32_t>(wgs);
+        // Prefer a multiple of the XCD count when the budget allows it, so the
+        // resident pool spreads evenly; never inflate past the budget.
+        if (global_grid_wgs > kNumXCDs) global_grid_wgs -= global_grid_wgs % kNumXCDs;
         if (const char* e = getenv("V2_GLOBAL_WGS")) global_grid_wgs = std::atoi(e);
         d_global_v = reinterpret_cast<uint64_t>(
             rt.device_malloc((size_t)global_grid_wgs * amp * sizeof(GpuComplex)));
@@ -331,7 +354,7 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
         uint64_t block_counts; uint64_t fused_u2; uint64_t fused_u4;
         uint64_t obs_off; uint64_t obs_tgt;
         uint64_t noise_sites; uint64_t noise_channels; uint64_t noise_hazards;
-        uint32_t num_noise_sites; uint32_t _pad_align;
+        uint32_t num_noise_sites; uint32_t expected_obs_mask;
         uint64_t pauli_masks;
         uint64_t readout_noise; uint64_t detector_offsets; uint64_t detector_targets;
         uint64_t global_v; uint64_t global_scratch; uint64_t work_counter;
@@ -353,7 +376,7 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     kargs.noise_channels = d_noise_channels;
     kargs.noise_hazards = d_noise_hazards;
     kargs.num_noise_sites = static_cast<uint32_t>(flat.noise_sites.size());
-    kargs._pad_align = 0;
+    kargs.expected_obs_mask = expected_obs_mask;
     kargs.pauli_masks = d_pauli_masks;
     kargs.readout_noise = d_readout_noise;
     kargs.detector_offsets = d_det_off;

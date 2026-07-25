@@ -41,7 +41,8 @@ static void execute_shot(V2State* st, CV2Complex* v, CV2Complex* scratch,
                          const CV2Mask* pauli_masks,
                          const CV2ReadoutNoise* readout_noise,
                          const u32* detector_offsets,
-                         const u32* detector_targets) {
+                         const u32* detector_targets,
+                         u32 expected_obs_mask) {
     (void)total_meas_slots;
     v2_shot_init(st, v, amp_capacity, shot_id, num_observables, seed,
                  noise_hazards, num_noise_sites);
@@ -94,7 +95,7 @@ static void execute_shot(V2State* st, CV2Complex* v, CV2Complex* scratch,
         }
     }
 
-    v2_shot_aggregate(st, block_counts, num_observables);
+    v2_shot_aggregate(st, block_counts, num_observables, expected_obs_mask);
 }
 
 // The coop and global tiers use LDS + workgroup barriers; DEFAULT build.
@@ -115,7 +116,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                     const CV2NoiseSite* noise_sites,
                     const CV2Channel* noise_channels,
                     const double* noise_hazards,
-                    u32 num_noise_sites,
+                    u32 num_noise_sites, u32 expected_obs_mask,
                     const CV2Mask* pauli_masks,
                     const CV2ReadoutNoise* readout_noise,
                     const u32* detector_offsets,
@@ -129,7 +130,8 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                  seed, block_counts, fused_u2, fused_u4,
                  observable_offsets, observable_targets,
                  noise_sites, noise_channels, noise_hazards, num_noise_sites,
-                 pauli_masks, readout_noise, detector_offsets, detector_targets);
+                 pauli_masks, readout_noise, detector_offsets, detector_targets,
+                 expected_obs_mask);
 }
 
 // =============================================================================
@@ -148,7 +150,7 @@ void clifft_v2_global(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                       const CV2NoiseSite* noise_sites,
                       const CV2Channel* noise_channels,
                       const double* noise_hazards,
-                      u32 num_noise_sites,
+                      u32 num_noise_sites, u32 expected_obs_mask,
                       const CV2Mask* pauli_masks,
                       const CV2ReadoutNoise* readout_noise,
                       const u32* detector_offsets,
@@ -171,7 +173,8 @@ void clifft_v2_global(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                      total_meas_slots, num_observables, seed, block_counts,
                      fused_u2, fused_u4, observable_offsets, observable_targets,
                      noise_sites, noise_channels, noise_hazards, num_noise_sites,
-                     pauli_masks, readout_noise, detector_offsets, detector_targets);
+                     pauli_masks, readout_noise, detector_offsets, detector_targets,
+                 expected_obs_mask);
         v2_barrier();
     }
 }
@@ -194,7 +197,7 @@ void clifft_v2_register(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                         const CV2NoiseSite* noise_sites,
                         const CV2Channel* noise_channels,
                         const double* noise_hazards,
-                        u32 num_noise_sites,
+                        u32 num_noise_sites, u32 expected_obs_mask,
                         const CV2Mask* pauli_masks,
                         const CV2ReadoutNoise* readout_noise,
                         const u32* detector_offsets,
@@ -209,7 +212,8 @@ void clifft_v2_register(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
                  total_meas_slots, num_observables, seed, block_counts,
                  fused_u2, fused_u4, observable_offsets, observable_targets,
                  noise_sites, noise_channels, noise_hazards, num_noise_sites,
-                 pauli_masks, readout_noise, detector_offsets, detector_targets);
+                 pauli_masks, readout_noise, detector_offsets, detector_targets,
+                 expected_obs_mask);
 }
 
 #endif  // V2_REGISTER

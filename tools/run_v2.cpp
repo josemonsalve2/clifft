@@ -72,7 +72,11 @@ int main(int argc, char** argv) {
         if (getenv("V2_DUMP_OPCODES")) {
             std::cerr << "PEAK_RANK " << program.peak_rank
                       << " MEAS_SLOTS " << program.total_meas_slots
-                      << " NUM_OBS " << program.num_observables << "\n";
+                      << " NUM_OBS " << program.num_observables
+                      << " NUM_QUBITS " << program.num_qubits << "\n";
+            std::cerr << "EXPECTED_OBS(" << program.expected_observables.size() << "):";
+            for (auto e : program.expected_observables) std::cerr << " " << (int)e;
+            std::cerr << "\n";
             std::cerr << "OPCODES(" << program.bytecode.size() << "):";
             for (auto& in : program.bytecode)
                 std::cerr << " " << static_cast<int>(in.opcode);

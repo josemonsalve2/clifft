@@ -498,16 +498,28 @@ static inline void v2_shot_init(V2State* st, CV2Complex* v, u32 amp_capacity, u6
     }
     v2_barrier();
 }
-static inline void v2_shot_aggregate(V2State* st, CV2BlockCounts* block_counts, u32 num_observables) {
+// expected_obs_mask: bit i set <=> expected_observables[i] != 0. The raw obs
+// parity is XORed against the noiseless reference before counting, exactly as
+// GPU-SVM (hip_sampler.hip) and the CPU sampler (svm.cc) do. Omitting this made
+// V2 report the COMPLEMENT of SVM's observable_ones on every circuit whose
+// reference observable is 1 (e.g. surface_d11_t19: 674 vs 1326 of 2000 passed).
+static inline void v2_shot_aggregate(V2State* st, CV2BlockCounts* block_counts,
+                                     u32 num_observables, u32 expected_obs_mask) {
     u32 t = v2_tid();
     v2_barrier();
     if (IS_OWNER) {
         if (!st->discarded) {
             __atomic_fetch_add(&block_counts->passed, 1UL, __ATOMIC_RELAXED);
+            u8 any_logical = 0;
             for (u32 i = 0; i < num_observables && i < CLIFFT_V2_MAX_OBS; ++i) {
-                if (st->obs[i] != 0)
+                u8 val = st->obs[i] ^ (u8)((expected_obs_mask >> i) & 1u);
+                if (val != 0) {
                     __atomic_fetch_add(&block_counts->observable_ones[i], 1UL, __ATOMIC_RELAXED);
+                    any_logical = 1;
+                }
             }
+            if (any_logical)
+                __atomic_fetch_add(&block_counts->logical_errors, 1UL, __ATOMIC_RELAXED);
         }
     }
 }

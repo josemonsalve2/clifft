@@ -14,7 +14,9 @@
 
 #include <stdint.h>
 
-#define CLIFFT_V2_ABI_VERSION 2u
+// v3: added expected_obs_mask to the kernarg (occupies the former implicit pad
+// slot after num_noise_sites, so the struct size is unchanged).
+#define CLIFFT_V2_ABI_VERSION 3u
 
 // Frame width in 64-bit words (mirrors host kPauliWords). Config-driven per R4;
 // pinned to the host value at build time. If the host changes kPauliWords the
@@ -111,6 +113,7 @@ typedef struct {
     uint64_t noise_channels;      // const CV2Channel*
     uint64_t noise_hazards;       // const double*
     uint32_t num_noise_sites;
+    uint32_t expected_obs_mask;   // bit i = expected_observables[i] (see below)
     uint64_t pauli_masks;         // const CV2Mask*
     uint64_t readout_noise;       // const CV2ReadoutNoise*
     uint64_t detector_offsets;    // const uint32_t*
