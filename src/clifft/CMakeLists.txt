@@ -155,10 +155,13 @@ if(CLIFFT_ENABLE_MLIR_V2)
         target_link_libraries(clifft_core PRIVATE hsa-runtime64::hsa-runtime64)
         target_compile_definitions(clifft_core PUBLIC CLIFFT_ENABLE_GPU)
     endif()
-    # V2 host sources (kernel load/dispatch + host codegen driver + ABI checks).
+    # V2 host sources (kernel load/dispatch + host codegen driver + ABI checks
+    # + per-circuit specializer + runtime compile cache).
     target_sources(clifft_core PRIVATE
         gpu/mlir/v2/v2_kernel.cc
         gpu/mlir/v2/device_abi_checks.cc
+        gpu/mlir/v2/v2_specializer.cc
+        gpu/mlir/v2/v2_compile_cache.cc
     )
     target_compile_definitions(clifft_core PRIVATE CLIFFT_ENABLE_MLIR_V2)
 
@@ -192,6 +195,17 @@ if(CLIFFT_ENABLE_MLIR_V2)
     add_dependencies(clifft_core clifft_v2_register_hsaco)
     target_compile_definitions(clifft_core PRIVATE
         CLIFFT_V2_REGISTER_HSACO="${CMAKE_BINARY_DIR}/clifft_v2_register.hsaco")
+
+    # Runtime compile-cache config for the specializer: the SAME toolchain +
+    # ocml bitcode + arch + include dir that ClifftAmdgcn.cmake used at build
+    # time, so runtime-emitted kernels compile byte-identically. CLIFFT_LLVM_PREFIX
+    # / CLIFFT_ROCM_BITCODE_DIR are set by ClifftAmdgcn.cmake (included above).
+    target_compile_definitions(clifft_core PRIVATE
+        CLIFFT_V2_LLVM_PREFIX="${_clifft_llvm_hint}"
+        CLIFFT_V2_AMDGPU_ARCH="${CLIFFT_AMDGPU_ARCH}"
+        CLIFFT_V2_ROCM_BITCODE_DIR="${CLIFFT_ROCM_BITCODE_DIR}"
+        CLIFFT_V2_SRC_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/.."
+        CLIFFT_V2_CACHE_DIR="${CMAKE_BINARY_DIR}/v2_spec_cache")
 
     message(STATUS "CLIFFT_ENABLE_MLIR_V2=ON: HIP-free HSA path, arch=${CLIFFT_AMDGPU_ARCH}")
 endif()

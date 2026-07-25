@@ -5,9 +5,12 @@
 #include "clifft/gpu/runtime/hsa_kernel_dispatch.h"
 #include "clifft/gpu/device_program.h"   // flatten_program, FlattenedProgram
 #include "clifft/gpu/gpu_types.h"        // GpuInstr, BlockCounts, kMaxObs
+#include "clifft/gpu/mlir/v2/v2_specializer.h"
+#include "clifft/gpu/mlir/v2/v2_compile_cache.h"
 
 #include <cstring>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -80,6 +83,32 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
         load_path = CLIFFT_V2_REGISTER_HSACO;
         if (load_path.empty()) throw std::runtime_error("v2_sample: no register .hsaco path");
     }
+
+    // SPECIALIZER (opt-in via V2_SPECIALIZE): emit a per-circuit kernel that
+    // straight-lines the bytecode with constant operands, compile+cache it at
+    // runtime, and dispatch that instead of the runtime interpreter. Byte-exact
+    // by construction (calls the same v2_op_*). Register tier is the first slice;
+    // other tiers/opcodes fall back to the interpreter. Compile time is never on
+    // the sampling path (cached; warm before benchmarking).
+    std::string spec_sym;
+    if (getenv("V2_SPECIALIZE") && eff_tier == REG && specializer_toolchain_available()) {
+        try {
+            SpecTier st = SpecTier::Register;
+            spec_sym = "clifft_v2_spec";
+            std::string csrc = emit_specialized_kernel(flat, spec_sym, st);
+            // Cache key: peak_rank + instr count + a cheap content hash of the ops.
+            std::string key = "reg_r" + std::to_string(flat.peak_rank) + "_n" +
+                              std::to_string(flat.instrs.size());
+            std::string spath = compile_specialized(csrc, key);
+            load_path = spath;
+            sym = spec_sym.c_str();
+        } catch (const std::exception& e) {
+            spec_sym.clear();  // fall back to the interpreter kernel
+            if (getenv("V2_SPECIALIZE_VERBOSE"))
+                std::fprintf(stderr, "[v2-spec] fallback: %s\n", e.what());
+        }
+    }
+
     HsaLoadedKernel kernel = hsa_load_kernel(load_path, sym, 0);
     if (!kernel.valid) throw std::runtime_error(std::string("v2_sample: kernel load failed: ") + sym);
 
