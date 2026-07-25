@@ -83,12 +83,15 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
     uint64_t d_do = upload(rt, flat.detector_offsets);
     uint64_t d_dt = upload(rt, flat.detector_targets);
 
-    const uint32_t val_shots = 4000;  // enough to surface a 1-in-thousands flip
-    const uint64_t val_seed = 12345;
+    const uint32_t val_shots = 5000;  // enough to surface a 1-in-thousands flip
     const uint32_t block = 256;
+    // Divergence is seed-dependent (a borderline shot flips on SOME seeds), so
+    // validate across several seeds — one seed can pass while the circuit still
+    // diverges on others.
+    const uint64_t val_seeds[] = {1, 7, 42, 99, 123, 2718};
 
     auto run_one = [&](const std::string& path, const std::string& sym,
-                       BlockCounts* out) -> bool {
+                       uint64_t val_seed, BlockCounts* out) -> bool {
         HsaLoadedKernel k = hsa_load_kernel(path, sym, 0);
         if (!k.valid) return false;
         BlockCounts* d_counts = static_cast<BlockCounts*>(rt.device_malloc(sizeof(BlockCounts)));
@@ -113,20 +116,22 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
         return true;
     };
 
-    BlockCounts hi{}, hs{};
-    bool ok = run_one(interp_path, interp_sym, &hi) &&
-              run_one(spec_hsaco, spec_symbol, &hs);
+    bool match = true;
+    for (uint64_t vs : val_seeds) {
+        BlockCounts hi{}, hs{};
+        if (!run_one(interp_path, interp_sym, vs, &hi) ||
+            !run_one(spec_hsaco, spec_symbol, vs, &hs)) { match = false; break; }
+        if (hi.passed != hs.passed) { match = false; break; }
+        for (uint32_t i = 0; i < flat.num_observables && i < kMaxObs; ++i)
+            if (hi.observable_ones[i] != hs.observable_ones[i]) { match = false; break; }
+        if (!match) break;
+    }
 
     auto free_if = [&](uint64_t p) { if (p) rt.device_free(reinterpret_cast<void*>(p)); };
     free_if(d_instrs); free_if(d_u2); free_if(d_u4); free_if(d_oo); free_if(d_ot);
     free_if(d_ns); free_if(d_nc); free_if(d_nh); free_if(d_pm); free_if(d_rn);
     free_if(d_do); free_if(d_dt);
-    if (!ok) return false;
-
-    if (hi.passed != hs.passed) return false;
-    for (uint32_t i = 0; i < flat.num_observables && i < kMaxObs; ++i)
-        if (hi.observable_ones[i] != hs.observable_ones[i]) return false;
-    return true;
+    return match;
 }
 
 }  // namespace
@@ -206,17 +211,32 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
                               "_n" + std::to_string(flat.instrs.size());
             std::string spath = compile_specialized(csrc, key);
 
-            // --- correctness gate (cached per circuit key) ---
-            static std::map<std::string, bool> s_spec_ok;   // key -> passed validation
-            auto it = s_spec_ok.find(key);
+            // --- correctness gate (cached in-process AND on disk) ---
+            // The verdict is written to "<spath>.gate" so it is computed ONCE
+            // ever (not per process) and NEVER re-run during a profiled sample
+            // dispatch — the gate's own validation dispatches would otherwise
+            // pollute rocprofv3 kernel traces. Disk cache also survives the
+            // fresh process rocprofv3 spawns per invocation.
+            static std::map<std::string, bool> s_spec_ok;
             bool validated;
+            auto it = s_spec_ok.find(key);
             if (it != s_spec_ok.end()) {
                 validated = it->second;
             } else {
-                validated = specialized_matches_interpreter(program, spath, spec_sym);
+                std::string gate_path = spath + ".gate";
+                std::FILE* gf = std::fopen(gate_path.c_str(), "r");
+                if (gf) {                       // disk cache hit
+                    int v = 0; if (std::fscanf(gf, "%d", &v) != 1) v = 0; std::fclose(gf);
+                    validated = (v == 1);
+                } else {                        // compute once, persist
+                    validated = specialized_matches_interpreter(program, spath, spec_sym);
+                    if (std::FILE* wf = std::fopen(gate_path.c_str(), "w")) {
+                        std::fprintf(wf, "%d\n", validated ? 1 : 0); std::fclose(wf);
+                    }
+                    if (!validated && getenv("V2_SPECIALIZE_VERBOSE"))
+                        std::fprintf(stderr, "[v2-spec] %s FAILED correctness gate -> interpreter\n", key.c_str());
+                }
                 s_spec_ok[key] = validated;
-                if (!validated && getenv("V2_SPECIALIZE_VERBOSE"))
-                    std::fprintf(stderr, "[v2-spec] %s FAILED correctness gate -> interpreter\n", key.c_str());
             }
             if (validated) { load_path = spath; sym = spec_sym.c_str(); }
             else spec_sym.clear();
