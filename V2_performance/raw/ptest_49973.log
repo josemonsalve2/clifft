@@ -1,0 +1,26 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 49973
+--------------------------------------------
+=== plain run_v2 frame_h 20k (V2_NO_CPU) ===
+  "v2_kernel_seconds": 0.0006758,
+
+real	0m0.418s
+user	0m0.027s
+sys	0m0.047s
+=== kernel-trace pass ===
+
+real	0m0.814s
+user	0m0.050s
+sys	0m0.075s
+=== hsa-core-trace pass ===
+
+real	0m0.480s
+user	0m0.046s
+sys	0m0.068s
+=== 1 counter pass ===
+
+real	0m1.027s
+user	0m0.282s
+sys	0m0.698s
+DONE

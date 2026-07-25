@@ -78,13 +78,16 @@ int main(int argc, char** argv) {
                 std::cerr << " " << static_cast<int>(in.opcode);
             std::cerr << "\n";
         }
-        // CPU reference (f64 gold).
-        auto cpu = clifft::sample_survivors(program, shots, seed, false);
+        // CPU reference (f64 gold) — skip with --no-cpu for GPU-only profiling.
+        const bool skip_cpu = getenv("V2_NO_CPU") != nullptr;
+        clifft::SurvivorResult cpu;
+        if (!skip_cpu) cpu = clifft::sample_survivors(program, shots, seed, false);
         // V2 GPU (HIP-free HSA).
         double ks = 0.0;
         auto v2 = clifft::gpu::v2::v2_sample(program, shots, seed, &ks, hsaco);
 
-        bool match = (cpu.passed_shots == v2.passed_shots) &&
+        bool match = skip_cpu ? true :
+                     (cpu.passed_shots == v2.passed_shots) &&
                      (cpu.observable_ones == v2.observable_ones);
         std::cout << "{\n"
                   << "  \"circuit\": \"" << circuit << "\",\n"

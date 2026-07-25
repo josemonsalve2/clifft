@@ -1,0 +1,75 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 49963
+--------------------------------------------
+ROCM_PATH=/opt/rocm-7.2.3
+=== profiler binaries ===
+rocprofv3: /opt/rocm-7.2.3/bin/rocprofv3
+rocprof: /opt/rocm-7.2.3/bin/rocprof
+rocprof-compute: /opt/rocm-7.2.3/bin/rocprof-compute
+rocprofiler-compute: MISSING
+omniperf: MISSING
+rocprofv2: /opt/rocm-7.2.3/bin/rocprofv2
+llvm-objdump: MISSING
+readelf: /usr/bin/readelf
+roofline: MISSING
+=== rocprofv3 --help (trace options) ===
+  -i INPUT, --input INPUT               Input file for run configuration (JSON or YAML) or counter collection (TXT)
+  -E EXTRA_COUNTERS, --extra-counters EXTRA_COUNTERS
+                                        Path to YAML file containing extra counter definitions
+  -r [BOOL], --runtime-trace [BOOL]     Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.
+  -s [BOOL], --sys-trace [BOOL]         Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.
+  --kernel-trace [BOOL]                 For collecting Kernel Dispatch Traces
+  --memory-copy-trace [BOOL]            For collecting Memory Copy Traces. This was part of HIP and HSA traces in previous rocprof versions but is now a separate option
+  --hsa-trace [BOOL]                    For collecting --hsa-core-trace, --hsa-amd-trace,--hsa-image-trace and --hsa-finalizer-trace. This option only enables the tracing of the HSA API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc
+  --hsa-core-trace [BOOL]               For collecting HSA API Traces (core API), e.g. HSA functions prefixed with only 'hsa_' (i.e. hsa_init).
+  --hsa-amd-trace [BOOL]                For collecting HSA API Traces (AMD-extension API), e.g. HSA function prefixed with 'hsa_amd_' (i.e. hsa_amd_coherency_get_type).
+  --hsa-image-trace [BOOL]              For collecting HSA API Traces (Image-extension API), e.g. HSA functions prefixed with only 'hsa_ext_image_' (i.e. hsa_ext_image_get_capability).
+  --hsa-finalizer-trace [BOOL]          For collecting HSA API Traces (Finalizer-extension API), e.g. HSA functions prefixed with only 'hsa_ext_program_' (i.e. hsa_ext_program_create).
+Counter collection options:
+  --pmc [PMC ...]                       Specify Performance Monitoring Counters to collect(comma OR space separated in case of more than 1 counters). Note: job will fail if entire set of counters cannot be collected in single pass
+  --stats [BOOL]                        For collecting statistics of enabled tracing types. Must be combined with one or more tracing options. No default kernel stats unlike previous rocprof versions
+                                        Output a summary for each set of domains matching the regular expression, e.g. 'KERNEL_DISPATCH|MEMORY_COPY' will generate a summary from all the tracing data in the KERNEL_DISPATCH and MEMORY_COPY domains; '*._API' will generate a summary from all the tracing data in the HIP_API, HSA_API, and MARKER_API domains
+                                        Include the kernels matching this filter from counter-collection and thread-trace data (non-matching kernels will be excluded)
+                                        Exclude the kernels matching this filter from counter-collection and thread-trace data (applied after --kernel-include-regex option)
+  -L [BOOL], --list-avail [BOOL]        List available PC sampling configurations and metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters
+  --group-by-queue [BOOL]               For displaying the HIP streams that kernels and memory copy operations are submitted to rather than HSA queues.
+=== TEST 1: rocprofv3 --kernel-trace through HSA dispatch (qv10) ===
+exit=0
+total 28
+drwxr-xr-x  3 jmonsalv amd   4096 Jul 25 02:21 .
+drwxrwxrwt 15 root     root 20480 Jul 25 02:21 ..
+drwxr-xr-x  2 jmonsalv amd   4096 Jul 25 02:21 smci350-rck-g03-d13-21
+--- err ---
+E20260725 02:21:41.812176 125424565026496 output_stream.cpp:111] Opened result file: /tmp/rp_kt/smci350-rck-g03-d13-21/604587_kernel_trace.csv
+E20260725 02:21:41.817122 125424565026496 output_stream.cpp:111] Opened result file: /tmp/rp_kt/smci350-rck-g03-d13-21/604587_agent_info.csv
+E20260725 02:21:41.817447 125424565026496 output_stream.cpp:111] Opened result file: /tmp/rp_kt/smci350-rck-g03-d13-21/604587_domain_stats.csv
+W20260725 02:21:41.857238 125424565026496 simple_timer.cpp:55] [rocprofv3] output generation ::     0.675156 sec
+W20260725 02:21:41.857282 125424565026496 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.675222 sec
+=== TEST 2: rocprofv3 hsa trace (dispatch overhead) ===
+exit=0
+total 28
+drwxr-xr-x  3 jmonsalv amd   4096 Jul 25 02:21 .
+drwxrwxrwt 16 root     root 20480 Jul 25 02:21 ..
+drwxr-xr-x  2 jmonsalv amd   4096 Jul 25 02:21 smci350-rck-g03-d13-21
+E20260725 02:21:58.183799 132496027221696 output_stream.cpp:111] Opened result file: /tmp/rp_hsa/smci350-rck-g03-d13-21/606107_agent_info.csv
+W20260725 02:21:58.222371 132496027221696 simple_timer.cpp:55] [rocprofv3] output generation ::     0.402949 sec
+W20260725 02:21:58.222409 132496027221696 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.403171 sec
+=== TEST 3: hw counters through HSA ===
+exit=0
+/tmp/rp_pmc/pmc_1/smci350-rck-g03-d13-21/606124_agent_info.csv
+/tmp/rp_pmc/pmc_1/smci350-rck-g03-d13-21/606124_counter_collection.csv
+W20260725 02:22:14.151796 129922576690880 simple_timer.cpp:55] [rocprofv3] 'build-v2-nohip/run_v2 --circuit tests/fixtures/qv10.stim --shots 20000 --seed 1' ::    15.679985 sec
+E20260725 02:22:14.828068 129922576690880 output_stream.cpp:111] Opened result file: /tmp/rp_pmc/pmc_1/smci350-rck-g03-d13-21/606124_counter_collection.csv
+E20260725 02:22:14.831959 129922576690880 output_stream.cpp:111] Opened result file: /tmp/rp_pmc/pmc_1/smci350-rck-g03-d13-21/606124_agent_info.csv
+W20260725 02:22:14.873170 129922576690880 simple_timer.cpp:55] [rocprofv3] output generation ::     0.630772 sec
+W20260725 02:22:14.873207 129922576690880 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.630814 sec
+=== TEST 4: rocprof-compute availability ===
+No module named 'pandas'
+[ERROR] The 'astunparse==1.6.2' package was not found in the current execution environment.
+[ERROR] The 'colorlover' package was not found in the current execution environment.
+=== objdump on hsaco ===
+/var/spool/slurmd/job49963/slurm_script: line 32: llvm-objdump=/opt/rocm-7.2.3/llvm/bin/llvm-objdump: No such file or directory
+build-v2-nohip/clifft_v2_coop.hsaco
+build-v2-nohip/clifft_v2_probe.hsaco
+DONE

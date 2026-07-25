@@ -1,0 +1,72 @@
+{
+  "circuit": "frame_h",
+  "v2": {
+    "kernel_name": "clifft_v2_coop",
+    "LDS_Block_Size": "25088",
+    "Scratch_Size": "416",
+    "VGPR_Count": "64",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "112",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "5120000",
+    "n_dispatches": 1,
+    "total_kernel_ns": 521057,
+    "per_dispatch_ns_median": 521057,
+    "domain_total_ns": 521057,
+    "domain_calls": 1,
+    "hsa_total_ns": 12186238,
+    "counters": {
+      "SQ_INSTS_LDS": 900000.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 22789925.0,
+      "SQ_INSTS_VALU": 26180000.0,
+      "SQ_WAVES": 80000.0,
+      "TCC_HIT_sum": 22628632.0,
+      "TCC_MISS_sum": 19640997.0,
+      "GRBM_GUI_ACTIVE": 11328774.0,
+      "SQ_BUSY_CYCLES": 27626457.0,
+      "SQ_WAIT_INST_LDS": 265272.0,
+      "SQ_WAVE_CYCLES": 795743071.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (no GEMM, butterfly compute as designed)",
+      "LDS_insts/wave=11",
+      "L2_hit%=53.5"
+    ]
+  },
+  "svm": {
+    "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+    "LDS_Block_Size": "0",
+    "Scratch_Size": "4480",
+    "VGPR_Count": "60",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "112",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "20224",
+    "n_dispatches": 1,
+    "total_kernel_ns": 18439,
+    "per_dispatch_ns_median": 18439,
+    "domain_total_ns": 43597,
+    "domain_calls": 8,
+    "hsa_total_ns": 11410981,
+    "counters": {
+      "SQ_INSTS_LDS": 25280.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 96271.0,
+      "SQ_INSTS_VALU": 96349.0,
+      "SQ_WAVES": 316.0,
+      "TCC_HIT_sum": 75101.0,
+      "TCC_MISS_sum": 37457.0,
+      "GRBM_GUI_ACTIVE": 5060357.0,
+      "SQ_BUSY_CYCLES": 983670.0,
+      "SQ_WAIT_INST_LDS": 69.0,
+      "SQ_WAVE_CYCLES": 2359214.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (no GEMM, butterfly compute as designed)",
+      "LDS_insts/wave=80",
+      "L2_hit%=66.7"
+    ]
+  },
+  "v2_vs_svm_kernel_ratio": 28.258
+}

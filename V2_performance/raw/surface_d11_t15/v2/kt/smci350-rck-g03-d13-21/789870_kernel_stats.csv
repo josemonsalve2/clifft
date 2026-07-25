@@ -1,0 +1,2 @@
+"Name","Calls","TotalDurationNs","AverageNs","Percentage","MinNs","MaxNs","StdDev"
+"clifft_v2_global",1,70186576,70186576.000000,100.00,70186576,70186576,0.00000000e+00
