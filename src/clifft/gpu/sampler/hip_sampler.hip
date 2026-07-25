@@ -1939,9 +1939,15 @@ __global__ void sample_kernel_global_coop(GpuProgram program, uint64_t shot_offs
                                           GpuComplex* global_scratch, uint64_t* work_counter,
                                           BlockCounts* counts) {
     uint32_t slot = blockIdx.x;
-    GpuComplex* v = global_v + static_cast<size_t>(slot) * kGlobalMaxAmplitudes;
+    // Per-slot stride is derived from THIS circuit's peak_rank, not from
+    // kGlobalMaxAmplitudes. The max-derived stride made every allocation scale
+    // with the cap (at kGlobalMaxPeakRank=26 that would be 512 MB per resident
+    // workgroup regardless of circuit size). Must stay in lockstep with the
+    // host-side v_count/scratch_count below.
+    const size_t slot_amps = static_cast<size_t>(1) << program.peak_rank;
+    GpuComplex* v = global_v + static_cast<size_t>(slot) * slot_amps;
     GpuComplex* scratch =
-        global_scratch + static_cast<size_t>(slot) * (kGlobalMaxAmplitudes / 2);
+        global_scratch + static_cast<size_t>(slot) * (slot_amps / 2);
 
     __shared__ uint8_t meas[kMaxMeas];
     __shared__ uint8_t obs[kMaxObs];
@@ -2069,6 +2075,19 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
         if (max_batch_shots < global_worker_blocks) {
             global_worker_blocks = static_cast<uint32_t>(max_batch_shots);
         }
+        // HBM budget cap. Each resident block owns one amplitude slice
+        // (1<<peak_rank) plus a half-size scratch, i.e. 12 bytes per amplitude.
+        // Without this, high-rank circuits (peak_rank >= 22) would ask for
+        // hundreds of GB once kGlobalMaxPeakRank was raised past 19.
+        {
+            const uint64_t bytes_per_block =
+                ((static_cast<uint64_t>(1) << flat.peak_rank) * 3 / 2) * sizeof(GpuComplex);
+            const uint64_t hbm_budget = 32ull << 30;  // 32 GB
+            uint64_t max_by_budget = hbm_budget / bytes_per_block;
+            if (max_by_budget < 1) max_by_budget = 1;
+            if (global_worker_blocks > max_by_budget)
+                global_worker_blocks = static_cast<uint32_t>(max_by_budget);
+        }
     }
 
     auto wall_setup = std::chrono::steady_clock::now();
@@ -2157,9 +2176,11 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
             (options.mlir && flat.peak_rank > kSharedMaxPeakRank &&
              flat.peak_rank <= kGlobalMaxPeakRank);
         if (need_global_buffers) {
-            size_t v_count = static_cast<size_t>(global_worker_blocks) * kGlobalMaxAmplitudes;
+            // Rank-derived per-slot stride (see sample_kernel_global_coop).
+            const size_t slot_amps = static_cast<size_t>(1) << flat.peak_rank;
+            size_t v_count = static_cast<size_t>(global_worker_blocks) * slot_amps;
             size_t scratch_count =
-                static_cast<size_t>(global_worker_blocks) * (kGlobalMaxAmplitudes / 2);
+                static_cast<size_t>(global_worker_blocks) * (slot_amps / 2);
             if (buffers.hsa_allocated) {
                 auto& rt = hsa_runtime();
                 buffers.global_v = static_cast<GpuComplex*>(

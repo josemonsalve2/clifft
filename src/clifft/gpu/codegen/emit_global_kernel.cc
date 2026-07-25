@@ -76,12 +76,17 @@ std::string generate_compiled_kernel_global(const FlattenedProgram& flat) {
         << ") {\n";
 
     // Each block has a dedicated HBM slot for its amplitude array
+    // Per-slot stride is derived from THIS circuit's peak_rank (matching the
+    // host allocation in hip_sampler.hip), NOT from kGlobalMaxPeakRank — a
+    // max-derived stride would scale every allocation with the cap.
+    const uint64_t slot_amps = 1ull << flat.peak_rank;
     out << "    uint32_t slot = BIDX;\n"
-        << "    GpuComplex* v = global_v + (size_t)slot * " << (1u << kGlobalMaxPeakRank) << "u;\n";
+        << "    GpuComplex* v = global_v + (size_t)slot * " << slot_amps << "ull;\n";
     if (uf.swap_meas_interfere) {
-        // scratch_v for global kernel: use global_scratch per-slot (same stride as v)
+        // scratch_v: the host allocates scratch at HALF the per-slot amplitude
+        // count, so the scratch stride is half the v stride.
         out << "    GpuComplex* scratch_v = global_scratch + (size_t)slot * "
-            << (1u << kGlobalMaxPeakRank) << "u;\n";
+            << (slot_amps / 2) << "ull;\n";
     } else {
         out << "    GpuComplex* scratch_v = nullptr; // unused\n";
     }

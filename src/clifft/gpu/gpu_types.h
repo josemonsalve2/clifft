@@ -9,7 +9,12 @@ constexpr uint32_t kThreadMaxPeakRank = 4;
 constexpr uint32_t kThreadMaxAmplitudes = 1u << kThreadMaxPeakRank;
 constexpr uint32_t kSharedMaxPeakRank = 10;
 constexpr uint32_t kSharedMaxAmplitudes = 1u << kSharedMaxPeakRank;
-constexpr uint32_t kGlobalMaxPeakRank = 19;
+// Global tier cap. The per-workgroup HBM amplitude slice is sized from the
+// CIRCUIT's peak_rank (not from this max), so raising the cap costs nothing
+// for low-rank circuits; it only admits larger ones. 2^26 amplitudes = 512 MB
+// of f32 complex per resident workgroup, which the MI355X's 288 GB HBM can
+// host with a useful workgroup pool. Keep <= 30 so 1u<<rank stays in u32.
+constexpr uint32_t kGlobalMaxPeakRank = 26;
 constexpr uint32_t kGlobalMaxAmplitudes = 1u << kGlobalMaxPeakRank;
 constexpr uint32_t kMaxPeakRank = kGlobalMaxPeakRank;
 constexpr uint32_t kMaxMeas = 4096;

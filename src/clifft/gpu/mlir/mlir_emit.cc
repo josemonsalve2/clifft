@@ -3039,9 +3039,12 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     out << "  %f_one = llvm.mlir.constant(1.0 : f32) : f32\n";
     out << "  %f_zero = llvm.mlir.constant(0.0 : f32) : f32\n";
 
-    // kGlobalMaxPeakRank stride for HBM slot addressing
+    // Per-slot HBM stride, derived from THIS circuit's peak_rank (matching the
+    // host allocation in hip_sampler.hip). Previously kGlobalMaxPeakRank-derived,
+    // which tied every allocation to the cap.
     char stridebuf[32];
-    snprintf(stridebuf, sizeof(stridebuf), "%u", 1u << kGlobalMaxPeakRank);
+    snprintf(stridebuf, sizeof(stridebuf), "%llu",
+             (unsigned long long)(1ull << flat.peak_rank));
     out << "  %hbm_stride = llvm.mlir.constant(" << stridebuf << " : i64) : i64\n";
 
     // Get TIDX, BIDX
@@ -3061,7 +3064,7 @@ std::string emit_mlir_text_global(const FlattenedProgram& flat) {
     // kernel (hip_sampler.hip). Using the full stride here walked past the
     // half-sized allocation for every bidx>=1 -> GPU memory access fault at
     // N>=2 shots.
-    std::string scratch_stride = emit_const_i64(out, (uint64_t)(1u << kGlobalMaxPeakRank) / 2);
+    std::string scratch_stride = emit_const_i64(out, (1ull << flat.peak_rank) / 2);
     std::string scr_off = fresh_ssa();
     out << "  " << scr_off << " = llvm.mul %bidx, " << scratch_stride << " : i64\n";
     out << "  %scratch_ptr = llvm.getelementptr inbounds %global_scratch[" << scr_off
