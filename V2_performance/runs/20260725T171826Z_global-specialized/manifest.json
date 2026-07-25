@@ -1,0 +1,8 @@
+{
+  "run_id": "20260725T171826Z_global-specialized",
+  "label": "global-specialized",
+  "commit": "5d10409",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 8
+}
