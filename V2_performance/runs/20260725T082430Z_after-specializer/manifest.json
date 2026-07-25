@@ -1,0 +1,8 @@
+{
+  "run_id": "20260725T082430Z_after-specializer",
+  "label": "after-specializer",
+  "commit": "60d5728",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 8
+}
