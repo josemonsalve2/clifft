@@ -39,10 +39,21 @@ enum { FLAG_SIGN = 1u << 0, FLAG_IDENTITY = 1u << 2, FLAG_EXPECTED_ONE = 1u << 3
 // ----- LDS shared state (per workgroup / per shot) ---------------------------
 // Sized for coop tier: rank <= 10 -> 1024 amplitudes. extern = uninitialized
 // (llc rejects an initializer on addrspace(3)).
-#define V2_MAX_AMP  1024
-#define V2_MAX_MEAS 4096
+//
+// P1 LDS reclamation (2026-07-25): the coop kernel was LDS-occupancy-bound at
+// 25 KB -> 2 wg/CU. Shrinking the reduction buffers is free + byte-exact:
+//   - lds_red0/1: coop_reduce2 only writes warps 0..3 and reads t<4 -> [4] is
+//     the true size (was [256] = 4 KB wasted). Sized to 8 (>=4, aligned).
+//   - lds_red_scratch: only OP_SWAP_MEAS_INTERFERE uses it, and at coop rank<=10
+//     the fold half = 1<<to <= 1<<9 = 512. [512] is exact (was [1024] = 4 KB).
+// This is the SAME per-circuit sizing the MLIR specializer will bake in at
+// compile time; here it is a conservative static bound for the runtime tier.
+#define V2_MAX_AMP     1024
+#define V2_MAX_MEAS    4096
+#define V2_SCRATCH_AMP 512    // coop SWAP_MEAS fold half <= 2^(10-1)
+#define V2_RED_WARPS   8      // coop_reduce2 touches only warps 0..3
 extern __attribute__((address_space(3))) CV2Complex lds_v[V2_MAX_AMP];
-extern __attribute__((address_space(3))) CV2Complex lds_red_scratch[V2_MAX_AMP];
+extern __attribute__((address_space(3))) CV2Complex lds_red_scratch[V2_SCRATCH_AMP];
 extern __attribute__((address_space(3))) u8   lds_meas[V2_MAX_MEAS];
 extern __attribute__((address_space(3))) u8   lds_obs[CLIFFT_V2_MAX_OBS];
 extern __attribute__((address_space(3))) u64  lds_px[CLIFFT_V2_PAULI_WORDS];
@@ -52,8 +63,8 @@ extern __attribute__((address_space(3))) u8   lds_discarded;
 extern __attribute__((address_space(3))) u64  lds_rng[4];   // tid0-owned RNG state
 extern __attribute__((address_space(3))) u8   lds_branch;   // sampled branch broadcast
 extern __attribute__((address_space(3))) u32  lds_next_noise;// next scheduled noise site
-extern __attribute__((address_space(3))) double lds_red0[256];
-extern __attribute__((address_space(3))) double lds_red1[256];
+extern __attribute__((address_space(3))) double lds_red0[V2_RED_WARPS];
+extern __attribute__((address_space(3))) double lds_red1[V2_RED_WARPS];
 extern __attribute__((address_space(3))) u32 lds_xcd;        // global tier: XCD id
 extern __attribute__((address_space(3))) u64 lds_shot;       // global tier: claimed shot
 
