@@ -9,7 +9,7 @@
 // change rank update st->active_k themselves (so the caller re-reads it).
 
 // ---- frame ops (tid0-only, O(1)) --------------------------------------------
-static inline void v2_op_frame_cnot(V2State* st, u32 ctrl, u32 tgt) {
+static inline __attribute__((always_inline)) void v2_op_frame_cnot(V2State* st, u32 ctrl, u32 tgt) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         int px_c = fget(st->px, ctrl), pz_tt = fget(st->pz, tgt);
@@ -17,7 +17,7 @@ static inline void v2_op_frame_cnot(V2State* st, u32 ctrl, u32 tgt) {
     }
     v2_barrier();
 }
-static inline void v2_op_frame_cz(V2State* st, u32 a, u32 b) {
+static inline __attribute__((always_inline)) void v2_op_frame_cz(V2State* st, u32 a, u32 b) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         int px_a = fget(st->px, a), px_b = fget(st->px, b);
@@ -25,7 +25,7 @@ static inline void v2_op_frame_cz(V2State* st, u32 a, u32 b) {
     }
     v2_barrier();
 }
-static inline void v2_op_frame_h(V2State* st, u32 axis) {
+static inline __attribute__((always_inline)) void v2_op_frame_h(V2State* st, u32 axis) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         int px = fget(st->px, axis), pz = fget(st->pz, axis);
@@ -33,12 +33,12 @@ static inline void v2_op_frame_h(V2State* st, u32 axis) {
     }
     v2_barrier();
 }
-static inline void v2_op_frame_s(V2State* st, u32 axis) {
+static inline __attribute__((always_inline)) void v2_op_frame_s(V2State* st, u32 axis) {
     u32 t = v2_tid();
     if (IS_OWNER) { int px = fget(st->px, axis); fxor(st->pz, axis, px); }
     v2_barrier();
 }
-static inline void v2_op_frame_swap(V2State* st, u32 a, u32 b) {
+static inline __attribute__((always_inline)) void v2_op_frame_swap(V2State* st, u32 a, u32 b) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         int px_a = fget(st->px, a), px_b = fget(st->px, b);
@@ -50,7 +50,7 @@ static inline void v2_op_frame_swap(V2State* st, u32 a, u32 b) {
 }
 
 // ---- dormant measurements (tid0-only) ---------------------------------------
-static inline void v2_op_meas_dormant_static(V2State* st, u32 axis, u32 slot, u8 flags) {
+static inline __attribute__((always_inline)) void v2_op_meas_dormant_static(V2State* st, u32 axis, u32 slot, u8 flags) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         u8 mval;
@@ -63,7 +63,7 @@ static inline void v2_op_meas_dormant_static(V2State* st, u32 axis, u32 slot, u8
     }
     v2_barrier();
 }
-static inline void v2_op_meas_dormant_random(V2State* st, u32 axis, u32 slot, u8 flags) {
+static inline __attribute__((always_inline)) void v2_op_meas_dormant_random(V2State* st, u32 axis, u32 slot, u8 flags) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         u8 m_abs = (rng_uniform(st->rng) < 0.5) ? 0u : 1u;
@@ -74,7 +74,7 @@ static inline void v2_op_meas_dormant_random(V2State* st, u32 axis, u32 slot, u8
 }
 
 // ---- expand family (grows k) ------------------------------------------------
-static inline void v2_op_expand(V2State* st, CV2Complex* v, u32 active_k) {
+static inline __attribute__((always_inline)) void v2_op_expand(V2State* st, CV2Complex* v, u32 active_k) {
     u32 t = v2_tid();
     u32 half = 1u << active_k;
     for (u32 i = t; i < half; i += V2_STRIDE) v[i + half] = v[i];
@@ -82,7 +82,7 @@ static inline void v2_op_expand(V2State* st, CV2Complex* v, u32 active_k) {
     if (IS_OWNER) st->active_k = active_k + 1;
     v2_barrier();
 }
-static inline void v2_op_expand_t(V2State* st, CV2Complex* v, u32 active_k, u32 axis, int dagger) {
+static inline __attribute__((always_inline)) void v2_op_expand_t(V2State* st, CV2Complex* v, u32 active_k, u32 axis, int dagger) {
     u32 t = v2_tid();
     u32 half = 1u << active_k;
     int px = fget(st->px, axis);
@@ -94,7 +94,7 @@ static inline void v2_op_expand_t(V2State* st, CV2Complex* v, u32 active_k, u32 
     if (IS_OWNER) st->active_k = active_k + 1;
     v2_barrier();
 }
-static inline void v2_op_expand_rot(V2State* st, CV2Complex* v, u32 active_k,
+static inline __attribute__((always_inline)) void v2_op_expand_rot(V2State* st, CV2Complex* v, u32 active_k,
                                     u32 axis, double wre, double wim) {
     u32 t = v2_tid();
     u32 half = 1u << active_k;
@@ -108,7 +108,7 @@ static inline void v2_op_expand_rot(V2State* st, CV2Complex* v, u32 active_k,
 }
 
 // ---- active measurements (shrinks k; cooperative reduction) -----------------
-static inline void v2_op_meas_active_diagonal(V2State* st, CV2Complex* v, u32 active_k,
+static inline __attribute__((always_inline)) void v2_op_meas_active_diagonal(V2State* st, CV2Complex* v, u32 active_k,
                                               u32 axis, u32 slot, u8 flags) {
     u32 t = v2_tid();
     u32 half = 1u << (active_k - 1u);
@@ -132,7 +132,7 @@ static inline void v2_op_meas_active_diagonal(V2State* st, CV2Complex* v, u32 ac
     }
     v2_barrier();
 }
-static inline void v2_op_meas_active_interfere(V2State* st, CV2Complex* v, u32 active_k,
+static inline __attribute__((always_inline)) void v2_op_meas_active_interfere(V2State* st, CV2Complex* v, u32 active_k,
                                                u32 axis, u32 slot, u8 flags) {
     u32 t = v2_tid();
     u32 half = 1u << (active_k - 1u);
@@ -165,7 +165,7 @@ static inline void v2_op_meas_active_interfere(V2State* st, CV2Complex* v, u32 a
 }
 
 // ---- array Clifford ops -----------------------------------------------------
-static inline void v2_op_array_cnot(V2State* st, CV2Complex* v, u32 active_k, u32 c, u32 tg) {
+static inline __attribute__((always_inline)) void v2_op_array_cnot(V2State* st, CV2Complex* v, u32 active_k, u32 c, u32 tg) {
     u32 t = v2_tid();
     u64 c_bit = 1ull << c, t_bit = 1ull << tg;
     u64 iters = 1ull << (active_k - 2u);
@@ -178,7 +178,7 @@ static inline void v2_op_array_cnot(V2State* st, CV2Complex* v, u32 active_k, u3
     if (IS_OWNER) { int px_c = fget(st->px, c), pz_t = fget(st->pz, tg); fxor(st->px, tg, px_c); fxor(st->pz, c, pz_t); }
     v2_barrier();
 }
-static inline void v2_op_array_cz(V2State* st, CV2Complex* v, u32 active_k, u32 a, u32 b) {
+static inline __attribute__((always_inline)) void v2_op_array_cz(V2State* st, CV2Complex* v, u32 active_k, u32 a, u32 b) {
     u32 t = v2_tid();
     u64 both = (1ull << a) | (1ull << b);
     u64 iters = 1ull << (active_k - 2u);
@@ -190,7 +190,7 @@ static inline void v2_op_array_cz(V2State* st, CV2Complex* v, u32 active_k, u32 
     if (IS_OWNER) { int px_a = fget(st->px, a), px_b = fget(st->px, b); fxor(st->pz, b, px_a); fxor(st->pz, a, px_b); }
     v2_barrier();
 }
-static inline void v2_op_array_swap(V2State* st, CV2Complex* v, u32 active_k, u32 a, u32 b) {
+static inline __attribute__((always_inline)) void v2_op_array_swap(V2State* st, CV2Complex* v, u32 active_k, u32 a, u32 b) {
     u32 t = v2_tid();
     u64 a_bit = 1ull << a, b_bit = 1ull << b;
     u64 iters = 1ull << (active_k - 2u);
@@ -203,7 +203,7 @@ static inline void v2_op_array_swap(V2State* st, CV2Complex* v, u32 active_k, u3
     if (IS_OWNER) { fswap(st->px, a, b); fswap(st->pz, a, b); }
     v2_barrier();
 }
-static inline void v2_op_array_multi_cnot(V2State* st, CV2Complex* v, u32 active_k, u32 tg, u64 ctrl_mask) {
+static inline __attribute__((always_inline)) void v2_op_array_multi_cnot(V2State* st, CV2Complex* v, u32 active_k, u32 tg, u64 ctrl_mask) {
     u32 t = v2_tid();
     u64 t_bit = 1ull << tg;
     u64 half = 1ull << (active_k - 1u);
@@ -223,7 +223,7 @@ static inline void v2_op_array_multi_cnot(V2State* st, CV2Complex* v, u32 active
     }
     v2_barrier();
 }
-static inline void v2_op_array_multi_cz(V2State* st, CV2Complex* v, u32 active_k, u32 ctrl, u64 target_mask) {
+static inline __attribute__((always_inline)) void v2_op_array_multi_cz(V2State* st, CV2Complex* v, u32 active_k, u32 ctrl, u64 target_mask) {
     u32 t = v2_tid();
     u64 c_bit = 1ull << ctrl;
     u64 half = 1ull << (active_k - 1u);
@@ -242,7 +242,7 @@ static inline void v2_op_array_multi_cz(V2State* st, CV2Complex* v, u32 active_k
     }
     v2_barrier();
 }
-static inline void v2_op_array_h(V2State* st, CV2Complex* v, u32 active_k, u32 axis) {
+static inline __attribute__((always_inline)) void v2_op_array_h(V2State* st, CV2Complex* v, u32 active_k, u32 axis) {
     u32 t = v2_tid();
     u64 axis_bit = 1ull << axis;
     u64 iters = 1ull << (active_k - 1u);
@@ -256,14 +256,14 @@ static inline void v2_op_array_h(V2State* st, CV2Complex* v, u32 active_k, u32 a
     if (IS_OWNER) { int px = fget(st->px, axis), pz = fget(st->pz, axis); fset(st->px, axis, pz); fset(st->pz, axis, px); }
     v2_barrier();
 }
-static inline void v2_op_array_s(V2State* st, CV2Complex* v, u32 active_k, u32 axis, int dagger) {
+static inline __attribute__((always_inline)) void v2_op_array_s(V2State* st, CV2Complex* v, u32 active_k, u32 axis, int dagger) {
     u32 t = v2_tid();
     CV2Complex ph; ph.re = 0.0f; ph.im = dagger ? -1.0f : 1.0f;
     coop_apply_phase(t, v, active_k, axis, ph);
     if (IS_OWNER) { int px = fget(st->px, axis); fxor(st->pz, axis, px); }
     v2_barrier();
 }
-static inline void v2_op_array_t(V2State* st, CV2Complex* v, u32 active_k, u32 axis, int dagger) {
+static inline __attribute__((always_inline)) void v2_op_array_t(V2State* st, CV2Complex* v, u32 active_k, u32 axis, int dagger) {
     u32 t = v2_tid();
     if (axis >= active_k) { v2_barrier(); return; }
     int px = fget(st->px, axis);
@@ -272,7 +272,7 @@ static inline void v2_op_array_t(V2State* st, CV2Complex* v, u32 active_k, u32 a
     CV2Complex phase; phase.re = (float)V2_INV_SQRT2; phase.im = (float)imag;
     coop_apply_phase(t, v, active_k, axis, phase);
 }
-static inline void v2_op_array_rot(V2State* st, CV2Complex* v, u32 active_k, u32 axis, double wre, double wim) {
+static inline __attribute__((always_inline)) void v2_op_array_rot(V2State* st, CV2Complex* v, u32 active_k, u32 axis, double wre, double wim) {
     u32 t = v2_tid();
     if (axis < active_k) {
         int px = fget(st->px, axis);
@@ -281,7 +281,7 @@ static inline void v2_op_array_rot(V2State* st, CV2Complex* v, u32 active_k, u32
         coop_apply_phase(t, v, active_k, axis, phase);
     } else v2_barrier();
 }
-static inline void v2_op_array_u2(V2State* st, CV2Complex* v, u32 active_k, u32 axis,
+static inline __attribute__((always_inline)) void v2_op_array_u2(V2State* st, CV2Complex* v, u32 active_k, u32 axis,
                                   const CV2FusedU2Entry* fused_u2, u32 cp) {
     u32 t = v2_tid();
     int in_state = (fget(st->pz, axis) ? 2 : 0) | (fget(st->px, axis) ? 1 : 0);
@@ -303,7 +303,7 @@ static inline void v2_op_array_u2(V2State* st, CV2Complex* v, u32 active_k, u32 
     }
     v2_barrier();
 }
-static inline void v2_op_array_u4(V2State* st, CV2Complex* v, u32 active_k, u32 lo, u32 hi,
+static inline __attribute__((always_inline)) void v2_op_array_u4(V2State* st, CV2Complex* v, u32 active_k, u32 lo, u32 hi,
                                   const CV2FusedU4Entry* fused_u4, u32 cp) {
     u32 t = v2_tid();
     int in_state = (fget(st->pz, hi) << 3) | (fget(st->px, hi) << 2)
@@ -336,7 +336,7 @@ static inline void v2_op_array_u4(V2State* st, CV2Complex* v, u32 active_k, u32 
 }
 
 // ---- swap-measure-interfere (fused swap + X-fold; shrinks k) -----------------
-static inline void v2_op_swap_meas_interfere(V2State* st, CV2Complex* v, CV2Complex* scratch,
+static inline __attribute__((always_inline)) void v2_op_swap_meas_interfere(V2State* st, CV2Complex* v, CV2Complex* scratch,
                                              u32 active_k, u32 from, u32 to, u32 slot, u8 flags) {
     u32 t = v2_tid();
     if (from == to) {
@@ -403,7 +403,7 @@ static inline void v2_op_swap_meas_interfere(V2State* st, CV2Complex* v, CV2Comp
 }
 
 // ---- classical / noise / probe ----------------------------------------------
-static inline void v2_op_apply_pauli(V2State* st, const CV2Mask* pauli_masks, u32 cp, u32 cond_slot) {
+static inline __attribute__((always_inline)) void v2_op_apply_pauli(V2State* st, const CV2Mask* pauli_masks, u32 cp, u32 cond_slot) {
     u32 t = v2_tid();
     if (IS_OWNER && mget(st->meas, cond_slot) != 0) {
         const CV2Mask* m = &pauli_masks[cp];
@@ -411,7 +411,7 @@ static inline void v2_op_apply_pauli(V2State* st, const CV2Mask* pauli_masks, u3
     }
     v2_barrier();
 }
-static inline void v2_op_noise(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
+static inline __attribute__((always_inline)) void v2_op_noise(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
                                const double* hazards, u32 num_sites, u32 site) {
     u32 t = v2_tid();
     if (IS_OWNER && site == st->next_noise) {
@@ -421,7 +421,7 @@ static inline void v2_op_noise(V2State* st, const CV2NoiseSite* sites, const CV2
     }
     v2_barrier();
 }
-static inline void v2_op_noise_block(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
+static inline __attribute__((always_inline)) void v2_op_noise_block(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
                                      const double* hazards, u32 num_sites, u32 start, u32 count) {
     u32 t = v2_tid();
     if (IS_OWNER) {
@@ -435,7 +435,7 @@ static inline void v2_op_noise_block(V2State* st, const CV2NoiseSite* sites, con
     }
     v2_barrier();
 }
-static inline void v2_op_readout_noise(V2State* st, const CV2ReadoutNoise* readout_noise, u32 idx) {
+static inline __attribute__((always_inline)) void v2_op_readout_noise(V2State* st, const CV2ReadoutNoise* readout_noise, u32 idx) {
     u32 t = v2_tid();
     if (IS_OWNER) {
         CV2ReadoutNoise r = readout_noise[idx];
@@ -443,7 +443,7 @@ static inline void v2_op_readout_noise(V2State* st, const CV2ReadoutNoise* reado
     }
     v2_barrier();
 }
-static inline void v2_op_observable(V2State* st, const u32* observable_offsets,
+static inline __attribute__((always_inline)) void v2_op_observable(V2State* st, const u32* observable_offsets,
                                     const u32* observable_targets, u32 idx, u32 obs_slot) {
     u32 t = v2_tid();
     if (IS_OWNER) {
@@ -455,7 +455,7 @@ static inline void v2_op_observable(V2State* st, const u32* observable_offsets,
     v2_barrier();
 }
 // Returns 1 if the shot is discarded (caller must return from the kernel).
-static inline int v2_op_postselect(V2State* st, const u32* detector_offsets,
+static inline __attribute__((always_inline)) int v2_op_postselect(V2State* st, const u32* detector_offsets,
                                    const u32* detector_targets, u32 idx, u8 flags) {
     u32 t = v2_tid();
     if (IS_OWNER) {
@@ -467,7 +467,7 @@ static inline int v2_op_postselect(V2State* st, const u32* detector_offsets,
     v2_barrier();
     return st->discarded;
 }
-static inline void v2_op_detector(void) { v2_barrier(); }
+static inline __attribute__((always_inline)) void v2_op_detector(void) { v2_barrier(); }
 
 // ---- per-shot init + final aggregation (shared) -----------------------------
 static inline void v2_shot_init(V2State* st, CV2Complex* v, u32 amp_capacity, u64 shot_id,
