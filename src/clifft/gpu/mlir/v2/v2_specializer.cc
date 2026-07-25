@@ -184,9 +184,35 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
           << "    spec_body((V2State*)&lds_state, (CV2Complex*)lds_v, (CV2Complex*)lds_red_scratch,\n"
           << "              V2_MAX_AMP, shot_id, " << fwd << ");\n"
           << "}\n";
-    } else {
-        // global emitted later.
-        throw std::runtime_error("v2 specializer: Global tier not emitted yet");
+    } else {  // SpecTier::Global
+        // Global tier (rank 11-19): amplitudes in HBM (one slice per resident
+        // workgroup), classical state in LDS, shots drained via a single atomic
+        // work-steal counter. Same spec_body (scatter index math constant-folded
+        // by the emitted constant operands — the primary lever: it removes the
+        // 2x-VALU per-amplitude scatter recompute the runtime interpreter pays).
+        // amp_capacity = 1<<peak_rank is a compile-time constant here.
+        const uint32_t amp_cap = 1u << flat.peak_rank;
+        o << "extern __attribute__((address_space(3))) V2State lds_state;\n"
+          << "extern __attribute__((address_space(3))) unsigned long lds_shot;\n"
+          << "__attribute__((amdgpu_kernel, visibility(\"default\")))\n"
+          << "void " << kernel_name << "(" << args << ",\n"
+          << "    CV2Complex* global_v, CV2Complex* global_scratch, u64* work_counter) {\n"
+          << "    (void)peak_rank; (void)num_instrs; (void)instrs; (void)total_meas_slots;\n"
+          << "    u32 t = v2_tid();\n"
+          << "    u32 slot = v2_bid();\n"
+          << "    const u64 amp_capacity = " << amp_cap << "ull;\n"
+          << "    CV2Complex* v = global_v + (u64)slot * amp_capacity;\n"
+          << "    CV2Complex* scratch = global_scratch + (u64)slot * (amp_capacity >> 1);\n"
+          << "    for (;;) {\n"
+          << "        if (t == 0) lds_shot = __atomic_fetch_add(&work_counter[0], 1UL, __ATOMIC_RELAXED);\n"
+          << "        v2_barrier();\n"
+          << "        u64 batch_shot = lds_shot;\n"
+          << "        if (batch_shot >= shots) return;\n"
+          << "        spec_body((V2State*)&lds_state, v, scratch, (u32)amp_capacity,\n"
+          << "                  shot_offset + batch_shot, " << fwd << ");\n"
+          << "        v2_barrier();\n"
+          << "    }\n"
+          << "}\n";
     }
     (void)tier_macro;
     return o.str();

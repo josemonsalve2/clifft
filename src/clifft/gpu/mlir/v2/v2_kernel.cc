@@ -49,6 +49,11 @@ struct __attribute__((packed)) CoopKernArgs {
     uint64_t pauli_masks;
     uint64_t readout_noise; uint64_t detector_offsets; uint64_t detector_targets;
 };
+// Global tier appends 3 pointers (HBM amplitude slices + work counter).
+struct __attribute__((packed)) GlobalKernArgs {
+    CoopKernArgs base;
+    uint64_t global_v; uint64_t global_scratch; uint64_t work_counter;
+};
 
 // Correctness gate: dispatch the interpreter kernel and the specialized kernel
 // on the same small shot sample and compare passed_shots + observable_ones.
@@ -61,13 +66,27 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
     using namespace clifft::gpu;
     FlattenedProgram flat = flatten_program(program);
     const bool is_reg = flat.peak_rank <= 4;
-    const char* interp_sym = is_reg ? "clifft_v2_register" : "clifft_v2_coop";
+    const bool is_global = flat.peak_rank > 10;
+    const char* interp_sym = is_reg ? "clifft_v2_register"
+                           : is_global ? "clifft_v2_global" : "clifft_v2_coop";
     std::string interp_path = is_reg ? std::string(CLIFFT_V2_REGISTER_HSACO)
                                      : std::string(CLIFFT_V2_COOP_HSACO);
+    // Global interpreter kernel lives in the coop .hsaco (same non-register TU).
     if (interp_path.empty()) return false;
 
     auto& rt = hsa_runtime();
     if (!rt.init()) return false;
+
+    // Global tier: HBM amplitude buffers for a small validation worker pool.
+    const uint32_t g_wgs = is_global ? 64u : 0u;
+    uint64_t d_gv = 0, d_gs = 0, d_wc = 0;
+    if (is_global) {
+        const uint64_t amp = 1ull << flat.peak_rank;
+        d_gv = reinterpret_cast<uint64_t>(rt.device_malloc((size_t)g_wgs * amp * sizeof(GpuComplex)));
+        d_gs = reinterpret_cast<uint64_t>(rt.device_malloc((size_t)g_wgs * (amp/2) * sizeof(GpuComplex)));
+        d_wc = reinterpret_cast<uint64_t>(rt.device_malloc(8 * sizeof(uint64_t)));
+        if (!d_gv || !d_gs || !d_wc) return false;
+    }
 
     // Shared device buffers.
     uint64_t d_instrs = upload(rt, flat.instrs);
@@ -96,7 +115,8 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
         if (!k.valid) return false;
         BlockCounts* d_counts = static_cast<BlockCounts*>(rt.device_malloc(sizeof(BlockCounts)));
         rt.memset_device(d_counts, 0, sizeof(BlockCounts) / sizeof(uint32_t));
-        CoopKernArgs ka{};
+        GlobalKernArgs ga{};
+        CoopKernArgs& ka = ga.base;
         ka.instrs = d_instrs; ka.num_instrs = (uint32_t)flat.instrs.size();
         ka.peak_rank = flat.peak_rank; ka.total_meas_slots = flat.total_meas_slots;
         ka.num_observables = flat.num_observables; ka.seed = val_seed;
@@ -107,9 +127,16 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
         ka.num_noise_sites = (uint32_t)flat.noise_sites.size();
         ka.pauli_masks = d_pm; ka.readout_noise = d_rn;
         ka.detector_offsets = d_do; ka.detector_targets = d_dt;
-        const uint32_t grid = is_reg ? (((val_shots + block - 1u) / block) * block)
-                                     : (val_shots * block);
-        hsa_dispatch_and_wait(k, 0, grid, block, &ka, sizeof(ka));
+        uint32_t grid; size_t ka_bytes;
+        if (is_global) {
+            rt.memset_device(reinterpret_cast<void*>(d_wc), 0, 8 * (sizeof(uint64_t)/sizeof(uint32_t)));
+            ga.global_v = d_gv; ga.global_scratch = d_gs; ga.work_counter = d_wc;
+            grid = g_wgs * block; ka_bytes = sizeof(ga);
+        } else {
+            grid = is_reg ? (((val_shots + block - 1u) / block) * block) : (val_shots * block);
+            ka_bytes = sizeof(ka);
+        }
+        hsa_dispatch_and_wait(k, 0, grid, block, &ga, ka_bytes);
         rt.memcpy_d2h(out, d_counts, sizeof(BlockCounts));
         rt.device_free(d_counts);
         hsa_free_kernel(k);
@@ -131,6 +158,7 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
     free_if(d_instrs); free_if(d_u2); free_if(d_u4); free_if(d_oo); free_if(d_ot);
     free_if(d_ns); free_if(d_nc); free_if(d_nh); free_if(d_pm); free_if(d_rn);
     free_if(d_do); free_if(d_dt);
+    free_if(d_gv); free_if(d_gs); free_if(d_wc);
     return match;
 }
 
@@ -200,11 +228,13 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     // diverge, fall back to the interpreter for that circuit (verdict cached per
     // process). This guarantees byte-exactness for EVERY circuit, not just the
     // ones we happened to test, and is robust to any future codegen quirk.
-    const bool spec_ok = (eff_tier == REG) || (eff_tier == COOP);
+    const bool spec_ok = (eff_tier == REG) || (eff_tier == COOP) || (eff_tier == GLOBAL);
     if (getenv("V2_SPECIALIZE") && spec_ok && specializer_toolchain_available()) {
         try {
-            SpecTier st = (eff_tier == REG) ? SpecTier::Register : SpecTier::Coop;
-            const char* tname = (eff_tier == REG) ? "reg" : "coop";
+            SpecTier st = (eff_tier == REG) ? SpecTier::Register
+                        : (eff_tier == COOP) ? SpecTier::Coop : SpecTier::Global;
+            const char* tname = (eff_tier == REG) ? "reg"
+                              : (eff_tier == COOP) ? "coop" : "global";
             spec_sym = "clifft_v2_spec";
             std::string csrc = emit_specialized_kernel(flat, spec_sym, st);
             std::string key = std::string(tname) + "_r" + std::to_string(flat.peak_rank) +
