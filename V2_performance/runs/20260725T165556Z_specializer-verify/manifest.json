@@ -1,0 +1,8 @@
+{
+  "run_id": "20260725T165556Z_specializer-verify",
+  "label": "specializer-verify",
+  "commit": "e02eeec",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 8
+}
