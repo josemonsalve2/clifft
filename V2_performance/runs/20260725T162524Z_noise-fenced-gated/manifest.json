@@ -1,0 +1,8 @@
+{
+  "run_id": "20260725T162524Z_noise-fenced-gated",
+  "label": "noise-fenced-gated",
+  "commit": "9d9cc68",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 8
+}

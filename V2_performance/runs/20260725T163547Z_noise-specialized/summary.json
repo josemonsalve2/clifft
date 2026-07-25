@@ -1,0 +1,578 @@
+[
+  {
+    "circuit": "circuit_d3_p0.001",
+    "v2": {
+      "kernel_name": "clifft_v2_spec",
+      "LDS_Block_Size": "0",
+      "Scratch_Size": "1024",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "20224",
+      "n_dispatches": 1,
+      "total_kernel_ns": 224160,
+      "per_dispatch_ns_median": 224160,
+      "domain_total_ns": 224160,
+      "domain_calls": 1,
+      "hsa_total_ns": 11872580,
+      "counters": {
+        "SQ_INSTS_LDS": 0.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 1092326.0,
+        "SQ_INSTS_VALU": 3785987.0,
+        "SQ_WAVES": 316.0,
+        "TCC_HIT_sum": 3431534.0,
+        "TCC_MISS_sum": 169818.0,
+        "GRBM_GUI_ACTIVE": 6422540.0,
+        "SQ_BUSY_CYCLES": 14896759.0,
+        "SQ_WAIT_INST_LDS": 0.0,
+        "SQ_WAVE_CYCLES": 34379625.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=95.3",
+        "wave_cycles/wave=108796"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "0",
+      "Scratch_Size": "4480",
+      "VGPR_Count": "60",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "20224",
+      "n_dispatches": 1,
+      "total_kernel_ns": 427828,
+      "per_dispatch_ns_median": 427828,
+      "domain_total_ns": 467546,
+      "domain_calls": 12,
+      "hsa_total_ns": 12031128,
+      "counters": {
+        "SQ_INSTS_LDS": 25280.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 7295137.0,
+        "SQ_INSTS_VALU": 4641712.0,
+        "SQ_WAVES": 316.0,
+        "TCC_HIT_sum": 4050283.0,
+        "TCC_MISS_sum": 76489.0,
+        "GRBM_GUI_ACTIVE": 12489189.0,
+        "SQ_BUSY_CYCLES": 29568634.0,
+        "SQ_WAIT_INST_LDS": 2.0,
+        "SQ_WAVE_CYCLES": 72040518.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=98.1",
+        "wave_cycles/wave=227976"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 0.524
+  },
+  {
+    "circuit": "frame_h",
+    "v2": {
+      "kernel_name": "clifft_v2_spec",
+      "LDS_Block_Size": "0",
+      "Scratch_Size": "656",
+      "VGPR_Count": "32",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "64",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "20224",
+      "n_dispatches": 1,
+      "total_kernel_ns": 10481,
+      "per_dispatch_ns_median": 10481,
+      "domain_total_ns": 10481,
+      "domain_calls": 1,
+      "hsa_total_ns": 11801329,
+      "counters": {
+        "SQ_INSTS_LDS": 0.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 19737.0,
+        "SQ_INSTS_VALU": 40389.0,
+        "SQ_WAVES": 316.0,
+        "TCC_HIT_sum": 97682.0,
+        "TCC_MISS_sum": 89461.0,
+        "GRBM_GUI_ACTIVE": 2775964.0,
+        "SQ_BUSY_CYCLES": 618679.0,
+        "SQ_WAIT_INST_LDS": 0.0,
+        "SQ_WAVE_CYCLES": 1469301.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=52.2",
+        "wave_cycles/wave=4650"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "0",
+      "Scratch_Size": "4480",
+      "VGPR_Count": "60",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "20224",
+      "n_dispatches": 1,
+      "total_kernel_ns": 17080,
+      "per_dispatch_ns_median": 17080,
+      "domain_total_ns": 40320,
+      "domain_calls": 8,
+      "hsa_total_ns": 11423352,
+      "counters": {
+        "SQ_INSTS_LDS": 25280.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 96271.0,
+        "SQ_INSTS_VALU": 96349.0,
+        "SQ_WAVES": 316.0,
+        "TCC_HIT_sum": 75123.0,
+        "TCC_MISS_sum": 37457.0,
+        "GRBM_GUI_ACTIVE": 5384448.0,
+        "SQ_BUSY_CYCLES": 990667.0,
+        "SQ_WAIT_INST_LDS": 79.0,
+        "SQ_WAVE_CYCLES": 2378942.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=66.7",
+        "wave_cycles/wave=7528"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 0.614
+  },
+  {
+    "circuit": "qv10",
+    "v2": {
+      "kernel_name": "clifft_v2_spec",
+      "LDS_Block_Size": "13312",
+      "Scratch_Size": "0",
+      "VGPR_Count": "36",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "80",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "5120000",
+      "n_dispatches": 1,
+      "total_kernel_ns": 1340029,
+      "per_dispatch_ns_median": 1340029,
+      "domain_total_ns": 1340029,
+      "domain_calls": 1,
+      "hsa_total_ns": 12920006,
+      "counters": {
+        "SQ_INSTS_LDS": 58840000.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 119800000.0,
+        "SQ_INSTS_VALU": 501837264.0,
+        "SQ_WAVES": 80000.0,
+        "TCC_HIT_sum": 6698916.0,
+        "TCC_MISS_sum": 26383.0,
+        "GRBM_GUI_ACTIVE": 21101188.0,
+        "SQ_BUSY_CYCLES": 81848361.0,
+        "SQ_WAIT_INST_LDS": 296748250.0,
+        "SQ_WAVE_CYCLES": 4357960701.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=99.6",
+        "wave_cycles/wave=54475"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "23040",
+      "Scratch_Size": "8",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "5120000",
+      "n_dispatches": 1,
+      "total_kernel_ns": 4349340,
+      "per_dispatch_ns_median": 4349340,
+      "domain_total_ns": 4376096,
+      "domain_calls": 8,
+      "hsa_total_ns": 15715818,
+      "counters": {
+        "SQ_INSTS_LDS": 89240000.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 605370687.0,
+        "SQ_INSTS_VALU": 1128500000.0,
+        "SQ_WAVES": 80000.0,
+        "TCC_HIT_sum": 17385837.0,
+        "TCC_MISS_sum": 31289.0,
+        "GRBM_GUI_ACTIVE": 75329027.0,
+        "SQ_BUSY_CYCLES": 290239832.0,
+        "SQ_WAIT_INST_LDS": 57275490.0,
+        "SQ_WAVE_CYCLES": 9017881806.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=99.8",
+        "wave_cycles/wave=112724"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 0.308
+  },
+  {
+    "circuit": "surface_d11_t15",
+    "v2": {
+      "kernel_name": "clifft_v2_global",
+      "LDS_Block_Size": "1024",
+      "Scratch_Size": "400",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "524288",
+      "n_dispatches": 1,
+      "total_kernel_ns": 75153961,
+      "per_dispatch_ns_median": 75153961,
+      "domain_total_ns": 75153961,
+      "domain_calls": 1,
+      "hsa_total_ns": 86897890,
+      "counters": {
+        "SQ_INSTS_LDS": 562356735.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 17840506542.0,
+        "SQ_INSTS_VALU": 8743653230.0,
+        "SQ_WAVES": 8192.0,
+        "TCC_HIT_sum": 49659889.0,
+        "TCC_MISS_sum": 6719627.0,
+        "GRBM_GUI_ACTIVE": 1322355476.0,
+        "SQ_BUSY_CYCLES": 5237195845.0,
+        "SQ_WAIT_INST_LDS": 50562229.0,
+        "SQ_WAVE_CYCLES": 154670379548.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=88.1",
+        "wave_cycles/wave=18880662"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "8704",
+      "Scratch_Size": "56",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "131072",
+      "n_dispatches": 1,
+      "total_kernel_ns": 74759285,
+      "per_dispatch_ns_median": 74759285,
+      "domain_total_ns": 74794005,
+      "domain_calls": 9,
+      "hsa_total_ns": 86537421,
+      "counters": {
+        "SQ_INSTS_LDS": 173429043.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 9993699304.0,
+        "SQ_INSTS_VALU": 4336787012.0,
+        "SQ_WAVES": 2048.0,
+        "TCC_HIT_sum": 38150739.0,
+        "TCC_MISS_sum": 629847.0,
+        "GRBM_GUI_ACTIVE": 1312881033.0,
+        "SQ_BUSY_CYCLES": 5189015539.0,
+        "SQ_WAIT_INST_LDS": 26256666.0,
+        "SQ_WAVE_CYCLES": 80355569079.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=98.4",
+        "wave_cycles/wave=39236118"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 1.005
+  },
+  {
+    "circuit": "surface_d7_t15",
+    "v2": {
+      "kernel_name": "clifft_v2_spec",
+      "LDS_Block_Size": "13312",
+      "Scratch_Size": "288",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "96",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "2560000",
+      "n_dispatches": 1,
+      "total_kernel_ns": 11117416,
+      "per_dispatch_ns_median": 11117416,
+      "domain_total_ns": 11117416,
+      "domain_calls": 1,
+      "hsa_total_ns": 23006725,
+      "counters": {
+        "SQ_INSTS_LDS": 121994619.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 756023631.0,
+        "SQ_INSTS_VALU": 1150183688.0,
+        "SQ_WAVES": 40000.0,
+        "TCC_HIT_sum": 1711000426.0,
+        "TCC_MISS_sum": 39947019.0,
+        "GRBM_GUI_ACTIVE": 187073867.0,
+        "SQ_BUSY_CYCLES": 730713460.0,
+        "SQ_WAIT_INST_LDS": 59679494.0,
+        "SQ_WAVE_CYCLES": 22234298077.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=97.7",
+        "wave_cycles/wave=555857"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "23040",
+      "Scratch_Size": "8",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "2560000",
+      "n_dispatches": 1,
+      "total_kernel_ns": 22093550,
+      "per_dispatch_ns_median": 22093550,
+      "domain_total_ns": 22126030,
+      "domain_calls": 9,
+      "hsa_total_ns": 34068087,
+      "counters": {
+        "SQ_INSTS_LDS": 107897543.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 5358640038.0,
+        "SQ_INSTS_VALU": 1911184025.0,
+        "SQ_WAVES": 40000.0,
+        "TCC_HIT_sum": 14793666.0,
+        "TCC_MISS_sum": 135020.0,
+        "GRBM_GUI_ACTIVE": 388301216.0,
+        "SQ_BUSY_CYCLES": 1526319779.0,
+        "SQ_WAIT_INST_LDS": 23208338.0,
+        "SQ_WAVE_CYCLES": 46648365041.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=99.1",
+        "wave_cycles/wave=1166209"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 0.503
+  },
+  {
+    "circuit": "surface_d7_t19",
+    "v2": {
+      "kernel_name": "clifft_v2_global",
+      "LDS_Block_Size": "1024",
+      "Scratch_Size": "400",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "524288",
+      "n_dispatches": 1,
+      "total_kernel_ns": 20295233,
+      "per_dispatch_ns_median": 20295233,
+      "domain_total_ns": 20295233,
+      "domain_calls": 1,
+      "hsa_total_ns": 32262977,
+      "counters": {
+        "SQ_INSTS_LDS": 156242135.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 4688287346.0,
+        "SQ_INSTS_VALU": 2344018911.0,
+        "SQ_WAVES": 8192.0,
+        "TCC_HIT_sum": 40554175.0,
+        "TCC_MISS_sum": 8225661.0,
+        "GRBM_GUI_ACTIVE": 356766440.0,
+        "SQ_BUSY_CYCLES": 1411937278.0,
+        "SQ_WAIT_INST_LDS": 19394882.0,
+        "SQ_WAVE_CYCLES": 41536993632.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=83.1",
+        "wave_cycles/wave=5070434"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "8704",
+      "Scratch_Size": "56",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "131072",
+      "n_dispatches": 1,
+      "total_kernel_ns": 19998917,
+      "per_dispatch_ns_median": 19998917,
+      "domain_total_ns": 20029877,
+      "domain_calls": 10,
+      "hsa_total_ns": 31517069,
+      "counters": {
+        "SQ_INSTS_LDS": 53583049.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 2627425436.0,
+        "SQ_INSTS_VALU": 1176981907.0,
+        "SQ_WAVES": 2048.0,
+        "TCC_HIT_sum": 28797599.0,
+        "TCC_MISS_sum": 332375.0,
+        "GRBM_GUI_ACTIVE": 352311686.0,
+        "SQ_BUSY_CYCLES": 1379820711.0,
+        "SQ_WAIT_INST_LDS": 9319140.0,
+        "SQ_WAVE_CYCLES": 21413949906.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=98.9",
+        "wave_cycles/wave=10456030"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 1.015
+  },
+  {
+    "circuit": "surface_d9_t10",
+    "v2": {
+      "kernel_name": "clifft_v2_spec",
+      "LDS_Block_Size": "13312",
+      "Scratch_Size": "288",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "80",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "2560000",
+      "n_dispatches": 1,
+      "total_kernel_ns": 21318264,
+      "per_dispatch_ns_median": 21318264,
+      "domain_total_ns": 21318264,
+      "domain_calls": 1,
+      "hsa_total_ns": 33219474,
+      "counters": {
+        "SQ_INSTS_LDS": 230474098.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 1521096512.0,
+        "SQ_INSTS_VALU": 2300694373.0,
+        "SQ_WAVES": 40000.0,
+        "TCC_HIT_sum": 3389827846.0,
+        "TCC_MISS_sum": 55889868.0,
+        "GRBM_GUI_ACTIVE": 369113735.0,
+        "SQ_BUSY_CYCLES": 1450616653.0,
+        "SQ_WAIT_INST_LDS": 100547833.0,
+        "SQ_WAVE_CYCLES": 44174991214.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=98.4",
+        "wave_cycles/wave=1104375"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "23040",
+      "Scratch_Size": "8",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "2560000",
+      "n_dispatches": 1,
+      "total_kernel_ns": 44023819,
+      "per_dispatch_ns_median": 44023819,
+      "domain_total_ns": 44052219,
+      "domain_calls": 9,
+      "hsa_total_ns": 55567029,
+      "counters": {
+        "SQ_INSTS_LDS": 188763414.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 10737166506.0,
+        "SQ_INSTS_VALU": 3827609602.0,
+        "SQ_WAVES": 40000.0,
+        "TCC_HIT_sum": 31881257.0,
+        "TCC_MISS_sum": 281833.0,
+        "GRBM_GUI_ACTIVE": 776492518.0,
+        "SQ_BUSY_CYCLES": 3062069077.0,
+        "SQ_WAIT_INST_LDS": 36923973.0,
+        "SQ_WAVE_CYCLES": 93575779401.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=99.1",
+        "wave_cycles/wave=2339394"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 0.484
+  },
+  {
+    "circuit": "surface_d9_t19",
+    "v2": {
+      "kernel_name": "clifft_v2_global",
+      "LDS_Block_Size": "1024",
+      "Scratch_Size": "400",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "524288",
+      "n_dispatches": 1,
+      "total_kernel_ns": 43588150,
+      "per_dispatch_ns_median": 43588150,
+      "domain_total_ns": 43588150,
+      "domain_calls": 1,
+      "hsa_total_ns": 55212808,
+      "counters": {
+        "SQ_INSTS_LDS": 326688933.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 10106940931.0,
+        "SQ_INSTS_VALU": 5039589352.0,
+        "SQ_WAVES": 8192.0,
+        "TCC_HIT_sum": 70863944.0,
+        "TCC_MISS_sum": 13908031.0,
+        "GRBM_GUI_ACTIVE": 763667023.0,
+        "SQ_BUSY_CYCLES": 3036528822.0,
+        "SQ_WAIT_INST_LDS": 33070913.0,
+        "SQ_WAVE_CYCLES": 89323401423.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=83.6",
+        "wave_cycles/wave=10903736"
+      ]
+    },
+    "svm": {
+      "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",
+      "LDS_Block_Size": "8704",
+      "Scratch_Size": "56",
+      "VGPR_Count": "64",
+      "Accum_VGPR_Count": "0",
+      "SGPR_Count": "112",
+      "Workgroup_Size_X": "256",
+      "Grid_Size_X": "131072",
+      "n_dispatches": 1,
+      "total_kernel_ns": 44828012,
+      "per_dispatch_ns_median": 44828012,
+      "domain_total_ns": 44861969,
+      "domain_calls": 10,
+      "hsa_total_ns": 56185856,
+      "counters": {
+        "SQ_INSTS_LDS": 105306694.0,
+        "SQ_INSTS_MFMA": 0.0,
+        "SQ_INSTS_SALU": 5750822312.0,
+        "SQ_INSTS_VALU": 2538408572.0,
+        "SQ_WAVES": 2048.0,
+        "TCC_HIT_sum": 52555230.0,
+        "TCC_MISS_sum": 6016121.0,
+        "GRBM_GUI_ACTIVE": 788681601.0,
+        "SQ_BUSY_CYCLES": 3094098729.0,
+        "SQ_WAIT_INST_LDS": 16220428.0,
+        "SQ_WAVE_CYCLES": 48232203760.0
+      },
+      "bottleneck_notes": [
+        "MFMA=0 (butterfly, no GEMM)",
+        "L2_hit%=89.7",
+        "wave_cycles/wave=23550881"
+      ]
+    },
+    "v2_vs_svm_kernel_ratio": 0.972
+  }
+]

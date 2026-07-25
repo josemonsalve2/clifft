@@ -1,0 +1,72 @@
+{
+  "circuit": "frame_h",
+  "v2": {
+    "kernel_name": "clifft_v2_spec",
+    "LDS_Block_Size": "0",
+    "Scratch_Size": "656",
+    "VGPR_Count": "32",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "64",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "20224",
+    "n_dispatches": 1,
+    "total_kernel_ns": 10481,
+    "per_dispatch_ns_median": 10481,
+    "domain_total_ns": 10481,
+    "domain_calls": 1,
+    "hsa_total_ns": 11801329,
+    "counters": {
+      "SQ_INSTS_LDS": 0.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 19737.0,
+      "SQ_INSTS_VALU": 40389.0,
+      "SQ_WAVES": 316.0,
+      "TCC_HIT_sum": 97682.0,
+      "TCC_MISS_sum": 89461.0,
+      "GRBM_GUI_ACTIVE": 2775964.0,
+      "SQ_BUSY_CYCLES": 618679.0,
+      "SQ_WAIT_INST_LDS": 0.0,
+      "SQ_WAVE_CYCLES": 1469301.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (butterfly, no GEMM)",
+      "L2_hit%=52.2",
+      "wave_cycles/wave=4650"
+    ]
+  },
+  "svm": {
+    "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+    "LDS_Block_Size": "0",
+    "Scratch_Size": "4480",
+    "VGPR_Count": "60",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "112",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "20224",
+    "n_dispatches": 1,
+    "total_kernel_ns": 17080,
+    "per_dispatch_ns_median": 17080,
+    "domain_total_ns": 40320,
+    "domain_calls": 8,
+    "hsa_total_ns": 11423352,
+    "counters": {
+      "SQ_INSTS_LDS": 25280.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 96271.0,
+      "SQ_INSTS_VALU": 96349.0,
+      "SQ_WAVES": 316.0,
+      "TCC_HIT_sum": 75123.0,
+      "TCC_MISS_sum": 37457.0,
+      "GRBM_GUI_ACTIVE": 5384448.0,
+      "SQ_BUSY_CYCLES": 990667.0,
+      "SQ_WAIT_INST_LDS": 79.0,
+      "SQ_WAVE_CYCLES": 2378942.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (butterfly, no GEMM)",
+      "L2_hit%=66.7",
+      "wave_cycles/wave=7528"
+    ]
+  },
+  "v2_vs_svm_kernel_ratio": 0.614
+}

@@ -1,0 +1,8 @@
+{
+  "run_id": "20260725T163547Z_noise-specialized",
+  "label": "noise-specialized",
+  "commit": "bbb5e42",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 8
+}

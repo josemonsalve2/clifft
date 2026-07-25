@@ -1,0 +1,72 @@
+{
+  "circuit": "qv10",
+  "v2": {
+    "kernel_name": "clifft_v2_coop",
+    "LDS_Block_Size": "13312",
+    "Scratch_Size": "0",
+    "VGPR_Count": "36",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "80",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "5120000",
+    "n_dispatches": 3,
+    "total_kernel_ns": 2937431,
+    "per_dispatch_ns_median": 1270216,
+    "domain_total_ns": 2937431,
+    "domain_calls": 3,
+    "hsa_total_ns": 15781004,
+    "counters": {
+      "SQ_INSTS_LDS": 83408000.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 271752000.0,
+      "SQ_INSTS_VALU": 806536690.0,
+      "SQ_WAVES": 112000.0,
+      "TCC_HIT_sum": 16333358.0,
+      "TCC_MISS_sum": 3750996.0,
+      "GRBM_GUI_ACTIVE": 50643991.0,
+      "SQ_BUSY_CYCLES": 185946470.0,
+      "SQ_WAIT_INST_LDS": 354989058.0,
+      "SQ_WAVE_CYCLES": 7766709964.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (butterfly, no GEMM)",
+      "L2_hit%=81.3",
+      "wave_cycles/wave=69346"
+    ]
+  },
+  "svm": {
+    "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+    "LDS_Block_Size": "23040",
+    "Scratch_Size": "8",
+    "VGPR_Count": "64",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "112",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "5120000",
+    "n_dispatches": 1,
+    "total_kernel_ns": 4353316,
+    "per_dispatch_ns_median": 4353316,
+    "domain_total_ns": 4378355,
+    "domain_calls": 8,
+    "hsa_total_ns": 15805683,
+    "counters": {
+      "SQ_INSTS_LDS": 89240000.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 605370687.0,
+      "SQ_INSTS_VALU": 1128500000.0,
+      "SQ_WAVES": 80000.0,
+      "TCC_HIT_sum": 17421561.0,
+      "TCC_MISS_sum": 31282.0,
+      "GRBM_GUI_ACTIVE": 75501429.0,
+      "SQ_BUSY_CYCLES": 290290817.0,
+      "SQ_WAIT_INST_LDS": 57183800.0,
+      "SQ_WAVE_CYCLES": 9021523689.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (butterfly, no GEMM)",
+      "L2_hit%=99.8",
+      "wave_cycles/wave=112769"
+    ]
+  },
+  "v2_vs_svm_kernel_ratio": 0.675
+}
