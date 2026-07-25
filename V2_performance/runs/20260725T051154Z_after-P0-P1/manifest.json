@@ -1,0 +1,8 @@
+{
+  "run_id": "20260725T051154Z_after-P0-P1",
+  "label": "after-P0-P1",
+  "commit": "715f8d0",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 8
+}
