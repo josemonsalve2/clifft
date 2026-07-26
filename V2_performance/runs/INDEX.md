@@ -13,3 +13,4 @@
 | 20260726T000322Z_fullbench-rank26 | fullbench-rank26 | 6960527* | mlir-v2 | 21 | 0.643 |
 | 20260726T011254Z_fullbench-3way | fullbench-3way | 68cc1c6* | mlir-v2 | 21 | 0.664 |
 | 20260726T014859Z_all-tier5plus | all-tier5plus | 89d541e* | mlir-v2 | 26 | 0.769 |
+| 20260726T182433Z_report-final-postdust | report-final-postdust | f565075* | mlir-v2 | 26 | 0.759 |

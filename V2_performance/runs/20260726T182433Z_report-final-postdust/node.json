@@ -1,0 +1,7 @@
+{
+  "slurm_job_id": 50469,
+  "node": "smci350-rck-g03-f13-21",
+  "partition": "mi350x-es",
+  "arch": "gfx950",
+  "note": "Fresh full-corpus run on post-dust-fix HEAD. Node recorded explicitly: prior runs did not capture node identity and mi350x-es is heterogeneous - do not compare ratios across nodes."
+}
