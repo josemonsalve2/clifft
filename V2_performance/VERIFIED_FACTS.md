@@ -83,7 +83,14 @@ Three regimes, and the report should present them as three separate stories:
 2. **V2 wins modestly or ties** on quantum-volume circuits (0.72-0.99), with the
    win shrinking monotonically as rank climbs past 21.
 3. **V2 loses 1.44-1.46x** on exactly one family: the `circuit_d5` / `cultivation_d5`
-   coop circuits. Mechanism established in §6.
+   coop circuits — which are also **the only six circuits in the corpus that did
+   not run the specializer at all**. Their specialization failed the correctness
+   gate, so what these six rows measure is V2's *interpreter* against SVM's. See §6.
+
+A column the summary table above does not show, and which changes its reading
+entirely: **which kernel each row actually dispatched.** 20 of 26 ran
+`clifft_v2_spec`; the 6 that ran `clifft_v2_coop` are exactly the 6 losses. §6
+establishes this from `summary.json` and the on-disk `.gate` verdicts.
 
 `MFMA = 0.0` on all 26 circuits. The workload is a butterfly reduction over
 amplitudes, not a GEMM; the matrix cores are idle in both backends. Any claim
@@ -117,8 +124,17 @@ stops computing branch targets. It is the single most consistent signal in the
 corpus.
 
 **Verified:** the `circuit_d5` family is the *only* one where V2's VALU count
-goes **up** (2.2-2.3x) rather than down, and the only one where V2's L2 hit rate
-**collapses** (98% -> 71.5%). Both invert exactly on the family that loses. See §6.
+goes **up** (2.2-2.3x) rather than down, the only one where SALU goes **up**
+(1.62x vs 0.11-0.36 everywhere else), and the only one where V2's L2 hit rate
+**collapses** (98% -> 71.5%). All three invert together — and they invert on
+exactly the six circuits that ran `clifft_v2_coop`, the interpreter, because the
+correctness gate rejected their specialization. The SALU inversion is the
+tell: it is the *presence* of `switch` dispatch, which is precisely what the
+other 20 circuits' specialized kernels removed. See §6.
+
+**Read the last two rows of this table as "interpreter vs interpreter."** They
+are the only rows in the corpus that do not compare V2's compiler against SVM's
+interpreter.
 
 ---
 
@@ -214,58 +230,135 @@ Rendered stage pairs, all in `lowering/diffs/` as `.diff` (hunk-scoped) and
 
 ---
 
-## 6. The noise regression — mechanism, not speculation
+## 6. The `circuit_d5` regression — what actually ran
 
-The `circuit_d5` / `cultivation_d5` family is the only one where V2 loses
-(1.44-1.46x). Three independent measurements converge on the same cause.
+> **Correction (audit pass 2).** An earlier draft of this section attributed the
+> 1.44-1.46x loss to `noinline` noise ops inside the *specialized* kernel. That
+> attribution is **wrong**, and the data in this very run refutes it. The
+> specialized kernel never executed on these circuits. What follows is the
+> corrected account; the op-census and S7 evidence survive, but as an explanation
+> of *why specialization would not have saved this family*, not of the measured
+> gap.
 
-**(a) Op census.** The specialized source for these circuits
-(`build-v2-nohip/v2_spec_cache/coop_r10_n1720_*.c`, 1720 ops) contains:
+### 6.1 The primary fact: these six circuits ran the interpreter
+
+`summary.json` records, per circuit, the name of the kernel rocprofv3 actually
+timed. Across the 26-circuit corpus:
+
+| kernel actually dispatched | circuits |
+|---|---|
+| `clifft_v2_spec` (specialized) | 20 |
+| `clifft_v2_coop` (interpreter) | 6 — `circuit_d5_p{0.0005,0.001,0.002,0.003,0.005}`, `cultivation_d5` |
+
+Re-derive with:
+
+```
+python3 -c "import json;d=json.load(open('summary.json'));
+print(sorted((c['circuit'],c['v2']['kernel_name']) for c in d))"
+```
+
+**Every circuit V2 wins on ran `clifft_v2_spec`. Every circuit V2 loses on ran
+`clifft_v2_coop`.** The correlation in this corpus is perfect.
+
+### 6.2 Why the interpreter ran: the correctness gate rejected the specialization
+
+`v2_kernel.cc:340-405` validates each freshly compiled `.hsaco` against the
+interpreter on a sample before it is allowed to run, and persists the verdict to
+`<hsaco>.gate` so it is computed once ever. Verdicts on disk in
+`build-v2-nohip/v2_spec_cache/`:
+
+```
+$ for f in build-v2-nohip/v2_spec_cache/*.gate; do echo "$(cat $f) $(basename $f)"; done | sort
+0 coop_r10_n1720_977e1e830813621d.hsaco.gate
+0 coop_r10_n1720_cadfdf1980b2e2e8.hsaco.gate
+1 coop_r10_n140_4dfa2381ce3e045a.hsaco.gate
+... (34 more, all 1)
+```
+
+**2 failures out of 36 verdicts, and both are `coop_r10_n1720`** — the compiled
+shape of the entire `circuit_d5` / `cultivation_d5` family (rank 10, 1720
+instructions). The gate did its job: it caught a wrong kernel and fell back to
+the interpreter, which is why the numbers are still byte-exact against SVM
+(§2's ratios are apples-to-apples on *results*, just not on *code paths*).
+
+### 6.3 What the 1.44x therefore measures
+
+The headline 1.44-1.46x is **V2's bytecode interpreter versus SVM's bytecode
+interpreter**, on the one circuit family where V2's compiler is disqualified.
+It is not a measurement of specialized code losing. Two consequences for the
+report:
+
+- V2's interpreter is genuinely ~1.44x slower than SVM's GPU interpreter on this
+  shape. That is a real, reportable weakness of the V2 runtime path — V2 has
+  optimized its interpreter far less than SVM has, because the interpreter is
+  meant to be the fallback, not the product.
+- The counter inversion in §3 (VALU 2.2-2.3x, SALU 1.62x, L2 hit 71.5% vs 98.0%)
+  is a property of `clifft_v2_coop`, **not** of `V2_NOISE_ATTR` call boundaries.
+  The interpreter build compiles `v2_ops_body.inc` with `always_inline`
+  throughout; there are no `noinline` ABI boundaries in the kernel that ran. The
+  SALU ratio *above* 1.0 here — against 0.11-0.36 everywhere else — is the
+  signature of `switch`-dispatch overhead that specialization removes and that
+  this family never got to remove.
+
+### 6.4 Why specializing this family would not have been a free win either
+
+The op census and the S7 microbenchmark still bound the upside, and should be
+reported as such.
+
+**(a) Op census.** The specialized source `coop_r10_n1720_*.c` (1720 ops)
+contains:
 
 ```
 156  v2_op_noise          80  v2_op_noise_block      93  v2_op_readout_noise
 ```
 
-329 of 1720 ops (19.1%) are noise ops. By contrast `coop_r10_n140_*.c` (qv10,
-ratio 0.310) contains **zero** noise ops of any kind. The corpus splits cleanly:
-every circuit V2 wins big on is noise-light or noise-free at the op level;
-the family it loses on is the most noise-dense in the corpus.
+329 of 1720 ops (19.1%) are noise ops — the densest in the corpus. `coop_r10_n140`
+(qv10, ratio 0.310) has **zero**.
 
 **(b) Specialization gain is ~1.0 on exactly these ops.** S7 (§4) measures
 `noise_block` at 1.07x ISA / 1.02x VALU. The specializer cannot fold a
-PRNG-trip-count loop. So on a circuit that is 19% noise ops, ~19% of the work is
-immune to the entire optimization, and Amdahl does the rest.
+PRNG-trip-count loop; ~19% of this circuit is immune to the entire optimization,
+and Amdahl bounds the rest.
 
-**(c) The counters show the cost is not merely un-improved but actively worse.**
-V2's VALU count on this family is **2.2-2.3x SVM's**, and V2's L2 hit rate falls
-to 71.5% against SVM's 98.0%. Every other circuit in the corpus has V2 VALU
-*below* SVM. The straight-lined noise ops carry `V2_NOISE_ATTR =
-__attribute__((noinline))` (`v2_ops.h:265-273`, applied at
-`v2_ops_body.inc:111,135,339,428,438,452`), so each of the 329 sites is a real
-call with a real ABI boundary, and the hazard table + channel table are
-re-loaded per call instead of staying resident. The L2 collapse is consistent
-with that re-load pattern.
+**(c) But noise density alone does not explain the loss.** The whole surface
+family is *also* ~16-17% noise ops and V2 wins 2-4x on it. What is unique to
+`coop_r10_n1720` is the *combination*: `readout_noise = 93` (no other kernel in
+the corpus has a single one), `noise_block = 80` (vs 35-53 elsewhere),
+`swap_meas_interfere = 15`. Commit `9d9cc68` named exactly this combination as
+the knife-edge case when the gate was introduced.
 
-**Verified as structural fact:** v2's `-O2` output keeps exactly **5** functions,
-down from 36 at `-O0` — `clifft_v2_spec`, `v2_op_noise_block`, `v2_op_noise`,
-`v2_op_readout_noise`, `v2_op_swap_meas_interfere`. The survivors are exactly the
-`V2_NOISE_ATTR` set plus the kernel. The attribute does what it claims.
+### 6.5 Structural facts that remain verified
 
-**Why the attribute is kept anyway.** `v2_ops_body.inc:420-427` records the
-history in-tree: the `noinline` fence was originally introduced on the theory
-that inlining was reassociating FP and flipping a branch by ~1 ULP. **That
-theory was wrong.** The real bug was `v2_barrier()` being an execution-only
-barrier (§7). The comment is explicit that the attribute is retained "because it
-measurably helps register pressure and code size on large circuits, NOT because
-it is load-bearing for correctness." `V2_SPEC_NOISE_INLINE=1` flips it back to
-`always_inline` so the hypothesis stays A/B-testable rather than assumed.
+v2's `-O2` output on a specialized noise-heavy circuit keeps exactly **5**
+functions, down from 36 at `-O0` — `clifft_v2_spec`, `v2_op_noise_block`,
+`v2_op_noise`, `v2_op_readout_noise`, `v2_op_swap_meas_interfere`. The survivors
+are exactly the `V2_NOISE_ATTR` set plus the kernel; the attribute does what it
+claims. This is a fact about the *compiled artifact*, and holds regardless of
+whether that artifact was dispatched.
 
-**Open item the report should state as open:** whether flipping
-`V2_SPEC_NOISE_INLINE=1` recovers the `circuit_d5` family at acceptable register
-pressure has not been measured on the current HEAD. The knob exists; the
-experiment is one SLURM job. Until it is run, the report should present the
-regression as *characterized* (mechanism established by three converging
-measurements) but not *resolved*.
+`v2_ops_body.inc:420-427` records the in-tree history: the `noinline` fence was
+introduced on the theory that inlining reassociated FP and flipped a branch by
+~1 ULP. **That theory was wrong** — the real bug was an execution-only
+`v2_barrier()` (§7). The comment is explicit that the attribute is retained
+"because it measurably helps register pressure and code size on large circuits,
+NOT because it is load-bearing for correctness."
+
+### 6.6 Open items
+
+1. **Does `V2_SPEC_NOISE_INLINE=1` make `coop_r10_n1720` pass the gate?** The
+   knob flips `V2_NOISE_ATTR` to `always_inline`. The question is now a
+   *correctness* question, not a performance one: it would test whether the
+   remaining disagreement is inlining-related at all. Not measured on current
+   HEAD.
+2. **What does the specialized `coop_r10_n1720` actually get wrong?** The gate
+   reports pass/fail, not a diff. Nothing in the tree localizes the divergence to
+   an opcode or an instruction index.
+3. **Is V2's coop interpreter improvable to SVM parity?** Untested. It has never
+   been an optimization target.
+
+Until (1) and (2) are answered, the report must present this family as
+*characterized* — we know exactly which kernel ran and why — but **not**
+*resolved*: the specializer is still incorrect on this shape.
 
 ---
 
@@ -455,6 +548,23 @@ useful, **[unverified]** as stated.
 | item | status |
 |---|---|
 | HIP-vs-HSA dispatch cost, measured on gfx950 | SLURM job 50474 pending; replaces §11's asserted numbers |
-| `V2_SPEC_NOISE_INLINE=1` A/B on current HEAD | not run; would test whether §6's regression is recoverable |
-| `coop_r10_n1720` gate failure | see `project_v2_performance` notes; not re-tested this cycle |
+| **`coop_r10_n1720` specialization is incorrect** | **the 2 of 36 gate failures; root cause not localized to an opcode. This is the single largest open correctness item in V2** (§6.2) |
+| `V2_SPEC_NOISE_INLINE=1` A/B on current HEAD | not run; now a *correctness* probe (does the gate pass?), not a performance one (§6.6) |
+| V2 coop **interpreter** vs SVM interpreter parity | V2's is ~1.44x slower on the one shape where it has to run; never an optimization target (§6.3) |
 | Node identity for runs before `20260726T182433Z` | unrecoverable; cross-run deltas carry node variance |
+
+---
+
+## 13. Audit-pass-2 corrections to this document
+
+This ledger is itself subject to its own ground rule. Corrections made after the
+first commit, each traceable to data:
+
+| § | claim as first written | correction | evidence |
+|---|---|---|---|
+| 6 | the 1.44x loss is caused by `noinline` noise-op ABI boundaries in the specialized kernel | the specialized kernel never ran; the gate rejected it and the interpreter ran instead | `summary.json` `v2.kernel_name = clifft_v2_coop` on all 6; `coop_r10_n1720_*.hsaco.gate = 0` |
+| 3 | VALU/L2 inversion attributed to specialized-kernel call boundaries | inversion is a property of `clifft_v2_coop`; the interpreter build inlines `V2_NOISE_ATTR` throughout | same |
+| 2 | three regimes described purely by ratio | the third regime is defined by *which kernel ran*, not by circuit shape | same |
+
+The pattern to carry into the report: **`summary.json` records `v2.kernel_name`
+per circuit. Any performance claim about "V2" must state which V2 it means.**
