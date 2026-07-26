@@ -18,7 +18,47 @@ Ground rules used when auditing:
 
 ---
 
+## 0. INVALIDATION NOTICE — the 20260726T182433Z baseline dispatched stale kernels
+
+> **Everything in §1–§3, §6 and §10 that comes from
+> `runs/20260726T182433Z_report-final-postdust/` is under re-measurement.**
+> Read this section before quoting any number below it.
+>
+> `compile_specialized()` keyed the specializer cache on the *generated C* plus
+> toolchain paths, but **not on the device headers** that supply every
+> `v2_op_*` body, `v2_barrier()`, and `V2_DUST_EPS`. A header change produced
+> the same key, so the day-old `.hsaco` — and its `.gate` verdict — won.
+> Fixed in `009df59`; the poisoned cache is quarantined (moved, not deleted) at
+> `history/stale_spec_cache_20260725/`.
+>
+> Verified directly on the binaries with `llvm-objdump`, two independent markers:
+>
+> | marker | `build-v2-nohip/v2_spec_cache` (what job 50469 ran) | `scratch/*_cache` (fresh dirs) |
+> |---|---|---|
+> | `s_barrier` preceded by `lgkmcnt(0)` — the `150d09f` fence | **0 / 1509 (0.0 %)** | 1400 / 1509 (92.8 %) |
+> | `V2_DUST_EPS` constant — the `2a015fd` fix | **`1e-18` (old)** | `1e-11` (fixed) |
+>
+> All 36 cached kernels are dated 2026-07-25; `150d09f` landed 07-26 06:33 and
+> `2a015fd` landed 07-26 13:34. The run submitted specifically to prove the
+> corpus reflected post-fix code in fact dispatched **pre-fix** code.
+>
+> **The two `coop_r10_n1720` gate failures in §6 are verdicts on the pre-fence
+> binary.** Commit `435213e` already measured the post-fence gate *passing* on
+> that exact shape (and the specializer then beating the interpreter 1.72–1.76×).
+> §6's conclusion — "the specializer is still incorrect on this shape" — rests on
+> stale zeros and is retracted pending the re-run.
+>
+> Re-measurement: **SLURM job 50505**, `runs/20260726T221403Z_postcachefix-headerkeyed/`.
+> Facts not derived from that run (§4 spec_examples, §5 MLIR, §7 barrier, §8
+> f32/f64, §9 compile time) are unaffected — they were measured from sources,
+> fresh caches, or independently-built artifacts.
+
+---
+
 ## 1. The measurement baseline
+
+> ⚠️ **Invalid — see §0.** Superseded by job 50505. Retained verbatim because
+> the invalidation argument in §0 refers to it.
 
 | | |
 |---|---|
@@ -582,8 +622,9 @@ useful, **[unverified]** as stated.
 
 | item | status |
 |---|---|
-| HIP-vs-HSA dispatch cost, measured on gfx950 | SLURM job 50474 pending; replaces §11's asserted numbers |
-| **`coop_r10_n1720` specialization is incorrect** | **the 2 of 36 gate failures; root cause not localized to an opcode. This is the single largest open correctness item in V2** (§6.2) |
+| **Re-measure the whole corpus on header-keyed cache** | **job 50505 running; §0. Every §1–§3/§6/§10 number is provisional until it lands** |
+| HIP-vs-HSA dispatch cost, measured on gfx950 | SLURM job 50501 pending; replaces §11's asserted numbers |
+| ~~`coop_r10_n1720` specialization is incorrect~~ | **retracted (§0)** — the failing verdicts were computed on the pre-fence binary; `435213e` measured the post-fence gate passing |
 | `V2_SPEC_NOISE_INLINE=1` A/B on current HEAD | not run; now a *correctness* probe (does the gate pass?), not a performance one (§6.6) |
 | V2 coop **interpreter** vs SVM interpreter parity | V2's is ~1.44x slower on the one shape where it has to run; never an optimization target (§6.3) |
 | Node identity for runs before `20260726T182433Z` | unrecoverable; cross-run deltas carry node variance |
