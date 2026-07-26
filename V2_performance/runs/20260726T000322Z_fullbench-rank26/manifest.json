@@ -1,0 +1,8 @@
+{
+  "run_id": "20260726T000322Z_fullbench-rank26",
+  "label": "fullbench-rank26",
+  "commit": "6960527",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 21
+}

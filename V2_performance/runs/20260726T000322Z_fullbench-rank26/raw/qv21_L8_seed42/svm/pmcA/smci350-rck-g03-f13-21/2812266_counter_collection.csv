@@ -1,0 +1,41 @@
+"Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Id","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
+1,1,"Agent 2",1,2812266,2812266,1024,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_LDS",0.00000000e+00,6196924454490217,6196924454494657
+1,1,"Agent 2",1,2812266,2812266,1024,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_MFMA",0.00000000e+00,6196924454490217,6196924454494657
+1,1,"Agent 2",1,2812266,2812266,1024,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_SALU",318.000000,6196924454490217,6196924454494657
+1,1,"Agent 2",1,2812266,2812266,1024,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_VALU",241.000000,6196924454490217,6196924454494657
+1,1,"Agent 2",1,2812266,2812266,1024,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_WAVES",16.000000,6196924454490217,6196924454494657
+2,2,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_LDS",0.00000000e+00,6196924454579773,6196924454584093
+2,2,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_MFMA",0.00000000e+00,6196924454579773,6196924454584093
+2,2,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_SALU",122.000000,6196924454579773,6196924454584093
+2,2,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_VALU",57.000000,6196924454579773,6196924454584093
+2,2,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_WAVES",8.000000,6196924454579773,6196924454584093
+3,3,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_LDS",0.00000000e+00,6196924454651571,6196924454654291
+3,3,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_MFMA",0.00000000e+00,6196924454651571,6196924454654291
+3,3,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_SALU",122.000000,6196924454651571,6196924454654291
+3,3,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_VALU",57.000000,6196924454651571,6196924454654291
+3,3,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_WAVES",8.000000,6196924454651571,6196924454654291
+4,4,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_LDS",0.00000000e+00,6196924462290991,6196924462292671
+4,4,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_MFMA",0.00000000e+00,6196924462290991,6196924462292671
+4,4,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_SALU",84.000000,6196924462290991,6196924462292671
+4,4,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_VALU",35.000000,6196924462290991,6196924462292671
+4,4,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_WAVES",4.000000,6196924462290991,6196924462292671
+5,5,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_LDS",0.00000000e+00,6196924462347429,6196924462348909
+5,5,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_MFMA",0.00000000e+00,6196924462347429,6196924462348909
+5,5,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_SALU",85.000000,6196924462347429,6196924462348909
+5,5,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_VALU",34.000000,6196924462347429,6196924462348909
+5,5,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_WAVES",4.000000,6196924462347429,6196924462348909
+6,6,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_LDS",0.00000000e+00,6196924462398428,6196924462399708
+6,6,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_MFMA",0.00000000e+00,6196924462398428,6196924462399708
+6,6,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_SALU",84.000000,6196924462398428,6196924462399708
+6,6,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_INSTS_VALU",35.000000,6196924462398428,6196924462399708
+6,6,"Agent 2",1,2812266,2812266,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"SQ_WAVES",4.000000,6196924462398428,6196924462399708
+7,7,"Agent 2",1,2812266,2812266,131072,11,"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",256,8704,56,64,0,112,"SQ_INSTS_LDS",14190448.000000,6196924463106774,6196928510517011
+7,7,"Agent 2",1,2812266,2812266,131072,11,"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",256,8704,56,64,0,112,"SQ_INSTS_MFMA",0.00000000e+00,6196924463106774,6196928510517011
+7,7,"Agent 2",1,2812266,2812266,131072,11,"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",256,8704,56,64,0,112,"SQ_INSTS_SALU",29285808376.000000,6196924463106774,6196928510517011
+7,7,"Agent 2",1,2812266,2812266,131072,11,"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",256,8704,56,64,0,112,"SQ_INSTS_VALU",287974398448.000000,6196924463106774,6196928510517011
+7,7,"Agent 2",1,2812266,2812266,131072,11,"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",256,8704,56,64,0,112,"SQ_WAVES",10240.000000,6196924463106774,6196928510517011
+8,8,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_LDS",0.00000000e+00,6196928510655051,6196928510658131
+8,8,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_MFMA",0.00000000e+00,6196928510655051,6196928510658131
+8,8,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_SALU",163.000000,6196928510655051,6196928510658131
+8,8,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_INSTS_VALU",65.000000,6196928510655051,6196928510658131
+8,8,"Agent 2",1,2812266,2812266,512,8,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"SQ_WAVES",8.000000,6196928510655051,6196928510658131

@@ -1,0 +1,19 @@
+"Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Id","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
+1,1,"Agent 2",1,2801705,2801705,1024,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_HIT_sum",107.000000,6196793561261488,6196793561265648
+1,1,"Agent 2",1,2801705,2801705,1024,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_MISS_sum",210.000000,6196793561261488,6196793561265648
+2,2,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_HIT_sum",18.000000,6196793561392203,6196793561395323
+2,2,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_MISS_sum",14.000000,6196793561392203,6196793561395323
+3,3,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_HIT_sum",23.000000,6196793561467921,6196793561471521
+3,3,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_MISS_sum",14.000000,6196793561467921,6196793561471521
+4,4,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_HIT_sum",11.000000,6196793561539279,6196793561541479
+4,4,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_MISS_sum",14.000000,6196793561539279,6196793561541479
+5,5,"Agent 2",1,2801705,2801705,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"TCC_HIT_sum",15.000000,6196793561685756,6196793561687075
+5,5,"Agent 2",1,2801705,2801705,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"TCC_MISS_sum",17.000000,6196793561685756,6196793561687075
+6,6,"Agent 2",1,2801705,2801705,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"TCC_HIT_sum",14.000000,6196793561749634,6196793561751114
+6,6,"Agent 2",1,2801705,2801705,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"TCC_MISS_sum",16.000000,6196793561749634,6196793561751114
+7,7,"Agent 2",1,2801705,2801705,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"TCC_HIT_sum",14.000000,6196793561813472,6196793561814912
+7,7,"Agent 2",1,2801705,2801705,256,10,"__amd_rocclr_fillBufferAligned",256,0,0,8,0,48,"TCC_MISS_sum",16.000000,6196793561813472,6196793561814912
+8,8,"Agent 2",1,2801705,2801705,131072,12,"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",256,8704,56,64,0,112,"TCC_HIT_sum",92796272.000000,6196793562521913,6196793642529512
+8,8,"Agent 2",1,2801705,2801705,131072,12,"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",256,8704,56,64,0,112,"TCC_MISS_sum",25023709.000000,6196793562521913,6196793642529512
+9,9,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_HIT_sum",20.000000,6196793642656350,6196793642659030
+9,9,"Agent 2",1,2801705,2801705,512,7,"__amd_rocclr_copyBuffer",512,0,0,8,0,32,"TCC_MISS_sum",16.000000,6196793642656350,6196793642659030

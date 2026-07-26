@@ -1,0 +1,13 @@
+"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,1,8,"__amd_rocclr_copyBuffer",1,6196619683182831,6196619683186470,0,0,8,0,32,512,1,1,1024,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,2,8,"__amd_rocclr_copyBuffer",2,6196619683213510,6196619683216470,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,3,8,"__amd_rocclr_copyBuffer",3,6196619683231508,6196619683234028,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,4,8,"__amd_rocclr_copyBuffer",4,6196619690533960,6196619690537760,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,5,8,"__amd_rocclr_copyBuffer",5,6196619690552369,6196619690554889,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,6,8,"__amd_rocclr_copyBuffer",6,6196619690570158,6196619690572678,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,7,8,"__amd_rocclr_copyBuffer",7,6196619690586958,6196619690590078,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,8,8,"__amd_rocclr_copyBuffer",8,6196619690604477,6196619690607677,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,9,8,"__amd_rocclr_copyBuffer",9,6196619690622117,6196619690624477,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,10,8,"__amd_rocclr_copyBuffer",10,6196619690638757,6196619690641117,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,11,13,"clifft::gpu::(anonymous namespace)::sample_kernel(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",11,6196619691541059,6196619692088969,0,4480,60,0,112,256,1,1,20224,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,2789925,12,8,"__amd_rocclr_copyBuffer",12,6196619692115306,6196619692118546,0,0,8,0,32,512,1,1,1024,1,1

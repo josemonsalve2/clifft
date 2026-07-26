@@ -1,0 +1,71 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 50278
+--------------------------------------------
+/scratch/jmonsalv is not exists. Please contact System Admin..
+[100%] Built target run_v2
+RUN_DIR=/shared/jmonsalv/quantum/clifft_rl/clifft/V2_performance/runs/20260726T000322Z_fullbench-rank26
+=== frame_h (shots=20000) ===
+  v2 done
+  svm done
+=== four_t (shots=20000) ===
+  v2 done
+  svm done
+=== circuit_d3_p0.001 (shots=20000) ===
+  v2 done
+  svm done
+=== surface_d7_t5 (shots=20000) ===
+  v2 done
+  svm done
+=== qv10 (shots=20000) ===
+  v2 done
+  svm done
+=== cultivation_d5 (shots=20000) ===
+  v2 done
+  svm done
+=== circuit_d5_p0.001 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d7_t10 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d7_t15 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d9_t10 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d7_t19 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d9_t15 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d9_t19 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d11_t15 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d11_t19 (shots=5000) ===
+  v2 done
+  svm done
+=== qv20_seed42 (shots=2000) ===
+  v2 done
+  svm done
+=== qv20_L8_seed42 (shots=2000) ===
+  v2 done
+  svm done
+=== qv21_L8_seed42 (shots=2000) ===
+  v2 done
+  svm done
+=== qv22_L6_seed42 (shots=1000) ===
+  v2 done
+  svm done
+=== qv23_L5_seed42 (shots=1000) ===
+  v2 done
+  svm done
+=== qv24_L4_seed42 (shots=500) ===
+  v2 done
+  svm done
+SWEEP_DONE
