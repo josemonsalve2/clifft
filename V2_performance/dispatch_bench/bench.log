@@ -1,0 +1,19 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 50474
+--------------------------------------------
+# node=smci350-rck-g03-d13-21 arch=gfx950 rocm=/opt/rocm-7.2.3
+built bench_empty.hsaco
+hsa_dispatch_bench.cc: In function ‘int main(int, char**)’:
+hsa_dispatch_bench.cc:131:62: error: invalid conversion from ‘const char*’ to ‘hsa_file_t’ {aka ‘int’} [-fpermissive]
+  131 |     CHECK(hsa_code_object_reader_create_from_file(hsaco.c_str(), &reader),
+      |                                                   ~~~~~~~~~~~^~
+      |                                                              |
+      |                                                              const char*
+hsa_dispatch_bench.cc:31:28: note: in definition of macro ‘CHECK’
+   31 |         hsa_status_t s_ = (expr);                                          \
+      |                            ^~~~
+In file included from hsa_dispatch_bench.cc:19:
+/opt/rocm-7.2.3/include/hsa/hsa.h:4113:16: note:   initializing argument 1 of ‘hsa_status_t hsa_code_object_reader_create_from_file(hsa_file_t, hsa_code_object_reader_t*)’
+ 4113 |     hsa_file_t file,
+      |     ~~~~~~~~~~~^~~~
