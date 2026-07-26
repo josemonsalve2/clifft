@@ -53,7 +53,44 @@ enum { FLAG_SIGN = 1u << 0, FLAG_IDENTITY = 1u << 2, FLAG_EXPECTED_ONE = 1u << 3
 #define V2_SCRATCH_AMP 512
 #define V2_RED_WARPS   8
 #define V2_INV_SQRT2   0.70710678118654752440
-#define V2_DUST_EPS    1e-18
+
+// Relative epsilon for detecting floating-point dust in measurement
+// probabilities. This is NOT the SVM's kDustEpsilon and must not be synced to
+// it: the two backends store amplitudes at different precisions, and the
+// threshold has to sit above the dust floor of whichever one is in use.
+//
+//   SVM: std::complex<double> -> analytically-zero interference lands at
+//        1e-30..1e-24, and kDustEpsilon = 1e-18 clears it by six decades.
+//   V2:  CV2Complex = {float re; float im;} -> the same interference bottoms
+//        out on fp32_eps^2 = 1.4e-14 (see sizing below). 1e-18 is four decades
+//        BELOW that, so it can never fire.
+//
+// Why a threshold that never fires is a correctness bug, not just dead code:
+// sample_branch() returns WITHOUT drawing when a branch is dust. If the SVM
+// clamps where V2 does not, V2 consumes a PRNG draw the SVM never did. Both
+// still pick the same outcome (p0/total is 1-1e-15, so any uniform draw lands
+// the same way), but every subsequent draw in that shot is shifted by one and
+// the two streams never resynchronize. In a surface-code circuit nearly every
+// stabilizer measurement is deterministic, so this fires constantly -- it is
+// what made the d5 fixtures disagree with the CPU reference.
+//
+// Sizing. A branch probability is a sum of `half = 1 << (active_k - 1)` squared
+// fp32 magnitudes. The rounding error is RELATIVE to each amplitude, so the
+// dust floor does not grow with the term count -- summing more terms averages
+// the residuals rather than accumulating them. Measured (residual model,
+// p1/total over 2000 trials per rank):
+//
+//     rank  1 -> 9.7e-15 median, 1.2e-13 max      rank 12 -> 1.42e-14, 1.6e-14
+//     rank  4 -> 1.3e-14 median, 5.8e-14 max      rank 26 -> 1.42e-14, 1.5e-14
+//
+// It concentrates on fp32_eps^2 = 1.42e-14 and the spread TIGHTENS with rank;
+// the low-rank tail is the widest at ~1.2e-13. So one constant covers the whole
+// 1..26 range. 1e-11 sits ~2 decades above that tail and ~5 decades below the
+// smallest probability fp32 can carry meaningfully, leaving a wide margin on
+// both sides. Genuine small probabilities (the SVM comment cites R_ZZ angles
+// producing ~1e-16) are not representable in fp32 storage in the first place,
+// so nothing real is lost to the clamp.
+#define V2_DUST_EPS    1e-11
 
 // ----- per-shot classical state ----------------------------------------------
 typedef struct {
@@ -212,6 +249,9 @@ static inline void coop_reduce2(u32 t, double l0, double l1, double* out0, doubl
 }
 #endif
 
+// The clamp decision must match the SVM's on every call: a branch clamped on
+// one side and rolled on the other consumes a PRNG draw the other never did,
+// and the two streams never resynchronize. See V2_DUST_EPS.
 static inline u8 sample_branch(u64* rng, double p0, double p1, double total) {
     double eps = V2_DUST_EPS * total;
     if (p1 <= eps) return 0;
