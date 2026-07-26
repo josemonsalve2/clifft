@@ -143,8 +143,13 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
     // diverges on others.
     const uint64_t val_seeds[] = {1, 7, 42, 99, 123, 2718};
 
+    // shot_lo/shot_hi select a HALF-OPEN shot range [shot_lo, shot_hi). Each shot
+    // is seeded independently (rng_seed(seed, shot_id)) and aggregates via
+    // order-independent integer atomics, so any sub-range is reproducible on its
+    // own -- that is what makes the bisect below able to isolate a single shot.
     auto run_one = [&](const std::string& path, const std::string& sym,
-                       uint64_t val_seed, BlockCounts* out) -> bool {
+                       uint64_t val_seed, uint32_t shot_lo, uint32_t shot_hi,
+                       BlockCounts* out) -> bool {
         HsaLoadedKernel k = hsa_load_kernel(path, sym, 0);
         if (!k.valid) return false;
         BlockCounts* d_counts = static_cast<BlockCounts*>(rt.device_malloc(sizeof(BlockCounts)));
@@ -154,7 +159,12 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
         ka.instrs = d_instrs; ka.num_instrs = (uint32_t)flat.instrs.size();
         ka.peak_rank = flat.peak_rank; ka.total_meas_slots = flat.total_meas_slots;
         ka.num_observables = flat.num_observables; ka.seed = val_seed;
-        ka.shot_offset = 0; ka.shots = val_shots;
+        // coop/register compare shot_id (= shot_offset + lane) against `shots`,
+        // so `shots` is the ABSOLUTE upper bound; global drains a counter that
+        // starts at 0, so there `shots` is the COUNT. Getting this backwards
+        // would silently run the wrong shots rather than fail.
+        const uint32_t nshots = shot_hi - shot_lo;
+        ka.shot_offset = shot_lo; ka.shots = is_global ? nshots : shot_hi;
         ka.block_counts = reinterpret_cast<uint64_t>(d_counts);
         ka.fused_u2 = d_u2; ka.fused_u4 = d_u4; ka.obs_off = d_oo; ka.obs_tgt = d_ot;
         ka.noise_sites = d_ns; ka.noise_channels = d_nc; ka.noise_hazards = d_nh;
@@ -168,7 +178,7 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
             ga.global_v = d_gv; ga.global_scratch = d_gs; ga.work_counter = d_wc;
             grid = g_wgs * block; ka_bytes = sizeof(ga);
         } else {
-            grid = is_reg ? (((val_shots + block - 1u) / block) * block) : (val_shots * block);
+            grid = is_reg ? (((nshots + block - 1u) / block) * block) : (nshots * block);
             ka_bytes = sizeof(ka);
         }
         hsa_dispatch_and_wait(k, 0, grid, block, &ga, ka_bytes);
@@ -178,15 +188,92 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
         return true;
     };
 
+    // V2_GATE_SELFTEST: run the INTERPRETER against ITSELF, twice, same seed and
+    // same shots. Both runs execute identical machine code, so a rounding or
+    // codegen difference cannot possibly show up here -- any mismatch is proof
+    // of nondeterminism (a race or uninitialized state) that has nothing to do
+    // with the specializer. This distinguishes "spec differs from interp"
+    // (codegen) from "this kernel does not even agree with itself" (race), which
+    // the spec-vs-interp comparison alone cannot tell apart.
+    if (getenv("V2_GATE_SELFTEST")) {
+        struct { const char* tag; const std::string& path; std::string sym; }
+        kernels[] = {{"interp", interp_path, interp_sym},
+                     {"spec", spec_hsaco, spec_symbol}};
+        for (auto& kern : kernels) {
+            for (uint64_t vs : val_seeds) {
+                BlockCounts a{}, b{};
+                if (!run_one(kern.path, kern.sym, vs, 0, val_shots, &a) ||
+                    !run_one(kern.path, kern.sym, vs, 0, val_shots, &b)) break;
+                bool same = (a.passed == b.passed);
+                for (uint32_t i = 0; i < flat.num_observables && i < kMaxObs; ++i)
+                    if (a.observable_ones[i] != b.observable_ones[i]) same = false;
+                std::fprintf(stderr, "[v2-selftest] %s-vs-%s seed=%llu passed %llu/%llu",
+                    kern.tag, kern.tag, (unsigned long long)vs,
+                    (unsigned long long)a.passed, (unsigned long long)b.passed);
+                for (uint32_t i = 0; i < flat.num_observables && i < kMaxObs; ++i)
+                    std::fprintf(stderr, " obs%u %llu/%llu", i,
+                        (unsigned long long)a.observable_ones[i],
+                        (unsigned long long)b.observable_ones[i]);
+                std::fprintf(stderr, " -> %s\n", same ? "deterministic" : "NONDETERMINISTIC");
+            }
+        }
+    }
+
+    // V2_GATE_BISECT: narrow a diverging seed down to the individual shot(s).
+    // Each shot is independently seeded, so running [i, i+1) reproduces exactly
+    // that shot. Knowing WHICH shot diverges turns a statistical argument into a
+    // single reproducible case that can be inspected directly.
+    if (const char* bs = getenv("V2_GATE_BISECT")) {
+        const uint64_t vs = strtoull(bs, nullptr, 10);
+        std::fprintf(stderr, "[v2-bisect] seed=%llu scanning %u shots\n",
+                     (unsigned long long)vs, val_shots);
+        for (uint32_t i = 0; i < val_shots; ++i) {
+            BlockCounts hi{}, hs{};
+            if (!run_one(interp_path, interp_sym, vs, i, i + 1, &hi) ||
+                !run_one(spec_hsaco, spec_symbol, vs, i, i + 1, &hs)) break;
+            bool same = (hi.passed == hs.passed);
+            for (uint32_t j = 0; j < flat.num_observables && j < kMaxObs; ++j)
+                if (hi.observable_ones[j] != hs.observable_ones[j]) same = false;
+            if (!same) {
+                std::fprintf(stderr, "[v2-bisect] shot %u DIVERGES: passed %llu/%llu", i,
+                    (unsigned long long)hi.passed, (unsigned long long)hs.passed);
+                for (uint32_t j = 0; j < flat.num_observables && j < kMaxObs; ++j)
+                    std::fprintf(stderr, " obs%u %llu/%llu", j,
+                        (unsigned long long)hi.observable_ones[j],
+                        (unsigned long long)hs.observable_ones[j]);
+                std::fprintf(stderr, "\n");
+            }
+        }
+        std::fprintf(stderr, "[v2-bisect] done\n");
+    }
+
     bool match = true;
     for (uint64_t vs : val_seeds) {
         BlockCounts hi{}, hs{};
-        if (!run_one(interp_path, interp_sym, vs, &hi) ||
-            !run_one(spec_hsaco, spec_symbol, vs, &hs)) { match = false; break; }
-        if (hi.passed != hs.passed) { match = false; break; }
+        if (!run_one(interp_path, interp_sym, vs, 0, val_shots, &hi) ||
+            !run_one(spec_hsaco, spec_symbol, vs, 0, val_shots, &hs)) { match = false; break; }
+        bool seed_match = (hi.passed == hs.passed);
         for (uint32_t i = 0; i < flat.num_observables && i < kMaxObs; ++i)
-            if (hi.observable_ones[i] != hs.observable_ones[i]) { match = false; break; }
-        if (!match) break;
+            if (hi.observable_ones[i] != hs.observable_ones[i]) seed_match = false;
+        // V2_GATE_VERBOSE reports the MAGNITUDE of a divergence per seed, not
+        // just its existence. A handful of shots out of thousands says the
+        // cause is a rare numerical knife-edge; a large or total mismatch says
+        // the cause is structural. The old code broke on the first bad seed and
+        // printed nothing, which is why "irreducible 1 ULP" stayed a guess.
+        if (getenv("V2_GATE_VERBOSE")) {
+            std::fprintf(stderr,
+                "[v2-gate] seed=%llu shots=%u passed interp=%llu spec=%llu (d=%lld)",
+                (unsigned long long)vs, val_shots,
+                (unsigned long long)hi.passed, (unsigned long long)hs.passed,
+                (long long)hs.passed - (long long)hi.passed);
+            for (uint32_t i = 0; i < flat.num_observables && i < kMaxObs; ++i)
+                std::fprintf(stderr, " obs%u interp=%llu spec=%llu (d=%lld)", i,
+                    (unsigned long long)hi.observable_ones[i],
+                    (unsigned long long)hs.observable_ones[i],
+                    (long long)hs.observable_ones[i] - (long long)hi.observable_ones[i]);
+            std::fprintf(stderr, " -> %s\n", seed_match ? "match" : "DIVERGE");
+        }
+        if (!seed_match) { match = false; if (!getenv("V2_GATE_VERBOSE")) break; }
     }
 
     auto free_if = [&](uint64_t p) { if (p) rt.device_free(reinterpret_cast<void*>(p)); };

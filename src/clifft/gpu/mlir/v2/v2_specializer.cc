@@ -3,6 +3,7 @@
 #include "clifft/gpu/gpu_types.h"
 #include "clifft/backend/backend.h"   // Opcode enum values
 
+#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 
@@ -115,7 +116,14 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
     // analog of resolving noise to a loop, and it restores byte-exactness on
     // READOUT_NOISE/NOISE_BLOCK-heavy circuits (circuit_d5) without touching the
     // interpreter/register builds (they keep always_inline).
-    o << "#define V2_NOISE_ATTR __attribute__((noinline))\n";
+    // V2_SPEC_NOISE_INLINE=1 flips this back to always_inline (the interpreter's
+    // own setting) so the noinline-fence hypothesis can be A/B tested rather
+    // than assumed: if a circuit's gate verdict is unchanged with the fence
+    // removed, the fence is not what that circuit's divergence hinges on.
+    if (getenv("V2_SPEC_NOISE_INLINE"))
+        o << "#define V2_NOISE_ATTR __attribute__((always_inline))\n";
+    else
+        o << "#define V2_NOISE_ATTR __attribute__((noinline))\n";
     o << "#include \"clifft/gpu/mlir/v2/v2_ops.h\"\n\n";
 
     // --- specialized straight-line body (shared by the tier wrapper) ---------
