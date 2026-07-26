@@ -115,10 +115,10 @@ std::string compile_specialized(const std::string& csrc, const std::string& key)
 
     // 1) C -> amdgcn bitcode. Flags are IDENTICAL to the build-time interpreter
     // pipeline (ClifftAmdgcn.cmake) so the shared v2_op_*() bodies compile to the
-    // same code -> byte-exact. Byte-exactness comes from (a) same flags here and
-    // (b) the FP-carrying noise ops being emitted noinline (V2_NOISE_ATTR), which
-    // reproduces the interpreter's loop-body-per-noise-op fence; do NOT add
-    // vectorize/unroll flags that would diverge from the interpreter.
+    // same code -> byte-exact. -ffp-contract=off with no fast-math is what makes
+    // that hold regardless of inlining decisions: without reassociation or
+    // contraction the optimizer cannot change an FP result. Do NOT add
+    // vectorize/unroll/fast-math flags that would diverge from the interpreter.
     run(clang + " --target=amdgcn-amd-amdhsa -mcpu=" + cpu +
         " -ffreestanding -nostdlib -nogpulib -std=c23 -O2 -ffp-contract=off"
         " -I" + inc + " -emit-llvm -c -o " + bc + " " + src);

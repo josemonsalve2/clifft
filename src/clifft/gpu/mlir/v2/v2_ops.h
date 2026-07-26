@@ -84,7 +84,19 @@ static inline void v2_barrier(void) {}
 #else
 #  define V2_STRIDE 256u
 static inline u32 v2_tid(void)  { return __builtin_amdgcn_workitem_id_x(); }
-static inline void v2_barrier(void) { __builtin_amdgcn_s_barrier(); }
+// s_barrier alone is an EXECUTION barrier only: LLVM models the intrinsic as
+// IntrNoMem, so it neither emits `s_waitcnt lgkmcnt(0)` nor stops the scheduler
+// from sinking/hoisting LDS accesses across it. A wave can therefore retire the
+// barrier with a ds_write still in flight while a peer wave reads the stale
+// word. The release/acquire fence pair is what makes it a MEMORY barrier: the
+// release forces the waitcnt before s_barrier, the acquire keeps later loads
+// from being hoisted above it. HIP's __syncthreads() expands to exactly this,
+// which is why the SVM backend never saw the race.
+static inline void v2_barrier(void) {
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+}
 #  define V2_REDUCE2(T, L0, L1, O0, O1) coop_reduce2((T), (L0), (L1), (O0), (O1))
 #  define IS_OWNER (t == 0)
 #endif
@@ -178,8 +190,14 @@ static inline void coop_reduce2(u32 t, double l0, double l1, double* out0, doubl
         l0 += shfl_xor_f64(l0, lane, off);
         l1 += shfl_xor_f64(l1, lane, off);
     }
+    // v2_barrier(), not a bare s_barrier: every one of these three guards a
+    // read-after-write on lds_red0/lds_red1, so the release fence (== the
+    // s_waitcnt lgkmcnt(0) before s_barrier) is load-bearing. Without it a wave
+    // retires the barrier with its partial-sum ds_write still in flight and a
+    // peer reads the previous op's value -- which perturbs the reduction total
+    // and flips sample_branch.
     if (lane == 0u) { lds_red0[warp] = l0; lds_red1[warp] = l1; }
-    __builtin_amdgcn_s_barrier();
+    v2_barrier();
     if (t < 4u) {
         l0 = lds_red0[t]; l1 = lds_red1[t];
         for (int off = 2; off > 0; off >>= 1) {
@@ -188,9 +206,9 @@ static inline void coop_reduce2(u32 t, double l0, double l1, double* out0, doubl
         }
     }
     if (t == 0u) { lds_red0[0] = l0; lds_red1[0] = l1; }
-    __builtin_amdgcn_s_barrier();
+    v2_barrier();
     *out0 = lds_red0[0]; *out1 = lds_red1[0];
-    __builtin_amdgcn_s_barrier();
+    v2_barrier();
 }
 #endif
 

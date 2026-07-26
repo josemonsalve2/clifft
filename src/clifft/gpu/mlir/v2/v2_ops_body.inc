@@ -412,15 +412,19 @@ static inline __attribute__((always_inline)) void v2_op_apply_pauli(V2State* st,
     v2_barrier();
 }
 // NOISE ops carry scalar FP (ocml_log_f64 hazard draw + cumulative-probability
-// sums + RNG). In the INTERPRETER they share one loop-body, so the -O2 optimizer
-// cannot reassociate the FP across dynamic invocations (the pc-loop iteration is
-// the barrier). In the SPECIALIZER these were straight-lined into N inlined
-// copies, which let -O2 schedule/reassociate the FP across copies -> ~1 ULP
-// branch flips on circuit_d5 (the one circuit with READOUT_NOISE+NOISE_BLOCK).
-// V2_NOISE_ATTR (defined in v2_ops.h): always_inline for interpreter/register,
-// noinline for the specializer, so each emitted noise call is an optimization
-// barrier = the loop-body-per-invocation semantics the interpreter has. This is
-// the specializer analog of "resolve noise to a loop instead of unrolling."
+// sums + RNG). V2_NOISE_ATTR (defined in v2_ops.h) emits these noinline in the
+// specializer and always_inline in the interpreter/register build.
+//
+// HISTORICAL NOTE: this attribute was introduced to fix circuit_d5, on the
+// theory that straight-lining the noise ops let -O2 reassociate FP across
+// copies and flip a branch by ~1 ULP. That theory was WRONG and the real bug
+// was elsewhere (v2_barrier() was an execution-only barrier; see v2_ops.h).
+// Two facts refute the FP story: the build uses -O2 -ffp-contract=off with no
+// fast-math, under which inlining cannot legally change an FP result; and
+// V2_GATE_SELFTEST showed the specialized kernel disagreeing with ITSELF run
+// twice on identical inputs, which no amount of rounding can explain.
+// The attribute is kept because it measurably helps register pressure and code
+// size on large circuits, NOT because it is load-bearing for correctness.
 static inline V2_NOISE_ATTR void v2_op_noise(V2State* st, const CV2NoiseSite* sites, const CV2Channel* channels,
                                const double* hazards, u32 num_sites, u32 site) {
     u32 t = v2_tid();
