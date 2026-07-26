@@ -60,3 +60,18 @@ for f in sorted(glob.glob(sys.argv[1]+"/gate/*.hsaco.s")):
         if n>0 and 'lgkmcnt(0)' in full[n-1]: pre+=1
     print(f"{f.split('/')[-1]:50s} barriers={nb:6d} with lgkm-wait immediately before={pre:6d} ({100*pre/max(nb,1):.1f}%)")
 PY
+
+echo "########## ARM 4: every coop fixture, gate verdicts ##########"
+# The .gate verdict is keyed on the generated-C hash, which does NOT change when
+# v2_ops.h changes -- a stale "0" would hide the fix. Each arm uses a fresh
+# V2_SPEC_CACHE_DIR so every verdict below is recomputed from scratch.
+mkdir -p "$BASE/all"
+for C in tests/fixtures/large/*.stim; do
+  [ -f "$C" ] || continue
+  R=$(V2_SPEC_CACHE_DIR="$BASE/all" V2_SPECIALIZE_VERBOSE=1 \
+      ./build-v2-nohip/run_v2 --circuit "$C" --shots 500 --seed 42 2>&1 \
+      | grep -E '"match"|FAILED correctness' | tr '\n' ' ')
+  echo "$(basename "$C"): $R"
+done
+echo "--- gate verdicts (1=specialized used, 0=fell back to interpreter) ---"
+for g in "$BASE"/all/*.gate; do [ -f "$g" ] && echo "  $(basename "$g" .hsaco.gate): $(cat "$g")"; done
