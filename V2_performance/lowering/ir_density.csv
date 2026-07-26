@@ -1,0 +1,8 @@
+circuit,instrs,v1_mlir_lines,v1_per_instr,hybrid_hip_lines,hybrid_per_instr,v2_c_lines,v2_per_instr
+reg_frame_h,4,947,236.75,,,43,10.75
+reg_four_t,11,1384,125.81,,,49,4.45
+reg_circuit_d3,344,23002,66.86,5301,15.40,383,1.11
+coop_qv10,140,336988,2407.05,7805,55.75,179,1.27
+coop_circuit_d5,1720,118493,68.89,33508,19.48,1760,1.02
+coop_surface_d7_t10,4134,228544,55.28,75409,18.24,4174,1.00
+glob_surface_d7_t19,4296,239803,55.82,75794,17.64,4346,1.01
