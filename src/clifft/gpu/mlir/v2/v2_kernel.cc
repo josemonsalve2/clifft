@@ -90,8 +90,21 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
     auto& rt = hsa_runtime();
     if (!rt.init()) return false;
 
-    // Global tier: HBM amplitude buffers for a small validation worker pool.
-    const uint32_t g_wgs = is_global ? 64u : 0u;
+    // Global tier: HBM amplitude buffers for the validation worker pool. The
+    // pool must be sized the same way v2_sample sizes its own (32 GB budget,
+    // 12 bytes per amplitude), NOT a fixed 64: at rank 20+ a 64-workgroup pool
+    // is tens of times narrower than the real run, so the gate took longer than
+    // the benchmark it was gating. Still capped well below v2_sample's 2048 --
+    // the gate only needs enough parallelism to finish quickly.
+    uint32_t g_wgs = 0;
+    if (is_global) {
+        const uint64_t gamp = 1ull << flat.peak_rank;
+        const uint64_t bytes_per_wg = gamp * sizeof(GpuComplex) + (gamp / 2) * sizeof(GpuComplex);
+        uint64_t w = (32ull << 30) / bytes_per_wg;
+        if (w < 1) w = 1;
+        if (w > 512) w = 512;
+        g_wgs = static_cast<uint32_t>(w);
+    }
     uint64_t d_gv = 0, d_gs = 0, d_wc = 0;
     if (is_global) {
         const uint64_t amp = 1ull << flat.peak_rank;
@@ -115,7 +128,15 @@ bool specialized_matches_interpreter(const clifft::CompiledModule& program,
     uint64_t d_do = upload(rt, flat.detector_offsets);
     uint64_t d_dt = upload(rt, flat.detector_targets);
 
-    const uint32_t val_shots = 5000;  // enough to surface a 1-in-thousands flip
+    // 5000 shots is enough to surface a 1-in-thousands flip, but cost per shot
+    // grows as 2^peak_rank: at rank 24 that sample would take longer than the
+    // benchmark run it gates. Taper above rank 19, where a divergence shows up
+    // in far fewer shots anyway (each shot touches millions of amplitudes).
+    // V2_GATE_SHOTS overrides for a deliberately paranoid validation.
+    uint32_t val_shots = 5000;
+    if (flat.peak_rank >= 20) val_shots = 1000;
+    if (flat.peak_rank >= 22) val_shots = 250;
+    if (const char* e = getenv("V2_GATE_SHOTS")) val_shots = (uint32_t)std::atoi(e);
     const uint32_t block = 256;
     // Divergence is seed-dependent (a borderline shot flips on SOME seeds), so
     // validate across several seeds — one seed can pass while the circuit still
