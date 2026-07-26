@@ -1,0 +1,10 @@
+pipeline,circuit,ir_lines,isa_lines,scratch,vgpr,lds,occupancy,compile_s
+v1,coop_circuit_d5,118493,80257,48,73,24672 bytes/workgroup (compile time only),6,36.16
+v1,coop_qv10,336988,133797,0,53,24664 bytes/workgroup (compile time only),8,76.02
+v1,coop_surface_d7_t10,228544,148260,48,83,10336 bytes/workgroup (compile time only),5,83.13
+v1,glob_surface_d7_t19,239803,160777,320,128,8296 bytes/workgroup (compile time only),4,221.48
+v1,reg_circuit_d3,23002,17802,156,128,320 bytes/workgroup (compile time only),4,3.58
+v1,reg_four_t,1384,597,0,16,320 bytes/workgroup (compile time only),8,.59
+v1,reg_frame_h,947,524,0,16,320 bytes/workgroup (compile time only),8,.52
+v2,coop_circuit_d5,1760,61766,256,clifft_v2_spec.num_vgpr,13064 bytes/workgroup (compile time only),occupancy(8, 8, 512, 8, 8, max(clifft_v2_spec.numbered_sgpr+extrasgprs(clifft_v2_spec.uses_vcc, clifft_v2_spec.uses_flat_scratch, 1), 1, 0), max(totalnumvgprs(clifft_v2_spec.num_agpr, clifft_v2_spec.num_vgpr), 1, 0)),11.38
+v2,reg_circuit_d3,383,10398,928,clifft_v2_spec.num_vgpr,0 bytes/workgroup (compile time only),occupancy(8, 8, 512, 8, 8, max(clifft_v2_spec.numbered_sgpr+extrasgprs(clifft_v2_spec.uses_vcc, clifft_v2_spec.uses_flat_scratch, 1), 1, 0), max(totalnumvgprs(clifft_v2_spec.num_agpr, clifft_v2_spec.num_vgpr), 1, 0)),2.04
