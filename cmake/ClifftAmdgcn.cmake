@@ -39,6 +39,15 @@ message(STATUS "ClifftAmdgcn: clang=${CLIFFT_AMDGCN_CLANG} arch=${CLIFFT_AMDGPU_
 function(clifft_add_amdgcn_hsaco tgt)
     cmake_parse_arguments(A "OCML" "SOURCE;OUTPUT" "EXTRA_FLAGS" ${ARGN})
     set(_src "${CMAKE_CURRENT_SOURCE_DIR}/${A_SOURCE}")
+    # The device headers are pulled in by every .c below but a custom command
+    # gets no implicit header scanning -- depending on the .c file alone lets an
+    # edit to v2_ops.h / v2_ops_body.inc leave a STALE .hsaco in place, silently
+    # running the old kernel. (That is exactly how a barrier fix in v2_ops.h
+    # nearly went unmeasured.) List them explicitly.
+    # Glob is relative to the SOURCE's own directory so this stays correct
+    # whichever subdirectory calls the function.
+    get_filename_component(_src_dir "${_src}" DIRECTORY)
+    file(GLOB _dev_hdrs "${_src_dir}/*.h" "${_src_dir}/*.inc")
     set(_ll  "${CMAKE_CURRENT_BINARY_DIR}/${A_OUTPUT}.ll")
     set(_obj "${CMAKE_CURRENT_BINARY_DIR}/${A_OUTPUT}.o")
     set(_hsaco "${CMAKE_BINARY_DIR}/${A_OUTPUT}")
@@ -76,7 +85,7 @@ function(clifft_add_amdgcn_hsaco tgt)
                     -mattr=+wavefrontsize64 -filetype=obj -O2 -o "${_obj}" "${_linked}"
             # 5) object -> .hsaco
             COMMAND "${CLIFFT_AMDGCN_LLD}" -shared -o "${_hsaco}" "${_obj}"
-            DEPENDS "${_src}"
+            DEPENDS "${_src}" ${_dev_hdrs}
             COMMENT "amdgcn (no-HIP, +ocml): ${A_SOURCE} -> ${A_OUTPUT}"
             VERBATIM)
     else()
@@ -91,7 +100,7 @@ function(clifft_add_amdgcn_hsaco tgt)
                     -mattr=+wavefrontsize64 -filetype=obj -O2 -o "${_obj}" "${_ll}"
             # 3) object -> .hsaco (shared ELF HSA can load)
             COMMAND "${CLIFFT_AMDGCN_LLD}" -shared -o "${_hsaco}" "${_obj}"
-            DEPENDS "${_src}"
+            DEPENDS "${_src}" ${_dev_hdrs}
             COMMENT "amdgcn (no-HIP): ${A_SOURCE} -> ${A_OUTPUT}"
             VERBATIM)
     endif()

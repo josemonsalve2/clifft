@@ -18,9 +18,14 @@ set -x
 # build_v2.sh runs under `set -u` and reads $CLIFFT, so it must be exported.
 export CLIFFT=/shared/jmonsalv/quantum/clifft_rl/clifft
 cd "$CLIFFT"
-# V2_FENCE_SKIP_BUILD reuses the tree from a prior job (the build is ~10 min
-# and is unchanged when only the run needs re-doing on a node with a free GPU).
-[ -n "${V2_FENCE_SKIP_BUILD:-}" ] || bash V2_performance/scratch/build_v2.sh 2>&1 | tail -15
+# The .hsaco custom command in cmake/ClifftAmdgcn.cmake lists DEPENDS "${_src}"
+# only -- the C file, NOT the headers it includes. A change to v2_ops.h (which
+# is where the barrier lives) therefore does NOT invalidate the interpreter
+# .hsaco, and an incremental build would silently keep serving the PRE-FIX
+# kernel. Delete them so they are forced to regenerate.
+rm -f build-v2-nohip/*.hsaco
+bash V2_performance/scratch/build_v2.sh 2>&1 | tail -8
+ls -la --time-style=+%m-%d_%H:%M build-v2-nohip/*.hsaco
 
 CIRC=tests/fixtures/large/circuit_d5_p0.001.stim
 [ -f "$CIRC" ] || { echo "MISSING CIRCUIT $CIRC"; exit 1; }
