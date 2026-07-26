@@ -1,0 +1,4 @@
+"Name","Calls","TotalDurationNs","AverageNs","Percentage","MinNs","MaxNs","StdDev"
+"clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",1,2123679413,2123679413.000000,100.00,2123679413,2123679413,0.00000000e+00
+"__amd_rocclr_fillBufferAligned",3,11960,3986.666667,5.632e-04,2680,5400,1363.133645
+"__amd_rocclr_copyBuffer",3,10840,3613.333333,5.104e-04,2840,4840,1074.305978

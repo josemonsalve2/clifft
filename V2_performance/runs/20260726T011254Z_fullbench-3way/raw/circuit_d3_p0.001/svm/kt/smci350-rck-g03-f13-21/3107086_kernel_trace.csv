@@ -1,0 +1,13 @@
+"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,1,8,"__amd_rocclr_copyBuffer",1,6200789659172658,6200789659179098,0,0,8,0,32,512,1,1,1024,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,2,8,"__amd_rocclr_copyBuffer",2,6200789659204858,6200789659207816,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,3,8,"__amd_rocclr_copyBuffer",3,6200789659222936,6200789659225896,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,4,8,"__amd_rocclr_copyBuffer",4,6200789666447591,6200789666452631,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,5,8,"__amd_rocclr_copyBuffer",5,6200789666467891,6200789666470211,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,6,8,"__amd_rocclr_copyBuffer",6,6200789666485241,6200789666487761,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,7,8,"__amd_rocclr_copyBuffer",7,6200789666502230,6200789666505270,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,8,8,"__amd_rocclr_copyBuffer",8,6200789666519490,6200789666522810,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,9,8,"__amd_rocclr_copyBuffer",9,6200789666537690,6200789666540130,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,10,8,"__amd_rocclr_copyBuffer",10,6200789666554859,6200789666557179,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,11,13,"clifft::gpu::(anonymous namespace)::sample_kernel(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",11,6200789667410244,6200789667837725,0,4480,60,0,112,256,1,1,20224,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3107086,12,8,"__amd_rocclr_copyBuffer",12,6200789667864213,6200789667867013,0,0,8,0,32,512,1,1,1024,1,1

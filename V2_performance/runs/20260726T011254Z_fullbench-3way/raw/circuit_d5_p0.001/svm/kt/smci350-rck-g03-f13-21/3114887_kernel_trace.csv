@@ -1,0 +1,12 @@
+"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,1,9,"__amd_rocclr_copyBuffer",1,6200839140047537,6200839140051977,0,0,8,0,32,512,1,1,1024,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,2,9,"__amd_rocclr_copyBuffer",2,6200839140181344,6200839140186504,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,3,9,"__amd_rocclr_copyBuffer",3,6200839140201033,6200839140204113,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,4,9,"__amd_rocclr_copyBuffer",4,6200839140218423,6200839140222343,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,5,9,"__amd_rocclr_copyBuffer",5,6200839140236423,6200839140239583,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,6,9,"__amd_rocclr_copyBuffer",6,6200839140253973,6200839140257013,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,7,9,"__amd_rocclr_copyBuffer",7,6200839140271202,6200839140273762,0,0,8,0,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,8,10,"__amd_rocclr_fillBufferAligned",8,6200839140325671,6200839140327111,0,0,8,0,48,256,1,1,256,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,9,10,"__amd_rocclr_fillBufferAligned",9,6200839140331412,6200839140332572,0,0,8,0,48,256,1,1,256,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,10,12,"clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",10,6200839141079175,6200839151247649,23040,8,64,0,112,256,1,1,2560000,1,1
+"KERNEL_DISPATCH","Agent 2",1,0,3114887,11,9,"__amd_rocclr_copyBuffer",11,6200839151278548,6200839151281148,0,0,8,0,32,512,1,1,512,1,1

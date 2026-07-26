@@ -1,0 +1,8 @@
+{
+  "run_id": "20260726T011254Z_fullbench-3way",
+  "label": "fullbench-3way",
+  "commit": "68cc1c6",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 21
+}

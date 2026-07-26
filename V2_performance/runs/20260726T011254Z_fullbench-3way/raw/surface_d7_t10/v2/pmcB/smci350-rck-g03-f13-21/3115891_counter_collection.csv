@@ -1,0 +1,3 @@
+"Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Id","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
+1,1,"Agent 2",1,3115891,3115891,2560000,1,"clifft_v2_spec",256,13312,288,64,0,80,"TCC_HIT_sum",1691070541.000000,6200848925464790,6200848936380278
+1,1,"Agent 2",1,3115891,3115891,2560000,1,"clifft_v2_spec",256,13312,288,64,0,80,"TCC_MISS_sum",39806962.000000,6200848925464790,6200848936380278

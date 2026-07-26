@@ -1,0 +1,2 @@
+"Name","Calls","TotalDurationNs","AverageNs","Percentage","MinNs","MaxNs","StdDev"
+"HSA_API",1045,3249021545,3109111.526316,100.00,20,10968046,1686621.621432
