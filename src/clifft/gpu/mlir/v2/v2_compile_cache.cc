@@ -58,6 +58,38 @@ std::string arch() {
     return CLIFFT_V2_AMDGPU_ARCH;
 }
 
+// Identity of the DEVICE HEADERS the emitted C includes. The generated .c is
+// only half the translation unit: every v2_op_* body, v2_barrier(), and every
+// tunable constant (V2_DUST_EPS, ...) lives in these headers. Hashing only the
+// generated source therefore produces the SAME cache key for two materially
+// different kernels whenever a header changes, and the stale .hsaco -- plus its
+// stale "<hsaco>.gate" verdict -- silently wins.
+//
+// That is not hypothetical: it is exactly what happened to the 20260726T182433Z
+// benchmark run, which dispatched pre-barrier-fix, pre-dust-fix kernels compiled
+// a day earlier while the tree contained both fixes. Content, not mtime: mtimes
+// change on every checkout and would defeat the cache for no reason.
+std::string device_header_ident() {
+    const std::string inc = CLIFFT_V2_SRC_INCLUDE;
+    if (inc.empty()) return "";
+    // The full transitive include set of the emitted C.
+    static const char* kHeaders[] = {
+        "clifft/gpu/mlir/v2/v2_ops.h",
+        "clifft/gpu/mlir/v2/v2_ops_body.inc",
+        "clifft/gpu/mlir/v2/device_abi.h",
+    };
+    std::string acc;
+    for (const char* rel : kHeaders) {
+        std::ifstream f(fs::path(inc) / rel, std::ios::binary);
+        if (!f) { acc += std::string(rel) + ":MISSING|"; continue; }
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        acc += std::string(rel) + ":" +
+               std::to_string(std::hash<std::string>{}(ss.str())) + "|";
+    }
+    return acc;
+}
+
 // Run a command; throw with captured stderr on nonzero exit.
 void run(const std::string& cmd) {
     std::string full = cmd + " 2>&1";
@@ -87,8 +119,11 @@ std::string compile_specialized(const std::string& csrc, const std::string& key)
     const std::string dir = cache_dir();
     fs::create_directories(dir);
 
-    // Content hash of source + toolchain identity so cache invalidates on change.
-    std::string ident = csrc + "|" + llvm_bin("clang") + "|" + arch() + "|" + bitcode_dir();
+    // Content hash of source + DEVICE HEADERS + toolchain identity, so the cache
+    // invalidates on any change that can alter the compiled kernel. The headers
+    // are as load-bearing as the generated source (see device_header_ident).
+    std::string ident = csrc + "|" + llvm_bin("clang") + "|" + arch() + "|" +
+                        bitcode_dir() + "|" + device_header_ident();
     size_t h = std::hash<std::string>{}(ident);
     std::ostringstream tag;
     tag << key << "_" << std::hex << h;
