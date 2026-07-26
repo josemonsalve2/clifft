@@ -12,3 +12,4 @@
 | 20260725T171826Z_global-specialized | global-specialized | 5d10409* | mlir-v2 | 8 | 0.410 |
 | 20260726T000322Z_fullbench-rank26 | fullbench-rank26 | 6960527* | mlir-v2 | 21 | 0.643 |
 | 20260726T011254Z_fullbench-3way | fullbench-3way | 68cc1c6* | mlir-v2 | 21 | 0.664 |
+| 20260726T014859Z_all-tier5plus | all-tier5plus | 89d541e* | mlir-v2 | 26 | 0.769 |

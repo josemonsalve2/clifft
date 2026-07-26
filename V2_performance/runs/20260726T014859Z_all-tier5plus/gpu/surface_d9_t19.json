@@ -1,0 +1,72 @@
+{
+  "circuit": "surface_d9_t19",
+  "v2": {
+    "kernel_name": "clifft_v2_spec",
+    "LDS_Block_Size": "1024",
+    "Scratch_Size": "336",
+    "VGPR_Count": "64",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "112",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "524288",
+    "n_dispatches": 1,
+    "total_kernel_ns": 11842272,
+    "per_dispatch_ns_median": 11842272,
+    "domain_total_ns": 11842272,
+    "domain_calls": 1,
+    "hsa_total_ns": 23942821,
+    "counters": {
+      "SQ_INSTS_LDS": 124309083.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 787074337.0,
+      "SQ_INSTS_VALU": 1224524092.0,
+      "SQ_WAVES": 8192.0,
+      "TCC_HIT_sum": 1746383392.0,
+      "TCC_MISS_sum": 47044440.0,
+      "GRBM_GUI_ACTIVE": 200842477.0,
+      "SQ_BUSY_CYCLES": 786022064.0,
+      "SQ_WAIT_INST_LDS": 49954719.0,
+      "SQ_WAVE_CYCLES": 23138545028.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (butterfly, no GEMM)",
+      "L2_hit%=97.4",
+      "wave_cycles/wave=2824529"
+    ]
+  },
+  "svm": {
+    "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",
+    "LDS_Block_Size": "8704",
+    "Scratch_Size": "56",
+    "VGPR_Count": "64",
+    "Accum_VGPR_Count": "0",
+    "SGPR_Count": "112",
+    "Workgroup_Size_X": "256",
+    "Grid_Size_X": "131072",
+    "n_dispatches": 1,
+    "total_kernel_ns": 45439708,
+    "per_dispatch_ns_median": 45439708,
+    "domain_total_ns": 45476667,
+    "domain_calls": 10,
+    "hsa_total_ns": 57001784,
+    "counters": {
+      "SQ_INSTS_LDS": 105306694.0,
+      "SQ_INSTS_MFMA": 0.0,
+      "SQ_INSTS_SALU": 5750833696.0,
+      "SQ_INSTS_VALU": 2538422668.0,
+      "SQ_WAVES": 2048.0,
+      "TCC_HIT_sum": 52853370.0,
+      "TCC_MISS_sum": 5899962.0,
+      "GRBM_GUI_ACTIVE": 798854699.0,
+      "SQ_BUSY_CYCLES": 3133635396.0,
+      "SQ_WAIT_INST_LDS": 16181350.0,
+      "SQ_WAVE_CYCLES": 48819746624.0
+    },
+    "bottleneck_notes": [
+      "MFMA=0 (butterfly, no GEMM)",
+      "L2_hit%=90.0",
+      "wave_cycles/wave=23837767"
+    ]
+  },
+  "v2_vs_svm_kernel_ratio": 0.261
+}

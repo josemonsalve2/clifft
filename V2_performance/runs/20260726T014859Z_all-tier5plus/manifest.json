@@ -1,0 +1,8 @@
+{
+  "run_id": "20260726T014859Z_all-tier5plus",
+  "label": "all-tier5plus",
+  "commit": "89d541e",
+  "branch": "mlir-v2",
+  "dirty": true,
+  "n_circuits": 26
+}

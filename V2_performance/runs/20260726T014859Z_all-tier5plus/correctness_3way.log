@@ -1,0 +1,34 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 50327
+--------------------------------------------
+/scratch/jmonsalv is not exists. Please contact System Admin..
+node=smci350-rck-g03-f13-21 cpu_leg=on
+CIRCUIT                  RANK  SHOTS         V2        SVM   CPU(f64)  V2==SVM   V2-vs-CPU vs SVM-vs-CPU
+frame_h                     ?   2000   2000;[0]   2000;[0]   2000;[0]  EXACT     identical
+four_t                      ?   2000   2000;[0]   2000;[0]   2000;[0]  EXACT     identical
+circuit_d3_p0.001           4   2000  2000;[47]  2000;[47]  2000;[57]  EXACT     same (f32/f64)
+surface_d7_t5               3   2000 2000;[484] 2000;[484] 2000;[474]  EXACT     same (f32/f64)
+qv10                       10   2000    2000;[]    2000;[]    2000;[]  EXACT     identical
+cultivation_d5             10   2000 2000;[993] 2000;[993] 2000;[957]  EXACT     same (f32/f64)
+circuit_d5_p0.0005         10   2000 2000;[472] 2000;[472] 2000;[435]  EXACT     same (f32/f64)
+circuit_d5_p0.001          10   2000 2000;[651] 2000;[651] 2000;[678]  EXACT     same (f32/f64)
+circuit_d5_p0.002          10   2000 2000;[914] 2000;[914] 2000;[912]  EXACT     same (f32/f64)
+circuit_d5_p0.003          10   2000 2000;[955] 2000;[955] 2000;[993]  EXACT     same (f32/f64)
+circuit_d5_p0.005          10   2000 2000;[993] 2000;[993] 2000;[957]  EXACT     same (f32/f64)
+surface_d7_t10              7   2000 2000;[484] 2000;[484] 2000;[464]  EXACT     same (f32/f64)
+surface_d11_t10             7   2000 2000;[640] 2000;[640] 2000;[682]  EXACT     same (f32/f64)
+surface_d7_t15             10   2000 2000;[474] 2000;[474] 2000;[455]  EXACT     same (f32/f64)
+surface_d9_t10              7   2000 2000;[548] 2000;[548] 2000;[567]  EXACT     same (f32/f64)
+surface_d7_t19             12   2000 2000;[657] 2000;[657] 2000;[630]  EXACT     same (f32/f64)
+surface_d9_t15             11   2000 2000;[542] 2000;[542] 2000;[525]  EXACT     same (f32/f64)
+surface_d9_t19             13   2000 2000;[562] 2000;[562] 2000;[559]  EXACT     same (f32/f64)
+surface_d11_t15            11   2000 2000;[663] 2000;[663] 2000;[660]  EXACT     same (f32/f64)
+surface_d11_t19            14   2000 2000;[1354] 2000;[1354] 2000;[1353]  EXACT     same (f32/f64)
+qv20_seed42                20    200     200;[]     200;[]     200;[]  EXACT     identical
+qv20_L8_seed42             20    200     200;[]     200;[]     200;[]  EXACT     identical
+qv21_L8_seed42             21    200     200;[]     200;[]     200;[]  EXACT     identical
+qv22_L6_seed42             22     50      50;[]      50;[]      50;[]  EXACT     identical
+qv23_L5_seed42             23     50      50;[]      50;[]      50;[]  EXACT     identical
+qv24_L4_seed42             24     50      50;[]      50;[]      50;[]  EXACT     identical
+VERIFY_DONE hard_failures=0 cpu_deviation_differs=0
