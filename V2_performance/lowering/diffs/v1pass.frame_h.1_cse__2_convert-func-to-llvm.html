@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>v1pass / frame_h: cse → convert-func-to-llvm</title><style>
+body{background:#12141a;color:#d8dee9;font:12px/1.45 'JetBrains Mono',
+ 'DejaVu Sans Mono',monospace;margin:0;padding:16px}
+h1{font-size:15px;color:#88c0d0;margin:0 0 4px}
+h2{font-size:12px;color:#7a8494;font-weight:400;margin:0 0 14px}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+td{vertical-align:top;padding:0 6px;white-space:pre-wrap;word-break:break-all}
+td.ln{width:44px;text-align:right;color:#4b5262;user-select:none;
+ border-right:1px solid #232833}
+td.code{width:calc(50% - 50px)}
+tr.del td.code{background:#3a1d22}
+tr.add td.code{background:#16301f}
+tr.hdr td{background:#1c2530;color:#81a1c1;padding:5px 8px;font-weight:600;
+ border-top:1px solid #2e3440}
+.kw{color:#81a1c1}.op{color:#88c0d0}.ssa{color:#b48ead}.num{color:#d08770}
+.gone{opacity:.28}
+.legend{margin:10px 0 16px;font-size:11px;color:#7a8494}
+.legend span{padding:2px 7px;margin-right:8px;border-radius:3px}
+.legend .d{background:#3a1d22;color:#d8dee9}.legend .a{background:#16301f;color:#d8dee9}
+</style><h1>v1pass / frame_h: cse → convert-func-to-llvm</h1><h2>1_cse.mlir (608 lines) → 2_convert-func-to-llvm.mlir (608 lines) — 1 largest change hunks, 6 lines context, capped 80/side</h2><div class="legend"><span class="d">removed / left</span><span class="a">added / right</span></div><table><tr class="hdr"><td colspan="4">hunk 1/1 &mdash; left 1..7, right 1..7</td></tr><tr class="del add"><td class="ln">1</td><td class="code">// -----// IR Dump After CSE (cse) //----- //</td><td class="ln">1</td><td class="code">// -----// IR Dump After ConvertFuncToLLVMPass (convert-func-to-llvm) //----- //</td></tr><tr><td class="ln">2</td><td class="code"><span class="kw">module</span> <span class="kw">attributes</span> {<span class="op">llvm.target_triple</span> = &quot;amdgcn-amd-amdhsa&quot;} {</td><td class="ln">2</td><td class="code"><span class="kw">module</span> <span class="kw">attributes</span> {<span class="op">llvm.target_triple</span> = &quot;amdgcn-amd-amdhsa&quot;} {</td></tr><tr><td class="ln">3</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.workitem.id.x</span>() -&gt; i32</td><td class="ln">3</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.workitem.id.x</span>() -&gt; i32</td></tr><tr><td class="ln">4</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.workgroup.id.x</span>() -&gt; i32</td><td class="ln">4</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.workgroup.id.x</span>() -&gt; i32</td></tr><tr><td class="ln">5</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.s.barrier</span>()</td><td class="ln">5</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.s.barrier</span>()</td></tr><tr><td class="ln">6</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.ds.bpermute</span>(i32, i32) -&gt; i32</td><td class="ln">6</td><td class="code">  <span class="kw">llvm.func</span> @<span class="op">llvm.amdgcn.ds.bpermute</span>(i32, i32) -&gt; i32</td></tr><tr><td class="ln">7</td><td class="code">  <span class="kw">llvm.func</span> @clifft_log(<span class="ssa">%arg0</span>: f64) -&gt; f64 {</td><td class="ln">7</td><td class="code">  <span class="kw">llvm.func</span> @clifft_log(<span class="ssa">%arg0</span>: f64) -&gt; f64 {</td></tr></table>

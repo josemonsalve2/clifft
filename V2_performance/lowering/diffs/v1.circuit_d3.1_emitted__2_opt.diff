@@ -1,0 +1,255 @@
+# v1 / circuit_d3: emitted -> opt
+# circuit_d3.1_emitted.mlir (23002 lines) -> circuit_d3.2_opt.mlir (14257 lines)
+# 2 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u circuit_d3.1_emitted.mlir circuit_d3.2_opt.mlir
+
+@@ hunk 1/2 left 1..79 right 1..80 @@
+--- circuit_d3.1_emitted.mlir:1
++++ circuit_d3.2_opt.mlir:1
+@@ -1,79 +1,80 @@
+ module attributes {llvm.target_triple = "amdgcn-amd-amdhsa"} {
+-
+-llvm.func @llvm.amdgcn.workitem.id.x() -> i32
+-llvm.func @llvm.amdgcn.workgroup.id.x() -> i32
+-llvm.func @llvm.amdgcn.s.barrier() -> ()
+-llvm.func @llvm.amdgcn.ds.bpermute(i32, i32) -> i32
+-
+-llvm.func @clifft_log(%lx: f64) -> f64 {
+-  %t100 = llvm.bitcast %lx : f64 to i64
+-  %t101 = llvm.mlir.constant(52 : i64) : i64
+-  %t102 = llvm.lshr %t100, %t101 : i64
+-  %t103 = llvm.mlir.constant(1023 : i64) : i64
+-  %t104 = llvm.sub %t102, %t103 : i64
+-  %t105 = llvm.sitofp %t104 : i64 to f64
+-  %t106 = llvm.mlir.constant(0.6931471805599453 : f64) : f64
+-  %t107 = llvm.fmul %t105, %t106 : f64
+-  %t108 = llvm.mlir.constant(4607182418800017408 : i64) : i64
+-  %t109 = llvm.mlir.constant(9227875636482146303 : i64) : i64
+-  %t110 = llvm.and %t100, %t109 : i64
+-  %t111 = llvm.or %t110, %t108 : i64
+-  %t112 = llvm.bitcast %t111 : i64 to f64
+-  %t113 = llvm.mlir.constant(1.0 : f64) : f64
+-  %t114 = llvm.fsub %t112, %t113 : f64
+-  %t115 = llvm.fadd %t112, %t113 : f64
+-  %t116 = llvm.fdiv %t114, %t115 : f64
+-  %t117 = llvm.fmul %t116, %t116 : f64
+-  %t118 = llvm.mlir.constant(3.44827586206896547e-02 : f64) : f64
+-  %t119 = llvm.fmul %t117, %t118 : f64
+-  %t120 = llvm.mlir.constant(3.70370370370370350e-02 : f64) : f64
+-  %t121 = llvm.fadd %t119, %t120 : f64
+-  %t122 = llvm.fmul %t117, %t121 : f64
+-  %t123 = llvm.mlir.constant(4.00000000000000008e-02 : f64) : f64
+-  %t124 = llvm.fadd %t122, %t123 : f64
+-  %t125 = llvm.fmul %t117, %t124 : f64
+-  %t126 = llvm.mlir.constant(4.34782608695652162e-02 : f64) : f64
+-  %t127 = llvm.fadd %t125, %t126 : f64
+-  %t128 = llvm.fmul %t117, %t127 : f64
+-  %t129 = llvm.mlir.constant(4.76190476190476164e-02 : f64) : f64
+-  %t130 = llvm.fadd %t128, %t129 : f64
+-  %t131 = llvm.fmul %t117, %t130 : f64
+-  %t132 = llvm.mlir.constant(5.26315789473684181e-02 : f64) : f64
+-  %t133 = llvm.fadd %t131, %t132 : f64
+-  %t134 = llvm.fmul %t117, %t133 : f64
+-  %t135 = llvm.mlir.constant(5.88235294117647051e-02 : f64) : f64
+-  %t136 = llvm.fadd %t134, %t135 : f64
+-  %t137 = llvm.fmul %t117, %t136 : f64
+-  %t138 = llvm.mlir.constant(6.66666666666666657e-02 : f64) : f64
+-  %t139 = llvm.fadd %t137, %t138 : f64
+-  %t140 = llvm.fmul %t117, %t139 : f64
+-  %t141 = llvm.mlir.constant(7.69230769230769273e-02 : f64) : f64
+-  %t142 = llvm.fadd %t140, %t141 : f64
+-  %t143 = llvm.fmul %t117, %t142 : f64
+-  %t144 = llvm.mlir.constant(9.09090909090909116e-02 : f64) : f64
+-  %t145 = llvm.fadd %t143, %t144 : f64
+-  %t146 = llvm.fmul %t117, %t145 : f64
+-  %t147 = llvm.mlir.constant(1.11111111111111105e-01 : f64) : f64
+-  %t148 = llvm.fadd %t146, %t147 : f64
+-  %t149 = llvm.fmul %t117, %t148 : f64
+-  %t150 = llvm.mlir.constant(1.42857142857142849e-01 : f64) : f64
+-  %t151 = llvm.fadd %t149, %t150 : f64
+-  %t152 = llvm.fmul %t117, %t151 : f64
+-  %t153 = llvm.mlir.constant(2.00000000000000011e-01 : f64) : f64
+-  %t154 = llvm.fadd %t152, %t153 : f64
+-  %t155 = llvm.fmul %t117, %t154 : f64
+-  %t156 = llvm.mlir.constant(3.33333333333333315e-01 : f64) : f64
+-  %t157 = llvm.fadd %t155, %t156 : f64
+-  %t158 = llvm.fmul %t117, %t157 : f64
+-  %t159 = llvm.fadd %t113, %t158 : f64
+-  %t160 = llvm.mlir.constant(2.0 : f64) : f64
+-  %t161 = llvm.fmul %t160, %t116 : f64
+-  %t162 = llvm.fmul %t161, %t159 : f64
+-  %t163 = llvm.fadd %t107, %t162 : f64
+-  llvm.return %t163 : f64
+-}
+-
+-llvm.func @clifft_draw_next_noise(%nni_ptr: !llvm.ptr, %rng_ptr: !llvm.ptr, %noise_hazards_ptr: !llvm.ptr, %num_noise_sites: i64) {
+-  %c0_i32 = llvm.mlir.constant(0 : i32) : i32
+-  %c0_i64 = llvm.mlir.constant(0 : i64) : i64
+-  %c1_i64 = llvm.mlir.constant(1 : i64) : i64
++  llvm.func @llvm.amdgcn.workitem.id.x() -> i32
++  llvm.func @llvm.amdgcn.workgroup.id.x() -> i32
++  llvm.func @llvm.amdgcn.s.barrier()
++  llvm.func @llvm.amdgcn.ds.bpermute(i32, i32) -> i32
++  llvm.func @clifft_log(%arg0: f64) -> f64 {
++    %0 = llvm.mlir.constant(2.000000e+00 : f64) : f64
++    %1 = llvm.mlir.constant(0.33333333333333331 : f64) : f64
++    %2 = llvm.mlir.constant(2.000000e-01 : f64) : f64
++    %3 = llvm.mlir.constant(0.14285714285714285 : f64) : f64
++    %4 = llvm.mlir.constant(0.1111111111111111 : f64) : f64
++    %5 = llvm.mlir.constant(0.090909090909090911 : f64) : f64
++    %6 = llvm.mlir.constant(0.076923076923076927 : f64) : f64
++    %7 = llvm.mlir.constant(0.066666666666666666 : f64) : f64
++    %8 = llvm.mlir.constant(0.058823529411764705 : f64) : f64
++    %9 = llvm.mlir.constant(0.052631578947368418 : f64) : f64
++    %10 = llvm.mlir.constant(0.047619047619047616 : f64) : f64
++    %11 = llvm.mlir.constant(0.043478260869565216 : f64) : f64
++    %12 = llvm.mlir.constant(4.000000e-02 : f64) : f64
++    %13 = llvm.mlir.constant(0.037037037037037035 : f64) : f64
++    %14 = llvm.mlir.constant(0.034482758620689655 : f64) : f64
++    %15 = llvm.mlir.constant(1.000000e+00 : f64) : f64
++    %16 = llvm.mlir.constant(-9218868437227405313 : i64) : i64
++    %17 = llvm.mlir.constant(4607182418800017408 : i64) : i64
++    %18 = llvm.mlir.constant(0.69314718055994529 : f64) : f64
++    %19 = llvm.mlir.constant(1023 : i64) : i64
++    %20 = llvm.mlir.constant(52 : i64) : i64
++    %21 = llvm.bitcast %arg0 : f64 to i64
++    %22 = llvm.lshr %21, %20 : i64
++    %23 = llvm.sub %22, %19 : i64
++    %24 = llvm.sitofp %23 : i64 to f64
++    %25 = llvm.fmul %24, %18 : f64
++    %26 = llvm.and %21, %16 : i64
++    %27 = llvm.or %26, %17 : i64
++    %28 = llvm.bitcast %27 : i64 to f64
++    %29 = llvm.fsub %28, %15 : f64
++    %30 = llvm.fadd %28, %15 : f64
++    %31 = llvm.fdiv %29, %30 : f64
++    %32 = llvm.fmul %31, %31 : f64
++    %33 = llvm.fmul %32, %14 : f64
++    %34 = llvm.fadd %33, %13 : f64
++    %35 = llvm.fmul %32, %34 : f64
++    %36 = llvm.fadd %35, %12 : f64
++    %37 = llvm.fmul %32, %36 : f64
++    %38 = llvm.fadd %37, %11 : f64
++    %39 = llvm.fmul %32, %38 : f64
++    %40 = llvm.fadd %39, %10 : f64
++    %41 = llvm.fmul %32, %40 : f64
++    %42 = llvm.fadd %41, %9 : f64
++    %43 = llvm.fmul %32, %42 : f64
++    %44 = llvm.fadd %43, %8 : f64
++    %45 = llvm.fmul %32, %44 : f64
++    %46 = llvm.fadd %45, %7 : f64
++    %47 = llvm.fmul %32, %46 : f64
++    %48 = llvm.fadd %47, %6 : f64
++    %49 = llvm.fmul %32, %48 : f64
++    %50 = llvm.fadd %49, %5 : f64
++    %51 = llvm.fmul %32, %50 : f64
++    %52 = llvm.fadd %51, %4 : f64
++    %53 = llvm.fmul %32, %52 : f64
++    %54 = llvm.fadd %53, %3 : f64
++    %55 = llvm.fmul %32, %54 : f64
++    %56 = llvm.fadd %55, %2 : f64
++    %57 = llvm.fmul %32, %56 : f64
++    %58 = llvm.fadd %57, %1 : f64
++    %59 = llvm.fmul %32, %58 : f64
++    %60 = llvm.fadd %15, %59 : f64
++    %61 = llvm.fmul %0, %31 : f64
++    %62 = llvm.fmul %61, %60 : f64
++    %63 = llvm.fadd %25, %62 : f64
++    llvm.return %63 : f64
++  }
++  llvm.func @clifft_draw_next_noise(%arg0: !llvm.ptr, %arg1: !llvm.ptr, %arg2: !llvm.ptr, %arg3: i64) {
++    %0 = llvm.mlir.constant(1.000000e+00 : f64) : f64
++    %1 = llvm.mlir.constant(1.1102230246251565E-16 : f64) : f64
++    %2 = llvm.mlir.constant(11 : i64) : i64
++    %3 = llvm.mlir.constant(19 : i64) : i64
++    %4 = llvm.mlir.constant(45 : i64) : i64
++    %5 = llvm.mlir.constant(17 : i64) : i64
++    %6 = llvm.mlir.constant(41 : i64) : i64
+
+@@ hunk 2/2 left 70..149 right 14252..14257 @@
+--- circuit_d3.1_emitted.mlir:70
++++ circuit_d3.2_opt.mlir:14252
+@@ -1,80 +1,6 @@
+-  %t161 = llvm.fmul %t160, %t116 : f64
+-  %t162 = llvm.fmul %t161, %t159 : f64
+-  %t163 = llvm.fadd %t107, %t162 : f64
+-  llvm.return %t163 : f64
++    llvm.br ^bb785
++  ^bb785:  // 2 preds: ^bb781, ^bb784
++    llvm.return
++  }
+ }
+ 
+-llvm.func @clifft_draw_next_noise(%nni_ptr: !llvm.ptr, %rng_ptr: !llvm.ptr, %noise_hazards_ptr: !llvm.ptr, %num_noise_sites: i64) {
+-  %c0_i32 = llvm.mlir.constant(0 : i32) : i32
+-  %c0_i64 = llvm.mlir.constant(0 : i64) : i64
+-  %c1_i64 = llvm.mlir.constant(1 : i64) : i64
+-  %t164 = llvm.load %nni_ptr : !llvm.ptr -> i32
+-  %t165 = llvm.zext %t164 : i32 to i64
+-  %t166 = llvm.icmp "uge" %t165, %num_noise_sites : i64
+-  llvm.cond_br %t166, ^dn_skip0, ^dn_do1
+-^dn_skip0:
+-  %t167 = llvm.mlir.constant(-1 : i32) : i32
+-  llvm.store %t167, %nni_ptr : i32, !llvm.ptr
+-  llvm.br ^dn_end2
+-^dn_do1:
+-  %t168 = llvm.icmp "eq" %t164, %c0_i32 : i32
+-  %t169 = llvm.mlir.constant(0.0 : f64) : f64
+-  llvm.cond_br %t168, ^haz_done4(%t169 : f64), ^haz_nonzero3
+-^haz_nonzero3:
+-  %t171 = llvm.sub %t165, %c1_i64 : i64
+-  %t172 = llvm.getelementptr inbounds %noise_hazards_ptr[%t171] : (!llvm.ptr, i64) -> !llvm.ptr, f64
+-  %t173 = llvm.load %t172 : !llvm.ptr -> f64
+-  llvm.br ^haz_done4(%t173 : f64)
+-^haz_done4(%t170: f64):
+-  %t174 = llvm.mlir.constant(0 : i64) : i64
+-  %t175 = llvm.getelementptr inbounds %rng_ptr[%t174] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-  %t176 = llvm.load %t175 : !llvm.ptr -> i64
+-  %t177 = llvm.mlir.constant(1 : i64) : i64
+-  %t178 = llvm.getelementptr inbounds %rng_ptr[%t177] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-  %t179 = llvm.load %t178 : !llvm.ptr -> i64
+-  %t180 = llvm.mlir.constant(2 : i64) : i64
+-  %t181 = llvm.getelementptr inbounds %rng_ptr[%t180] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-  %t182 = llvm.load %t181 : !llvm.ptr -> i64
+-  %t183 = llvm.mlir.constant(3 : i64) : i64
+-  %t184 = llvm.getelementptr inbounds %rng_ptr[%t183] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-  %t185 = llvm.load %t184 : !llvm.ptr -> i64
+-  %t186 = llvm.add %t176, %t185 : i64
+-  %t187 = llvm.mlir.constant(23 : i64) : i64
+-  %t188 = llvm.mlir.constant(41 : i64) : i64
+-  %t189 = llvm.shl %t186, %t187 : i64
+-  %t190 = llvm.lshr %t186, %t188 : i64
+-  %t191 = llvm.or %t189, %t190 : i64
+-  %t192 = llvm.add %t191, %t176 : i64
+-  %t194 = llvm.mlir.constant(17 : i64) : i64
+-  %t193 = llvm.shl %t179, %t194 : i64
+-  %t195 = llvm.xor %t182, %t176 : i64
+-  %t196 = llvm.xor %t185, %t179 : i64
+-  %t197 = llvm.xor %t179, %t195 : i64
+-  %t198 = llvm.xor %t176, %t196 : i64
+-  %t199 = llvm.xor %t195, %t193 : i64
+-  %t203 = llvm.mlir.constant(45 : i64) : i64
+-  %t204 = llvm.mlir.constant(19 : i64) : i64
+-  %t200 = llvm.shl %t196, %t203 : i64
+-  %t201 = llvm.lshr %t196, %t204 : i64
+-  %t202 = llvm.or %t200, %t201 : i64
+-  llvm.store %t198, %t175 : i64, !llvm.ptr
+-  llvm.store %t197, %t178 : i64, !llvm.ptr
+-  llvm.store %t199, %t181 : i64, !llvm.ptr
+-  llvm.store %t202, %t184 : i64, !llvm.ptr
+-  %t206 = llvm.mlir.constant(11 : i64) : i64
+-  %t205 = llvm.lshr %t192, %t206 : i64
+-  %t207 = llvm.uitofp %t205 : i64 to f64
+-  %t208 = llvm.mlir.constant(1.1102230246251565e-16 : f64) : f64
+-  %t209 = llvm.fmul %t207, %t208 : f64
+-  %t210 = llvm.mlir.constant(1.0 : f64) : f64
+-  %t211 = llvm.fsub %t210, %t209 : f64
+-  %t212 = llvm.call @clifft_log(%t211) : (f64) -> f64
+-  %t213 = llvm.fneg %t212 : f64
+-  %t214 = llvm.fadd %t170, %t213 : f64
+-  %t215 = llvm.add %num_noise_sites, %c0_i64 : i64
+-  llvm.br ^bs_hdr5(%c0_i64, %t215 : i64, i64)
+-^bs_hdr5(%t216: i64, %t217: i64):
+-  %t218 = llvm.icmp "ult" %t216, %t217 : i64
+-  llvm.cond_br %t218, ^bs_body6, ^bs_done7(%t216 : i64)
+-^bs_body6:
+-  %t219 = llvm.sub %t217, %t216 : i64

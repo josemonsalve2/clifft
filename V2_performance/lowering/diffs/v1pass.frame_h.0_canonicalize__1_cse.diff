@@ -1,0 +1,576 @@
+# v1pass / frame_h: canonicalize -> cse
+# 0_canonicalize.mlir (736 lines) -> 1_cse.mlir (608 lines)
+# 4 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u 0_canonicalize.mlir 1_cse.mlir
+
+@@ hunk 1/4 left 248..315 right 248..308 @@
+--- 0_canonicalize.mlir:248
++++ 1_cse.mlir:248
+@@ -1,68 +1,61 @@
+     %134 = llvm.lshr %132, %133 : i64
+     %135 = llvm.and %134, %34 : i64
+     %136 = llvm.trunc %135 : i64 to i1
+     %137 = llvm.zext %136 : i1 to i8
+     llvm.store %137, %129 : i8, !llvm.ptr
+     %138 = llvm.load %45 : !llvm.ptr -> i64
+-    %139 = llvm.getelementptr inbounds %45[1] : (!llvm.ptr) -> !llvm.ptr, i64
+-    %140 = llvm.load %139 : !llvm.ptr -> i64
+-    %141 = llvm.getelementptr inbounds %45[2] : (!llvm.ptr) -> !llvm.ptr, i64
+-    %142 = llvm.load %141 : !llvm.ptr -> i64
+-    %143 = llvm.getelementptr inbounds %45[3] : (!llvm.ptr) -> !llvm.ptr, i64
+-    %144 = llvm.load %143 : !llvm.ptr -> i64
+-    %145 = llvm.add %138, %144 : i64
+-    %146 = llvm.shl %145, %16 : i64
+-    %147 = llvm.lshr %145, %15 : i64
+-    %148 = llvm.or %146, %147 : i64
+-    %149 = llvm.add %148, %138 : i64
+-    %150 = llvm.shl %140, %14 : i64
+-    %151 = llvm.xor %142, %138 : i64
+-    %152 = llvm.xor %144, %140 : i64
+-    %153 = llvm.xor %140, %151 : i64
+-    %154 = llvm.xor %138, %152 : i64
+-    %155 = llvm.xor %151, %150 : i64
+-    %156 = llvm.shl %152, %13 : i64
+-    %157 = llvm.lshr %152, %12 : i64
+-    %158 = llvm.or %156, %157 : i64
+-    llvm.store %154, %45 : i64, !llvm.ptr
+-    llvm.store %153, %139 : i64, !llvm.ptr
+-    llvm.store %155, %141 : i64, !llvm.ptr
+-    llvm.store %158, %143 : i64, !llvm.ptr
+-    %159 = llvm.lshr %149, %11 : i64
+-    %160 = llvm.uitofp %159 : i64 to f64
+-    %161 = llvm.fmul %160, %10 : f64
+-    %162 = llvm.fcmp "olt" %161, %9 : f64
+-    %163 = llvm.xor %162, %8 : i1
+-    %164 = llvm.zext %163 : i1 to i8
+-    %165 = llvm.lshr %33, %35 : i64
+-    %166 = llvm.getelementptr inbounds %49[%165] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-    %167 = llvm.load %166 : !llvm.ptr -> i64
+-    %168 = llvm.and %33, %36 : i64
+-    %169 = llvm.shl %34, %168 : i64
+-    %170 = llvm.xor %169, %37 : i64
+-    %171 = llvm.and %167, %170 : i64
+-    %172 = llvm.zext %163 : i1 to i64
+-    %173 = llvm.shl %172, %168 : i64
+-    %174 = llvm.or %171, %173 : i64
+-    llvm.store %174, %166 : i64, !llvm.ptr
+-    %175 = llvm.lshr %33, %35 : i64
+-    %176 = llvm.getelementptr inbounds %51[%175] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-    %177 = llvm.load %176 : !llvm.ptr -> i64
+-    %178 = llvm.and %33, %36 : i64
+-    %179 = llvm.shl %34, %178 : i64
+-    %180 = llvm.xor %179, %37 : i64
+-    %181 = llvm.and %177, %180 : i64
+-    %182 = llvm.shl %33, %178 : i64
+-    %183 = llvm.or %181, %182 : i64
+-    llvm.store %183, %176 : i64, !llvm.ptr
+-    llvm.store %164, %59 : i8, !llvm.ptr
+-    %184 = llvm.load %59 : !llvm.ptr -> i8
+-    %185 = llvm.xor %38, %184 : i8
+-    %186 = llvm.icmp "ne" %185, %38 : i8
+-    llvm.cond_br %186, ^bb6, ^bb7
++    %139 = llvm.load %106 : !llvm.ptr -> i64
++    %140 = llvm.load %117 : !llvm.ptr -> i64
++    %141 = llvm.load %128 : !llvm.ptr -> i64
++    %142 = llvm.add %138, %141 : i64
++    %143 = llvm.shl %142, %16 : i64
++    %144 = llvm.lshr %142, %15 : i64
++    %145 = llvm.or %143, %144 : i64
++    %146 = llvm.add %145, %138 : i64
++    %147 = llvm.shl %139, %14 : i64
++    %148 = llvm.xor %140, %138 : i64
++    %149 = llvm.xor %141, %139 : i64
++    %150 = llvm.xor %139, %148 : i64
++    %151 = llvm.xor %138, %149 : i64
++    %152 = llvm.xor %148, %147 : i64
++    %153 = llvm.shl %149, %13 : i64
++    %154 = llvm.lshr %149, %12 : i64
++    %155 = llvm.or %153, %154 : i64
++    llvm.store %151, %45 : i64, !llvm.ptr
++    llvm.store %150, %106 : i64, !llvm.ptr
++    llvm.store %152, %117 : i64, !llvm.ptr
++    llvm.store %155, %128 : i64, !llvm.ptr
++    %156 = llvm.lshr %146, %11 : i64
++    %157 = llvm.uitofp %156 : i64 to f64
++    %158 = llvm.fmul %157, %10 : f64
++    %159 = llvm.fcmp "olt" %158, %9 : f64
++    %160 = llvm.xor %159, %8 : i1
++    %161 = llvm.zext %160 : i1 to i8
++    %162 = llvm.lshr %33, %35 : i64
++    %163 = llvm.getelementptr inbounds %49[%162] : (!llvm.ptr, i64) -> !llvm.ptr, i64
++    %164 = llvm.load %163 : !llvm.ptr -> i64
++    %165 = llvm.and %33, %36 : i64
++    %166 = llvm.shl %34, %165 : i64
++    %167 = llvm.xor %166, %37 : i64
++    %168 = llvm.and %164, %167 : i64
++    %169 = llvm.zext %160 : i1 to i64
++    %170 = llvm.shl %169, %165 : i64
++    %171 = llvm.or %168, %170 : i64
++    llvm.store %171, %163 : i64, !llvm.ptr
++    %172 = llvm.getelementptr inbounds %51[%162] : (!llvm.ptr, i64) -> !llvm.ptr, i64
++    %173 = llvm.load %172 : !llvm.ptr -> i64
++    %174 = llvm.and %173, %167 : i64
++    %175 = llvm.shl %33, %165 : i64
++    %176 = llvm.or %174, %175 : i64
++    llvm.store %176, %172 : i64, !llvm.ptr
++    llvm.store %161, %59 : i8, !llvm.ptr
++    %177 = llvm.load %59 : !llvm.ptr -> i8
++    %178 = llvm.xor %38, %177 : i8
++    %179 = llvm.icmp "ne" %178, %38 : i8
++    llvm.cond_br %179, ^bb6, ^bb7
+   ^bb6:  // pred: ^bb5
+     llvm.store %39, %55 : i8, !llvm.ptr
+     llvm.br ^bb7
+   ^bb7:  // 2 preds: ^bb5, ^bb6
+-    %187 = llvm.getelementptr inbounds %59[1] : (!llvm.ptr) -> !llvm.ptr, i8
+-    %188 = llvm.load %187 : !llvm.ptr -> i8
++    %180 = llvm.load %129 : !llvm.ptr -> i8
++    %181 = llvm.xor %38, %180 : i8
+
+@@ hunk 2/4 left 386..465 right 386..465 @@
+--- 0_canonicalize.mlir:386
++++ 1_cse.mlir:386
+@@ -1,80 +1,80 @@
+-    %256 = llvm.and %62, %5 : i32
+-    %257 = llvm.xor %256, %28 : i32
++    %256 = llvm.trunc %255 : i64 to i32
++    %257 = llvm.xor %196, %30 : i32
+     %258 = llvm.shl %257, %31 : i32
+-    %259 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %251) : (i32, i32) -> i32
+-    %260 = llvm.zext %255 : i32 to i64
++    %259 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %254) : (i32, i32) -> i32
++    %260 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %256) : (i32, i32) -> i32
+     %261 = llvm.zext %259 : i32 to i64
+-    %262 = llvm.shl %261, %6 : i64
+-    %263 = llvm.or %260, %262 : i64
+-    %264 = llvm.add %248, %263 : i64
+-    %265 = llvm.trunc %264 : i64 to i32
+-    %266 = llvm.lshr %264, %6 : i64
+-    %267 = llvm.trunc %266 : i64 to i32
+-    %268 = llvm.and %62, %5 : i32
+-    %269 = llvm.xor %268, %31 : i32
+-    %270 = llvm.shl %269, %31 : i32
+-    %271 = llvm.call @llvm.amdgcn.ds.bpermute(%270, %265) : (i32, i32) -> i32
+-    %272 = llvm.and %62, %5 : i32
+-    %273 = llvm.xor %272, %31 : i32
+-    %274 = llvm.shl %273, %31 : i32
+-    %275 = llvm.call @llvm.amdgcn.ds.bpermute(%274, %267) : (i32, i32) -> i32
+-    %276 = llvm.zext %271 : i32 to i64
+-    %277 = llvm.zext %275 : i32 to i64
+-    %278 = llvm.shl %277, %6 : i64
+-    %279 = llvm.or %276, %278 : i64
+-    %280 = llvm.add %264, %279 : i64
+-    %281 = llvm.trunc %280 : i64 to i32
+-    %282 = llvm.lshr %280, %6 : i64
+-    %283 = llvm.trunc %282 : i64 to i32
+-    %284 = llvm.and %62, %5 : i32
+-    %285 = llvm.xor %284, %30 : i32
+-    %286 = llvm.shl %285, %31 : i32
+-    %287 = llvm.call @llvm.amdgcn.ds.bpermute(%286, %281) : (i32, i32) -> i32
+-    %288 = llvm.and %62, %5 : i32
+-    %289 = llvm.xor %288, %30 : i32
+-    %290 = llvm.shl %289, %31 : i32
+-    %291 = llvm.call @llvm.amdgcn.ds.bpermute(%290, %283) : (i32, i32) -> i32
+-    %292 = llvm.zext %287 : i32 to i64
+-    %293 = llvm.zext %291 : i32 to i64
+-    %294 = llvm.shl %293, %6 : i64
+-    %295 = llvm.or %292, %294 : i64
+-    %296 = llvm.add %280, %295 : i64
+-    %297 = llvm.trunc %200 : i64 to i32
+-    %298 = llvm.lshr %200, %6 : i64
+-    %299 = llvm.trunc %298 : i64 to i32
+-    %300 = llvm.and %62, %5 : i32
+-    %301 = llvm.xor %300, %7 : i32
+-    %302 = llvm.shl %301, %31 : i32
+-    %303 = llvm.call @llvm.amdgcn.ds.bpermute(%302, %297) : (i32, i32) -> i32
+-    %304 = llvm.and %62, %5 : i32
+-    %305 = llvm.xor %304, %7 : i32
+-    %306 = llvm.shl %305, %31 : i32
+-    %307 = llvm.call @llvm.amdgcn.ds.bpermute(%306, %299) : (i32, i32) -> i32
+-    %308 = llvm.zext %303 : i32 to i64
+-    %309 = llvm.zext %307 : i32 to i64
+-    %310 = llvm.shl %309, %6 : i64
+-    %311 = llvm.or %308, %310 : i64
+-    %312 = llvm.add %200, %311 : i64
+-    %313 = llvm.trunc %312 : i64 to i32
+-    %314 = llvm.lshr %312, %6 : i64
+-    %315 = llvm.trunc %314 : i64 to i32
+-    %316 = llvm.and %62, %5 : i32
+-    %317 = llvm.xor %316, %4 : i32
+-    %318 = llvm.shl %317, %31 : i32
+-    %319 = llvm.call @llvm.amdgcn.ds.bpermute(%318, %313) : (i32, i32) -> i32
+-    %320 = llvm.and %62, %5 : i32
+-    %321 = llvm.xor %320, %4 : i32
+-    %322 = llvm.shl %321, %31 : i32
+-    %323 = llvm.call @llvm.amdgcn.ds.bpermute(%322, %315) : (i32, i32) -> i32
+-    %324 = llvm.zext %319 : i32 to i64
+-    %325 = llvm.zext %323 : i32 to i64
+-    %326 = llvm.shl %325, %6 : i64
+-    %327 = llvm.or %324, %326 : i64
+-    %328 = llvm.add %312, %327 : i64
+-    %329 = llvm.trunc %328 : i64 to i32
+-    %330 = llvm.lshr %328, %6 : i64
+-    %331 = llvm.trunc %330 : i64 to i32
+-    %332 = llvm.and %62, %5 : i32
+-    %333 = llvm.xor %332, %25 : i32
+-    %334 = llvm.shl %333, %31 : i32
+-    %335 = llvm.call @llvm.amdgcn.ds.bpermute(%334, %329) : (i32, i32) -> i32
++    %262 = llvm.zext %260 : i32 to i64
++    %263 = llvm.shl %262, %6 : i64
++    %264 = llvm.or %261, %263 : i64
++    %265 = llvm.add %253, %264 : i64
++    %266 = llvm.trunc %192 : i64 to i32
++    %267 = llvm.lshr %192, %6 : i64
++    %268 = llvm.trunc %267 : i64 to i32
++    %269 = llvm.call @llvm.amdgcn.ds.bpermute(%198, %266) : (i32, i32) -> i32
++    %270 = llvm.call @llvm.amdgcn.ds.bpermute(%198, %268) : (i32, i32) -> i32
++    %271 = llvm.zext %269 : i32 to i64
++    %272 = llvm.zext %270 : i32 to i64
++    %273 = llvm.shl %272, %6 : i64
++    %274 = llvm.or %271, %273 : i64
++    %275 = llvm.add %192, %274 : i64
++    %276 = llvm.trunc %275 : i64 to i32
++    %277 = llvm.lshr %275, %6 : i64
++    %278 = llvm.trunc %277 : i64 to i32
++    %279 = llvm.call @llvm.amdgcn.ds.bpermute(%210, %276) : (i32, i32) -> i32
++    %280 = llvm.call @llvm.amdgcn.ds.bpermute(%210, %278) : (i32, i32) -> i32
++    %281 = llvm.zext %279 : i32 to i64
++    %282 = llvm.zext %280 : i32 to i64
++    %283 = llvm.shl %282, %6 : i64
++    %284 = llvm.or %281, %283 : i64
++    %285 = llvm.add %275, %284 : i64
++    %286 = llvm.trunc %285 : i64 to i32
++    %287 = llvm.lshr %285, %6 : i64
++    %288 = llvm.trunc %287 : i64 to i32
++    %289 = llvm.call @llvm.amdgcn.ds.bpermute(%222, %286) : (i32, i32) -> i32
++    %290 = llvm.call @llvm.amdgcn.ds.bpermute(%222, %288) : (i32, i32) -> i32
++    %291 = llvm.zext %289 : i32 to i64
++    %292 = llvm.zext %290 : i32 to i64
++    %293 = llvm.shl %292, %6 : i64
++    %294 = llvm.or %291, %293 : i64
++    %295 = llvm.add %285, %294 : i64
++    %296 = llvm.trunc %295 : i64 to i32
++    %297 = llvm.lshr %295, %6 : i64
++    %298 = llvm.trunc %297 : i64 to i32
++    %299 = llvm.call @llvm.amdgcn.ds.bpermute(%234, %296) : (i32, i32) -> i32
++    %300 = llvm.call @llvm.amdgcn.ds.bpermute(%234, %298) : (i32, i32) -> i32
++    %301 = llvm.zext %299 : i32 to i64
++    %302 = llvm.zext %300 : i32 to i64
++    %303 = llvm.shl %302, %6 : i64
++    %304 = llvm.or %301, %303 : i64
++    %305 = llvm.add %295, %304 : i64
++    %306 = llvm.trunc %305 : i64 to i32
++    %307 = llvm.lshr %305, %6 : i64
++    %308 = llvm.trunc %307 : i64 to i32
++    %309 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %306) : (i32, i32) -> i32
++    %310 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %308) : (i32, i32) -> i32
++    %311 = llvm.zext %309 : i32 to i64
++    %312 = llvm.zext %310 : i32 to i64
++    %313 = llvm.shl %312, %6 : i64
++    %314 = llvm.or %311, %313 : i64
++    %315 = llvm.add %305, %314 : i64
++    %316 = llvm.trunc %315 : i64 to i32
++    %317 = llvm.lshr %315, %6 : i64
++    %318 = llvm.trunc %317 : i64 to i32
++    %319 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %316) : (i32, i32) -> i32
++    %320 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %318) : (i32, i32) -> i32
++    %321 = llvm.zext %319 : i32 to i64
++    %322 = llvm.zext %320 : i32 to i64
++    %323 = llvm.shl %322, %6 : i64
++    %324 = llvm.or %321, %323 : i64
++    %325 = llvm.add %315, %324 : i64
++    %326 = llvm.trunc %190 : i64 to i32
++    %327 = llvm.lshr %190, %6 : i64
++    %328 = llvm.trunc %327 : i64 to i32
++    %329 = llvm.call @llvm.amdgcn.ds.bpermute(%198, %326) : (i32, i32) -> i32
++    %330 = llvm.call @llvm.amdgcn.ds.bpermute(%198, %328) : (i32, i32) -> i32
++    %331 = llvm.zext %329 : i32 to i64
++    %332 = llvm.zext %330 : i32 to i64
++    %333 = llvm.shl %332, %6 : i64
++    %334 = llvm.or %331, %333 : i64
++    %335 = llvm.add %190, %334 : i64
+
+@@ hunk 3/4 left 466..545 right 466..528 @@
+--- 0_canonicalize.mlir:466
++++ 1_cse.mlir:466
+@@ -1,80 +1,63 @@
+-    %336 = llvm.and %62, %5 : i32
+-    %337 = llvm.xor %336, %25 : i32
+-    %338 = llvm.shl %337, %31 : i32
+-    %339 = llvm.call @llvm.amdgcn.ds.bpermute(%338, %331) : (i32, i32) -> i32
+-    %340 = llvm.zext %335 : i32 to i64
++    %336 = llvm.trunc %335 : i64 to i32
++    %337 = llvm.lshr %335, %6 : i64
++    %338 = llvm.trunc %337 : i64 to i32
++    %339 = llvm.call @llvm.amdgcn.ds.bpermute(%210, %336) : (i32, i32) -> i32
++    %340 = llvm.call @llvm.amdgcn.ds.bpermute(%210, %338) : (i32, i32) -> i32
+     %341 = llvm.zext %339 : i32 to i64
+-    %342 = llvm.shl %341, %6 : i64
+-    %343 = llvm.or %340, %342 : i64
+-    %344 = llvm.add %328, %343 : i64
+-    %345 = llvm.trunc %344 : i64 to i32
+-    %346 = llvm.lshr %344, %6 : i64
+-    %347 = llvm.trunc %346 : i64 to i32
+-    %348 = llvm.and %62, %5 : i32
+-    %349 = llvm.xor %348, %28 : i32
+-    %350 = llvm.shl %349, %31 : i32
+-    %351 = llvm.call @llvm.amdgcn.ds.bpermute(%350, %345) : (i32, i32) -> i32
+-    %352 = llvm.and %62, %5 : i32
+-    %353 = llvm.xor %352, %28 : i32
+-    %354 = llvm.shl %353, %31 : i32
+-    %355 = llvm.call @llvm.amdgcn.ds.bpermute(%354, %347) : (i32, i32) -> i32
+-    %356 = llvm.zext %351 : i32 to i64
+-    %357 = llvm.zext %355 : i32 to i64
+-    %358 = llvm.shl %357, %6 : i64
+-    %359 = llvm.or %356, %358 : i64
+-    %360 = llvm.add %344, %359 : i64
+-    %361 = llvm.trunc %360 : i64 to i32
+-    %362 = llvm.lshr %360, %6 : i64
+-    %363 = llvm.trunc %362 : i64 to i32
+-    %364 = llvm.and %62, %5 : i32
+-    %365 = llvm.xor %364, %31 : i32
+-    %366 = llvm.shl %365, %31 : i32
+-    %367 = llvm.call @llvm.amdgcn.ds.bpermute(%366, %361) : (i32, i32) -> i32
+-    %368 = llvm.and %62, %5 : i32
+-    %369 = llvm.xor %368, %31 : i32
+-    %370 = llvm.shl %369, %31 : i32
+-    %371 = llvm.call @llvm.amdgcn.ds.bpermute(%370, %363) : (i32, i32) -> i32
+-    %372 = llvm.zext %367 : i32 to i64
+-    %373 = llvm.zext %371 : i32 to i64
+-    %374 = llvm.shl %373, %6 : i64
+-    %375 = llvm.or %372, %374 : i64
+-    %376 = llvm.add %360, %375 : i64
+-    %377 = llvm.trunc %376 : i64 to i32
+-    %378 = llvm.lshr %376, %6 : i64
+-    %379 = llvm.trunc %378 : i64 to i32
+-    %380 = llvm.and %62, %5 : i32
+-    %381 = llvm.xor %380, %30 : i32
+-    %382 = llvm.shl %381, %31 : i32
+-    %383 = llvm.call @llvm.amdgcn.ds.bpermute(%382, %377) : (i32, i32) -> i32
+-    %384 = llvm.and %62, %5 : i32
+-    %385 = llvm.xor %384, %30 : i32
+-    %386 = llvm.shl %385, %31 : i32
+-    %387 = llvm.call @llvm.amdgcn.ds.bpermute(%386, %379) : (i32, i32) -> i32
+-    %388 = llvm.zext %383 : i32 to i64
+-    %389 = llvm.zext %387 : i32 to i64
+-    %390 = llvm.shl %389, %6 : i64
+-    %391 = llvm.or %388, %390 : i64
+-    %392 = llvm.add %376, %391 : i64
+-    %393 = llvm.trunc %198 : i64 to i32
+-    %394 = llvm.lshr %198, %6 : i64
+-    %395 = llvm.trunc %394 : i64 to i32
+-    %396 = llvm.and %62, %5 : i32
+-    %397 = llvm.xor %396, %7 : i32
+-    %398 = llvm.shl %397, %31 : i32
+-    %399 = llvm.call @llvm.amdgcn.ds.bpermute(%398, %393) : (i32, i32) -> i32
+-    %400 = llvm.and %62, %5 : i32
+-    %401 = llvm.xor %400, %7 : i32
+-    %402 = llvm.shl %401, %31 : i32
+-    %403 = llvm.call @llvm.amdgcn.ds.bpermute(%402, %395) : (i32, i32) -> i32
+-    %404 = llvm.zext %399 : i32 to i64
+-    %405 = llvm.zext %403 : i32 to i64
+-    %406 = llvm.shl %405, %6 : i64
+-    %407 = llvm.or %404, %406 : i64
+-    %408 = llvm.add %198, %407 : i64
+-    %409 = llvm.trunc %408 : i64 to i32
+-    %410 = llvm.lshr %408, %6 : i64
+-    %411 = llvm.trunc %410 : i64 to i32
+-    %412 = llvm.and %62, %5 : i32
+-    %413 = llvm.xor %412, %4 : i32
+-    %414 = llvm.shl %413, %31 : i32
+-    %415 = llvm.call @llvm.amdgcn.ds.bpermute(%414, %409) : (i32, i32) -> i32
++    %342 = llvm.zext %340 : i32 to i64
++    %343 = llvm.shl %342, %6 : i64
++    %344 = llvm.or %341, %343 : i64
++    %345 = llvm.add %335, %344 : i64
++    %346 = llvm.trunc %345 : i64 to i32
++    %347 = llvm.lshr %345, %6 : i64
++    %348 = llvm.trunc %347 : i64 to i32
++    %349 = llvm.call @llvm.amdgcn.ds.bpermute(%222, %346) : (i32, i32) -> i32
++    %350 = llvm.call @llvm.amdgcn.ds.bpermute(%222, %348) : (i32, i32) -> i32
++    %351 = llvm.zext %349 : i32 to i64
++    %352 = llvm.zext %350 : i32 to i64
++    %353 = llvm.shl %352, %6 : i64
++    %354 = llvm.or %351, %353 : i64
++    %355 = llvm.add %345, %354 : i64
++    %356 = llvm.trunc %355 : i64 to i32
++    %357 = llvm.lshr %355, %6 : i64
++    %358 = llvm.trunc %357 : i64 to i32
++    %359 = llvm.call @llvm.amdgcn.ds.bpermute(%234, %356) : (i32, i32) -> i32
++    %360 = llvm.call @llvm.amdgcn.ds.bpermute(%234, %358) : (i32, i32) -> i32
++    %361 = llvm.zext %359 : i32 to i64
++    %362 = llvm.zext %360 : i32 to i64
++    %363 = llvm.shl %362, %6 : i64
++    %364 = llvm.or %361, %363 : i64
++    %365 = llvm.add %355, %364 : i64
++    %366 = llvm.trunc %365 : i64 to i32
++    %367 = llvm.lshr %365, %6 : i64
++    %368 = llvm.trunc %367 : i64 to i32
++    %369 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %366) : (i32, i32) -> i32
++    %370 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %368) : (i32, i32) -> i32
++    %371 = llvm.zext %369 : i32 to i64
++    %372 = llvm.zext %370 : i32 to i64
++    %373 = llvm.shl %372, %6 : i64
++    %374 = llvm.or %371, %373 : i64
++    %375 = llvm.add %365, %374 : i64
++    %376 = llvm.trunc %375 : i64 to i32
++    %377 = llvm.lshr %375, %6 : i64
++    %378 = llvm.trunc %377 : i64 to i32
++    %379 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %376) : (i32, i32) -> i32
++    %380 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %378) : (i32, i32) -> i32
++    %381 = llvm.zext %379 : i32 to i64
++    %382 = llvm.zext %380 : i32 to i64
++    %383 = llvm.shl %382, %6 : i64
++    %384 = llvm.or %381, %383 : i64
++    %385 = llvm.add %375, %384 : i64
++    %386 = llvm.addrspacecast %3 : !llvm.ptr<3> to !llvm.ptr
++    %387 = llvm.addrspacecast %2 : !llvm.ptr<3> to !llvm.ptr
++    %388 = llvm.addrspacecast %1 : !llvm.ptr<3> to !llvm.ptr
++    %389 = llvm.icmp "eq" %196, %29 : i32
++    %390 = llvm.lshr %62, %0 : i32
++    %391 = llvm.zext %390 : i32 to i64
++    llvm.cond_br %389, ^bb9, ^bb10
++  ^bb9:  // pred: ^bb8
++    %392 = llvm.getelementptr inbounds %386[%391] : (!llvm.ptr, i64) -> !llvm.ptr, i64
++    llvm.store %265, %392 : i64, !llvm.ptr
++    %393 = llvm.getelementptr inbounds %387[%391] : (!llvm.ptr, i64) -> !llvm.ptr, i64
++    llvm.store %325, %393 : i64, !llvm.ptr
++    %394 = llvm.add %391, %33 : i64
+
+@@ hunk 4/4 left 635..714 right 531..589 @@
+--- 0_canonicalize.mlir:635
++++ 1_cse.mlir:531
+@@ -1,80 +1,59 @@
+     llvm.br ^bb10
+   ^bb10:  // 2 preds: ^bb8, ^bb9
+     llvm.call @llvm.amdgcn.s.barrier() : () -> ()
+-    %500 = llvm.icmp "ult" %62, %28 : i32
+-    llvm.cond_br %500, ^bb11, ^bb14
++    %396 = llvm.icmp "ult" %62, %28 : i32
++    llvm.cond_br %396, ^bb11, ^bb14
+   ^bb11:  // pred: ^bb10
+-    %501 = llvm.zext %62 : i32 to i64
+-    %502 = llvm.getelementptr inbounds %489[%501] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-    %503 = llvm.load %502 : !llvm.ptr -> i64
+-    %504 = llvm.getelementptr inbounds %490[%501] : (!llvm.ptr, i64) -> !llvm.ptr, i64
+-    %505 = llvm.load %504 : !llvm.ptr -> i64
+-    %506 = llvm.trunc %503 : i64 to i32
+-    %507 = llvm.lshr %503, %6 : i64
+-    %508 = llvm.trunc %507 : i64 to i32
+-    %509 = llvm.and %62, %5 : i32
+-    %510 = llvm.xor %509, %31 : i32
+-    %511 = llvm.shl %510, %31 : i32
+-    %512 = llvm.call @llvm.amdgcn.ds.bpermute(%511, %506) : (i32, i32) -> i32
+-    %513 = llvm.and %62, %5 : i32
+-    %514 = llvm.xor %513, %31 : i32
+-    %515 = llvm.shl %514, %31 : i32
+-    %516 = llvm.call @llvm.amdgcn.ds.bpermute(%515, %508) : (i32, i32) -> i32
+-    %517 = llvm.zext %512 : i32 to i64
+-    %518 = llvm.zext %516 : i32 to i64
+-    %519 = llvm.shl %518, %6 : i64
+-    %520 = llvm.or %517, %519 : i64
+-    %521 = llvm.add %503, %520 : i64
+-    %522 = llvm.trunc %505 : i64 to i32
+-    %523 = llvm.lshr %505, %6 : i64
+-    %524 = llvm.trunc %523 : i64 to i32
+-    %525 = llvm.and %62, %5 : i32
+-    %526 = llvm.xor %525, %31 : i32
+-    %527 = llvm.shl %526, %31 : i32
+-    %528 = llvm.call @llvm.amdgcn.ds.bpermute(%527, %522) : (i32, i32) -> i32
+-    %529 = llvm.and %62, %5 : i32
+-    %530 = llvm.xor %529, %31 : i32
+-    %531 = llvm.shl %530, %31 : i32
+-    %532 = llvm.call @llvm.amdgcn.ds.bpermute(%531, %524) : (i32, i32) -> i32
+-    %533 = llvm.zext %528 : i32 to i64
+-    %534 = llvm.zext %532 : i32 to i64
+-    %535 = llvm.shl %534, %6 : i64
+-    %536 = llvm.or %533, %535 : i64
+-    %537 = llvm.add %505, %536 : i64
+-    %538 = llvm.trunc %521 : i64 to i32
+-    %539 = llvm.lshr %521, %6 : i64
+-    %540 = llvm.trunc %539 : i64 to i32
+-    %541 = llvm.and %62, %5 : i32
+-    %542 = llvm.xor %541, %30 : i32
+-    %543 = llvm.shl %542, %31 : i32
+-    %544 = llvm.call @llvm.amdgcn.ds.bpermute(%543, %538) : (i32, i32) -> i32
+-    %545 = llvm.and %62, %5 : i32
+-    %546 = llvm.xor %545, %30 : i32
+-    %547 = llvm.shl %546, %31 : i32
+-    %548 = llvm.call @llvm.amdgcn.ds.bpermute(%547, %540) : (i32, i32) -> i32
+-    %549 = llvm.zext %544 : i32 to i64
+-    %550 = llvm.zext %548 : i32 to i64
+-    %551 = llvm.shl %550, %6 : i64
+-    %552 = llvm.or %549, %551 : i64
+-    %553 = llvm.add %521, %552 : i64
+-    %554 = llvm.trunc %537 : i64 to i32
+-    %555 = llvm.lshr %537, %6 : i64
+-    %556 = llvm.trunc %555 : i64 to i32
+-    %557 = llvm.and %62, %5 : i32
+-    %558 = llvm.xor %557, %30 : i32
+-    %559 = llvm.shl %558, %31 : i32
+-    %560 = llvm.call @llvm.amdgcn.ds.bpermute(%559, %554) : (i32, i32) -> i32
+-    %561 = llvm.and %62, %5 : i32
+-    %562 = llvm.xor %561, %30 : i32
+-    %563 = llvm.shl %562, %31 : i32
+-    %564 = llvm.call @llvm.amdgcn.ds.bpermute(%563, %556) : (i32, i32) -> i32
+-    %565 = llvm.zext %560 : i32 to i64
+-    %566 = llvm.zext %564 : i32 to i64
+-    %567 = llvm.shl %566, %6 : i64
+-    %568 = llvm.or %565, %567 : i64
+-    %569 = llvm.add %537, %568 : i64
+-    %570 = llvm.icmp "eq" %62, %29 : i32
+-    llvm.cond_br %570, ^bb12, ^bb13
++    %397 = llvm.zext %62 : i32 to i64
++    %398 = llvm.getelementptr inbounds %386[%397] : (!llvm.ptr, i64) -> !llvm.ptr, i64
++    %399 = llvm.load %398 : !llvm.ptr -> i64
++    %400 = llvm.getelementptr inbounds %387[%397] : (!llvm.ptr, i64) -> !llvm.ptr, i64
++    %401 = llvm.load %400 : !llvm.ptr -> i64
++    %402 = llvm.trunc %399 : i64 to i32
++    %403 = llvm.lshr %399, %6 : i64
++    %404 = llvm.trunc %403 : i64 to i32
++    %405 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %402) : (i32, i32) -> i32
++    %406 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %404) : (i32, i32) -> i32
++    %407 = llvm.zext %405 : i32 to i64
++    %408 = llvm.zext %406 : i32 to i64
++    %409 = llvm.shl %408, %6 : i64
++    %410 = llvm.or %407, %409 : i64
++    %411 = llvm.add %399, %410 : i64
++    %412 = llvm.trunc %401 : i64 to i32
++    %413 = llvm.lshr %401, %6 : i64
++    %414 = llvm.trunc %413 : i64 to i32
++    %415 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %412) : (i32, i32) -> i32
++    %416 = llvm.call @llvm.amdgcn.ds.bpermute(%246, %414) : (i32, i32) -> i32
++    %417 = llvm.zext %415 : i32 to i64
++    %418 = llvm.zext %416 : i32 to i64
++    %419 = llvm.shl %418, %6 : i64
++    %420 = llvm.or %417, %419 : i64
++    %421 = llvm.add %401, %420 : i64
++    %422 = llvm.trunc %411 : i64 to i32
++    %423 = llvm.lshr %411, %6 : i64
++    %424 = llvm.trunc %423 : i64 to i32
++    %425 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %422) : (i32, i32) -> i32
++    %426 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %424) : (i32, i32) -> i32
++    %427 = llvm.zext %425 : i32 to i64
++    %428 = llvm.zext %426 : i32 to i64
++    %429 = llvm.shl %428, %6 : i64
++    %430 = llvm.or %427, %429 : i64
++    %431 = llvm.add %411, %430 : i64
++    %432 = llvm.trunc %421 : i64 to i32
++    %433 = llvm.lshr %421, %6 : i64
++    %434 = llvm.trunc %433 : i64 to i32
++    %435 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %432) : (i32, i32) -> i32
++    %436 = llvm.call @llvm.amdgcn.ds.bpermute(%258, %434) : (i32, i32) -> i32
++    %437 = llvm.zext %435 : i32 to i64
++    %438 = llvm.zext %436 : i32 to i64
++    %439 = llvm.shl %438, %6 : i64
++    %440 = llvm.or %437, %439 : i64
++    %441 = llvm.add %421, %440 : i64
++    %442 = llvm.icmp "eq" %62, %29 : i32
++    llvm.cond_br %442, ^bb12, ^bb13
+   ^bb12:  // pred: ^bb11
+-    %571 = llvm.atomicrmw add %arg3, %553 syncscope("agent") monotonic : !llvm.ptr, i64
+-    %572 = llvm.getelementptr %arg3[8] : (!llvm.ptr) -> !llvm.ptr, i8
++    %443 = llvm.atomicrmw add %arg3, %431 syncscope("agent") monotonic : !llvm.ptr, i64
++    %444 = llvm.getelementptr %arg3[8] : (!llvm.ptr) -> !llvm.ptr, i8
++    %445 = llvm.atomicrmw add %444, %441 syncscope("agent") monotonic : !llvm.ptr, i64
++    %446 = llvm.load %388 : !llvm.ptr -> i64
++    %447 = llvm.getelementptr inbounds %388[1] : (!llvm.ptr) -> !llvm.ptr, i64

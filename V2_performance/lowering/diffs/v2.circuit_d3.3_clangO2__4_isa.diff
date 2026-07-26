@@ -1,0 +1,189 @@
+# v2 / circuit_d3: clangO2 -> isa
+# circuit_d3.3_clangO2.ll (8132 lines) -> circuit_d3.4_isa.s (10398 lines)
+# 2 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u circuit_d3.3_clangO2.ll circuit_d3.4_isa.s
+
+@@ hunk 1/2 left 1..10 right 1..80 @@
+--- circuit_d3.3_clangO2.ll:1
++++ circuit_d3.4_isa.s:1
+@@ -1,10 +1,80 @@
+-; ModuleID = 'V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c'
+-source_filename = "V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c"
+-target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
+-target triple = "amdgcn-amd-amdhsa"
+-
+-%struct.V2State = type { [5 x i64], [5 x i64], [64 x i64], [4 x i64], [8 x i8], i32, i32, i8, i8 }
+-%struct.CV2Complex = type { float, float }
+-%struct.CV2NoiseSite = type { i32, i32, double }
+-%struct.CV2Channel = type { [5 x i64], [5 x i64], double }
+-%struct.CV2ReadoutNoise = type { i32, double }
++	.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
++	.amdhsa_code_object_version 6
++	.text
++	.p2align	2                               ; -- Begin function v2_op_noise_block
++	.type	v2_op_noise_block,@function
++v2_op_noise_block:                      ; @v2_op_noise_block
++; %bb.0:                                ; %entry
++	s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
++	s_mov_b32 s0, s33
++	s_mov_b32 s33, s32
++	s_or_saveexec_b64 s[2:3], -1
++	scratch_store_dword off, v63, s33 offset:68 ; 4-byte Folded Spill
++	s_mov_b64 exec, s[2:3]
++	scratch_store_dword off, v40, s33 offset:64 ; 4-byte Folded Spill
++	scratch_store_dword off, v41, s33 offset:60 ; 4-byte Folded Spill
++	scratch_store_dword off, v42, s33 offset:56 ; 4-byte Folded Spill
++	scratch_store_dword off, v43, s33 offset:52 ; 4-byte Folded Spill
++	scratch_store_dword off, v44, s33 offset:48 ; 4-byte Folded Spill
++	scratch_store_dword off, v45, s33 offset:44 ; 4-byte Folded Spill
++	scratch_store_dword off, v46, s33 offset:40 ; 4-byte Folded Spill
++	scratch_store_dword off, v47, s33 offset:36 ; 4-byte Folded Spill
++	scratch_store_dword off, v56, s33 offset:32 ; 4-byte Folded Spill
++	scratch_store_dword off, v57, s33 offset:28 ; 4-byte Folded Spill
++	scratch_store_dword off, v58, s33 offset:24 ; 4-byte Folded Spill
++	scratch_store_dword off, v59, s33 offset:20 ; 4-byte Folded Spill
++	scratch_store_dword off, v60, s33 offset:16 ; 4-byte Folded Spill
++	scratch_store_dword off, v61, s33 offset:12 ; 4-byte Folded Spill
++	scratch_store_dword off, v62, s33 offset:8 ; 4-byte Folded Spill
++	scratch_store_dword off, a32, s33 offset:4 ; 4-byte Folded Spill
++	scratch_store_dword off, a33, s33       ; 4-byte Folded Spill
++	v_mov_b32_e32 v41, v1
++	v_mov_b32_e32 v40, v0
++	flat_load_dword v16, v[40:41] offset:636
++	v_writelane_b32 v63, s0, 22
++	v_writelane_b32 v63, s30, 0
++	v_writelane_b32 v63, s31, 1
++	v_writelane_b32 v63, s34, 2
++	v_writelane_b32 v63, s35, 3
++	v_writelane_b32 v63, s36, 4
++	v_writelane_b32 v63, s37, 5
++	v_writelane_b32 v63, s38, 6
++	v_writelane_b32 v63, s39, 7
++	v_writelane_b32 v63, s48, 8
++	v_writelane_b32 v63, s49, 9
++	v_writelane_b32 v63, s50, 10
++	v_writelane_b32 v63, s51, 11
++	v_writelane_b32 v63, s52, 12
++	v_writelane_b32 v63, s53, 13
++	v_writelane_b32 v63, s54, 14
++	v_writelane_b32 v63, s55, 15
++	v_writelane_b32 v63, s64, 16
++	v_writelane_b32 v63, s65, 17
++	v_writelane_b32 v63, s66, 18
++	v_writelane_b32 v63, s67, 19
++	v_add_u32_e32 v0, v10, v9
++	v_writelane_b32 v63, s68, 20
++	v_writelane_b32 v63, s69, 21
++	v_mov_b32_e32 v58, v31
++	v_mov_b32_e32 v62, v8
++	v_mov_b32_e32 v43, v7
++	v_mov_b32_e32 v42, v6
++	v_mov_b32_e32 v45, v5
++	v_mov_b32_e32 v44, v4
++	v_mov_b32_e32 v47, v3
++	v_mov_b32_e32 v46, v2
++	s_mov_b32 s50, s15
++	s_mov_b32 s51, s14
++	s_mov_b32 s52, s13
++	s_mov_b32 s53, s12
++	s_mov_b64 s[34:35], s[10:11]
++	s_mov_b64 s[36:37], s[8:9]
++	s_mov_b64 s[38:39], s[6:7]
++	s_mov_b64 s[48:49], s[4:5]
++	v_accvgpr_write_b32 a32, v9
++	v_accvgpr_write_b32 a33, v0
++	s_addk_i32 s32, 0x50
++	s_waitcnt vmcnt(0) lgkmcnt(0)
++	v_cmp_ge_u32_e32 vcc, v16, v9
++	v_cmp_lt_u32_e64 s[0:1], v16, v0
++	s_and_b64 s[0:1], vcc, s[0:1]
+
+@@ hunk 2/2 left 1..80 right 10392..10398 @@
+--- circuit_d3.3_clangO2.ll:1
++++ circuit_d3.4_isa.s:10392
+@@ -1,80 +1,7 @@
+-; ModuleID = 'V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c'
+-source_filename = "V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c"
+-target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
+-target triple = "amdgcn-amd-amdhsa"
++amdhsa.target:   amdgcn-amd-amdhsa--gfx950
++amdhsa.version:
++  - 1
++  - 2
++...
+ 
+-%struct.V2State = type { [5 x i64], [5 x i64], [64 x i64], [4 x i64], [8 x i8], i32, i32, i8, i8 }
+-%struct.CV2Complex = type { float, float }
+-%struct.CV2NoiseSite = type { i32, i32, double }
+-%struct.CV2Channel = type { [5 x i64], [5 x i64], double }
+-%struct.CV2ReadoutNoise = type { i32, double }
+-
+-; Function Attrs: convergent nounwind
+-define amdgpu_kernel void @clifft_v2_spec(ptr noundef readnone captures(none) %instrs, i32 noundef %num_instrs, i32 noundef %peak_rank, i32 noundef %total_meas_slots, i32 noundef %num_observables, i64 noundef %seed, i64 noundef %shot_offset, i64 noundef %shots, ptr noundef captures(none) %block_counts, ptr noundef readnone captures(none) %fused_u2, ptr noundef readnone captures(none) %fused_u4, ptr noundef readonly captures(none) %observable_offsets, ptr noundef readonly captures(none) %observable_targets, ptr noundef readonly captures(none) %noise_sites, ptr noundef readonly captures(none) %noise_channels, ptr noundef readonly captures(none) %noise_hazards, i32 noundef %num_noise_sites, i32 noundef %expected_obs_mask, ptr noundef readonly %pauli_masks, ptr noundef readonly captures(none) %readout_noise, ptr noundef readnone captures(none) %detector_offsets, ptr noundef readnone captures(none) %detector_targets) local_unnamed_addr #0 {
+-entry:
+-  %st = alloca %struct.V2State, align 8, addrspace(5)
+-  %vloc = alloca [16 x %struct.CV2Complex], align 8, addrspace(5)
+-  %sloc = alloca [8 x %struct.CV2Complex], align 8, addrspace(5)
+-  %pauli_masks.global = addrspacecast ptr %pauli_masks to ptr addrspace(1)
+-  %noise_hazards.global = addrspacecast ptr %noise_hazards to ptr addrspace(1)
+-  %observable_targets.global = addrspacecast ptr %observable_targets to ptr addrspace(1)
+-  %observable_offsets.global = addrspacecast ptr %observable_offsets to ptr addrspace(1)
+-  %block_counts.global = addrspacecast ptr %block_counts to ptr addrspace(1)
+-  %0 = tail call noundef i32 @llvm.amdgcn.workgroup.id.x()
+-  %conv = zext i32 %0 to i64
+-  %mul = shl nuw nsw i64 %conv, 8
+-  %1 = tail call i32 @llvm.amdgcn.workitem.id.x()
+-  %conv1 = zext nneg i32 %1 to i64
+-  %add = add nuw nsw i64 %mul, %conv1
+-  %add2 = add i64 %add, %shot_offset
+-  %cmp.not = icmp ult i64 %add2, %shots
+-  br i1 %cmp.not, label %if.end, label %cleanup
+-
+-if.end:                                           ; preds = %entry
+-  %sloc.ascast = addrspacecast ptr addrspace(5) %sloc to ptr
+-  %vloc.ascast = addrspacecast ptr addrspace(5) %vloc to ptr
+-  %st.ascast = addrspacecast ptr addrspace(5) %st to ptr
+-  call void @llvm.lifetime.start.p5(i64 648, ptr addrspace(5) %st) #8
+-  call void @llvm.lifetime.start.p5(i64 128, ptr addrspace(5) %vloc) #8
+-  call void @llvm.lifetime.start.p5(i64 64, ptr addrspace(5) %sloc) #8
+-  %arrayidx.1.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 8
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.1.i.i, align 8, !tbaa !4
+-  %arrayidx.2.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 16
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.2.i.i, align 8, !tbaa !4
+-  %arrayidx.3.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 24
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.3.i.i, align 8, !tbaa !4
+-  %arrayidx.4.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 32
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.4.i.i, align 8, !tbaa !4
+-  %arrayidx.5.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 40
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.5.i.i, align 8, !tbaa !4
+-  %arrayidx.6.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 48
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.6.i.i, align 8, !tbaa !4
+-  %arrayidx.7.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 56
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.7.i.i, align 8, !tbaa !4
+-  %arrayidx.8.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 64
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.8.i.i, align 8, !tbaa !4
+-  %arrayidx.9.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 72
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.9.i.i, align 8, !tbaa !4
+-  %arrayidx.10.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 80
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.10.i.i, align 8, !tbaa !4
+-  %arrayidx.11.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 88
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.11.i.i, align 8, !tbaa !4
+-  %arrayidx.12.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 96
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.12.i.i, align 8, !tbaa !4
+-  %arrayidx.13.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 104
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.13.i.i, align 8, !tbaa !4
+-  %arrayidx.14.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 112
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.14.i.i, align 8, !tbaa !4
+-  %arrayidx.15.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 120
+-  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.15.i.i, align 8, !tbaa !4
+-  %pz.i3043.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 40
+-  store i64 0, ptr addrspace(5) %st, align 8, !tbaa !8
+-  store i64 0, ptr addrspace(5) %pz.i3043.i, align 8, !tbaa !8
+-  %arrayidx9.1.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 8
+-  store i64 0, ptr addrspace(5) %arrayidx9.1.i.i, align 8, !tbaa !8
+-  %arrayidx11.1.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 48
+-  store i64 0, ptr addrspace(5) %arrayidx11.1.i.i, align 8, !tbaa !8
+-  %arrayidx9.2.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 16
+-  store i64 0, ptr addrspace(5) %arrayidx9.2.i.i, align 8, !tbaa !8
+-  %arrayidx11.2.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 56
+-  store i64 0, ptr addrspace(5) %arrayidx11.2.i.i, align 8, !tbaa !8
++	.end_amdgpu_metadata

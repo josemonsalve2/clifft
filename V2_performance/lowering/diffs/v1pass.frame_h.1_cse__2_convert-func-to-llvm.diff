@@ -1,0 +1,16 @@
+# v1pass / frame_h: cse -> convert-func-to-llvm
+# 1_cse.mlir (608 lines) -> 2_convert-func-to-llvm.mlir (608 lines)
+# 1 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u 1_cse.mlir 2_convert-func-to-llvm.mlir
+
+@@ hunk 1/1 left 1..7 right 1..7 @@
+--- 1_cse.mlir:1
++++ 2_convert-func-to-llvm.mlir:1
+@@ -1,7 +1,7 @@
+-// -----// IR Dump After CSE (cse) //----- //
++// -----// IR Dump After ConvertFuncToLLVMPass (convert-func-to-llvm) //----- //
+ module attributes {llvm.target_triple = "amdgcn-amd-amdhsa"} {
+   llvm.func @llvm.amdgcn.workitem.id.x() -> i32
+   llvm.func @llvm.amdgcn.workgroup.id.x() -> i32
+   llvm.func @llvm.amdgcn.s.barrier()
+   llvm.func @llvm.amdgcn.ds.bpermute(i32, i32) -> i32
+   llvm.func @clifft_log(%arg0: f64) -> f64 {

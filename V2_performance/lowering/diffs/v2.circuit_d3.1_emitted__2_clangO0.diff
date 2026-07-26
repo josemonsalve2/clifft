@@ -1,0 +1,328 @@
+# v2 / circuit_d3: emitted -> clangO0
+# circuit_d3.1_emitted.c (383 lines) -> circuit_d3.2_clangO0.ll (19551 lines)
+# 4 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u circuit_d3.1_emitted.c circuit_d3.2_clangO0.ll
+
+@@ hunk 1/4 left 1..9 right 1..10 @@
+--- circuit_d3.1_emitted.c:1
++++ circuit_d3.2_clangO0.ll:1
+@@ -1,9 +1,10 @@
+-#define V2_REGISTER 1
+-#define V2_NOISE_ATTR __attribute__((noinline))
+-#include "clifft/gpu/mlir/v2/v2_ops.h"
++; ModuleID = 'V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c'
++source_filename = "V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c"
++target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
++target triple = "amdgcn-amd-amdhsa"
+ 
+-static void spec_body(V2State* st, CV2Complex* v, CV2Complex* scratch,
+-                      u32 amp_capacity, u64 shot_id, u32 num_observables, u64 seed,
+-                      CV2BlockCounts* block_counts,
+-                      const CV2FusedU2Entry* fused_u2, const CV2FusedU4Entry* fused_u4,
+-                      const u32* observable_offsets, const u32* observable_targets,
++%struct.V2State = type { [5 x i64], [5 x i64], [64 x i64], [4 x i64], [8 x i8], i32, i32, i8, i8 }
++%struct.CV2Complex = type { float, float }
++%struct.CV2Mask = type { [5 x i64], [5 x i64], i8 }
++%struct.CV2ReadoutNoise = type { i32, double }
++%struct.CV2BlockCounts = type { i64, i64, [8 x i64], [8 x double], i64 }
+
+@@ hunk 2/4 left 1..80 right 1..80 @@
+--- circuit_d3.1_emitted.c:1
++++ circuit_d3.2_clangO0.ll:1
+@@ -1,80 +1,80 @@
+-#define V2_REGISTER 1
+-#define V2_NOISE_ATTR __attribute__((noinline))
+-#include "clifft/gpu/mlir/v2/v2_ops.h"
++; ModuleID = 'V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c'
++source_filename = "V2_performance/scratch/perf_cache/reg_r4_n344_43971bba89d44888.c"
++target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
++target triple = "amdgcn-amd-amdhsa"
+ 
+-static void spec_body(V2State* st, CV2Complex* v, CV2Complex* scratch,
+-                      u32 amp_capacity, u64 shot_id, u32 num_observables, u64 seed,
+-                      CV2BlockCounts* block_counts,
+-                      const CV2FusedU2Entry* fused_u2, const CV2FusedU4Entry* fused_u4,
+-                      const u32* observable_offsets, const u32* observable_targets,
+-                      const CV2NoiseSite* noise_sites, const CV2Channel* noise_channels,
+-                      const double* noise_hazards, u32 num_noise_sites,
+-                      const CV2Mask* pauli_masks, const CV2ReadoutNoise* readout_noise,
+-                      const u32* detector_offsets, const u32* detector_targets,
+-                      u32 expected_obs_mask) {
+-    v2_shot_init(st, v, amp_capacity, shot_id, num_observables, seed, noise_hazards, num_noise_sites);
+-    v2_op_meas_dormant_static(st, 6u, 33u, 0u);
+-    v2_op_meas_dormant_static(st, 8u, 32u, 0u);
+-    v2_op_meas_dormant_static(st, 11u, 31u, 0u);
+-    v2_op_meas_dormant_random(st, 13u, 30u, 0u);
+-    v2_op_meas_dormant_random(st, 5u, 29u, 0u);
+-    v2_op_meas_dormant_random(st, 0u, 28u, 0u);
+-    v2_op_meas_dormant_random(st, 14u, 27u, 0u);
+-    v2_op_meas_dormant_random(st, 4u, 26u, 0u);
+-    v2_op_meas_dormant_random(st, 2u, 25u, 0u);
+-    v2_op_meas_dormant_random(st, 3u, 24u, 0u);
+-    v2_op_meas_dormant_random(st, 12u, 23u, 0u);
+-    v2_op_meas_dormant_random(st, 10u, 22u, 0u);
+-    v2_op_meas_dormant_random(st, 7u, 21u, 0u);
+-    v2_op_apply_pauli(st, pauli_masks, 0u, 21u);
+-    v2_op_apply_pauli(st, pauli_masks, 1u, 22u);
+-    v2_op_apply_pauli(st, pauli_masks, 2u, 23u);
+-    v2_op_apply_pauli(st, pauli_masks, 3u, 24u);
+-    v2_op_apply_pauli(st, pauli_masks, 4u, 25u);
+-    v2_op_apply_pauli(st, pauli_masks, 5u, 26u);
+-    v2_op_apply_pauli(st, pauli_masks, 6u, 27u);
+-    v2_op_apply_pauli(st, pauli_masks, 7u, 28u);
+-    v2_op_apply_pauli(st, pauli_masks, 8u, 29u);
+-    v2_op_apply_pauli(st, pauli_masks, 9u, 30u);
+-    v2_op_apply_pauli(st, pauli_masks, 10u, 31u);
+-    v2_op_apply_pauli(st, pauli_masks, 11u, 32u);
+-    v2_op_apply_pauli(st, pauli_masks, 12u, 33u);
+-    v2_op_noise_block(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 0u, 131u);
+-    v2_op_frame_cnot(st, 3u, 10u);
+-    v2_op_frame_cnot(st, 3u, 12u);
+-    v2_op_frame_cz(st, 3u, 6u);
+-    v2_op_frame_cz(st, 3u, 8u);
+-    v2_op_frame_swap(st, 3u, 0u);
+-    v2_op_frame_h(st, 0u);
+-    v2_op_expand_t(st, v, 0u, 0u, 1);
+-    v2_op_noise_block(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 131u, 57u);
+-    v2_op_meas_dormant_static(st, 3u, 34u, 0u);
+-    v2_op_noise(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 188u);
+-    v2_op_meas_dormant_static(st, 5u, 36u, 0u);
+-    v2_op_noise_block(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 189u, 3u);
+-    v2_op_frame_cnot(st, 2u, 7u);
+-    v2_op_frame_cnot(st, 2u, 10u);
+-    v2_op_frame_cz(st, 2u, 6u);
+-    v2_op_meas_dormant_random(st, 2u, 37u, 0u);
+-    v2_op_noise_block(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 192u, 2u);
+-    v2_op_frame_cnot(st, 4u, 7u);
+-    v2_op_frame_cnot(st, 4u, 12u);
+-    v2_op_frame_cz(st, 4u, 8u);
+-    v2_op_meas_dormant_random(st, 4u, 39u, 0u);
+-    v2_op_noise(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 194u);
+-    v2_op_meas_dormant_static(st, 9u, 40u, 0u);
+-    v2_op_noise_block(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 195u, 2u);
+-    v2_op_meas_dormant_static(st, 14u, 35u, 0u);
+-    v2_op_noise_block(st, noise_sites, noise_channels, noise_hazards, num_noise_sites, 197u, 3u);
+-    v2_op_frame_cnot(st, 7u, 10u);
+-    v2_op_frame_cnot(st, 7u, 12u);
+-    v2_op_frame_cnot(st, 7u, 13u);
+-    v2_op_frame_cz(st, 7u, 11u);
+-    v2_op_meas_dormant_random(st, 7u, 38u, 0u);
+-    v2_op_apply_pauli(st, pauli_masks, 13u, 34u);
+-    v2_op_apply_pauli(st, pauli_masks, 14u, 35u);
+-    v2_op_apply_pauli(st, pauli_masks, 15u, 36u);
+-    v2_op_apply_pauli(st, pauli_masks, 16u, 37u);
+-    v2_op_apply_pauli(st, pauli_masks, 17u, 38u);
+-    v2_op_apply_pauli(st, pauli_masks, 18u, 39u);
+-    v2_op_apply_pauli(st, pauli_masks, 19u, 40u);
++%struct.V2State = type { [5 x i64], [5 x i64], [64 x i64], [4 x i64], [8 x i8], i32, i32, i8, i8 }
++%struct.CV2Complex = type { float, float }
++%struct.CV2Mask = type { [5 x i64], [5 x i64], i8 }
++%struct.CV2ReadoutNoise = type { i32, double }
++%struct.CV2BlockCounts = type { i64, i64, [8 x i64], [8 x double], i64 }
++%struct.CV2NoiseSite = type { i32, i32, double }
++%struct.CV2Channel = type { [5 x i64], [5 x i64], double }
++
++; Function Attrs: convergent noinline nounwind optnone
++define amdgpu_kernel void @clifft_v2_spec(ptr noundef %instrs, i32 noundef %num_instrs, i32 noundef %peak_rank, i32 noundef %total_meas_slots, i32 noundef %num_observables, i64 noundef %seed, i64 noundef %shot_offset, i64 noundef %shots, ptr noundef %block_counts, ptr noundef %fused_u2, ptr noundef %fused_u4, ptr noundef %observable_offsets, ptr noundef %observable_targets, ptr noundef %noise_sites, ptr noundef %noise_channels, ptr noundef %noise_hazards, i32 noundef %num_noise_sites, i32 noundef %expected_obs_mask, ptr noundef %pauli_masks, ptr noundef %readout_noise, ptr noundef %detector_offsets, ptr noundef %detector_targets) #0 {
++entry:
++  %instrs.addr = alloca ptr, align 8, addrspace(5)
++  %num_instrs.addr = alloca i32, align 4, addrspace(5)
++  %peak_rank.addr = alloca i32, align 4, addrspace(5)
++  %total_meas_slots.addr = alloca i32, align 4, addrspace(5)
++  %num_observables.addr = alloca i32, align 4, addrspace(5)
++  %seed.addr = alloca i64, align 8, addrspace(5)
++  %shot_offset.addr = alloca i64, align 8, addrspace(5)
++  %shots.addr = alloca i64, align 8, addrspace(5)
++  %block_counts.addr = alloca ptr, align 8, addrspace(5)
++  %fused_u2.addr = alloca ptr, align 8, addrspace(5)
++  %fused_u4.addr = alloca ptr, align 8, addrspace(5)
++  %observable_offsets.addr = alloca ptr, align 8, addrspace(5)
++  %observable_targets.addr = alloca ptr, align 8, addrspace(5)
++  %noise_sites.addr = alloca ptr, align 8, addrspace(5)
++  %noise_channels.addr = alloca ptr, align 8, addrspace(5)
++  %noise_hazards.addr = alloca ptr, align 8, addrspace(5)
++  %num_noise_sites.addr = alloca i32, align 4, addrspace(5)
++  %expected_obs_mask.addr = alloca i32, align 4, addrspace(5)
++  %pauli_masks.addr = alloca ptr, align 8, addrspace(5)
++  %readout_noise.addr = alloca ptr, align 8, addrspace(5)
++  %detector_offsets.addr = alloca ptr, align 8, addrspace(5)
++  %detector_targets.addr = alloca ptr, align 8, addrspace(5)
++  %shot_id = alloca i64, align 8, addrspace(5)
++  %st = alloca %struct.V2State, align 8, addrspace(5)
++  %vloc = alloca [16 x %struct.CV2Complex], align 8, addrspace(5)
++  %sloc = alloca [8 x %struct.CV2Complex], align 8, addrspace(5)
++  %instrs.addr.ascast = addrspacecast ptr addrspace(5) %instrs.addr to ptr
++  %num_instrs.addr.ascast = addrspacecast ptr addrspace(5) %num_instrs.addr to ptr
++  %peak_rank.addr.ascast = addrspacecast ptr addrspace(5) %peak_rank.addr to ptr
++  %total_meas_slots.addr.ascast = addrspacecast ptr addrspace(5) %total_meas_slots.addr to ptr
++  %num_observables.addr.ascast = addrspacecast ptr addrspace(5) %num_observables.addr to ptr
++  %seed.addr.ascast = addrspacecast ptr addrspace(5) %seed.addr to ptr
++  %shot_offset.addr.ascast = addrspacecast ptr addrspace(5) %shot_offset.addr to ptr
++  %shots.addr.ascast = addrspacecast ptr addrspace(5) %shots.addr to ptr
++  %block_counts.addr.ascast = addrspacecast ptr addrspace(5) %block_counts.addr to ptr
++  %fused_u2.addr.ascast = addrspacecast ptr addrspace(5) %fused_u2.addr to ptr
++  %fused_u4.addr.ascast = addrspacecast ptr addrspace(5) %fused_u4.addr to ptr
++  %observable_offsets.addr.ascast = addrspacecast ptr addrspace(5) %observable_offsets.addr to ptr
++  %observable_targets.addr.ascast = addrspacecast ptr addrspace(5) %observable_targets.addr to ptr
++  %noise_sites.addr.ascast = addrspacecast ptr addrspace(5) %noise_sites.addr to ptr
++  %noise_channels.addr.ascast = addrspacecast ptr addrspace(5) %noise_channels.addr to ptr
++  %noise_hazards.addr.ascast = addrspacecast ptr addrspace(5) %noise_hazards.addr to ptr
++  %num_noise_sites.addr.ascast = addrspacecast ptr addrspace(5) %num_noise_sites.addr to ptr
++  %expected_obs_mask.addr.ascast = addrspacecast ptr addrspace(5) %expected_obs_mask.addr to ptr
++  %pauli_masks.addr.ascast = addrspacecast ptr addrspace(5) %pauli_masks.addr to ptr
++  %readout_noise.addr.ascast = addrspacecast ptr addrspace(5) %readout_noise.addr to ptr
++  %detector_offsets.addr.ascast = addrspacecast ptr addrspace(5) %detector_offsets.addr to ptr
++  %detector_targets.addr.ascast = addrspacecast ptr addrspace(5) %detector_targets.addr to ptr
++  %shot_id.ascast = addrspacecast ptr addrspace(5) %shot_id to ptr
++  %st.ascast = addrspacecast ptr addrspace(5) %st to ptr
++  %vloc.ascast = addrspacecast ptr addrspace(5) %vloc to ptr
++  %sloc.ascast = addrspacecast ptr addrspace(5) %sloc to ptr
++  store ptr %instrs, ptr %instrs.addr.ascast, align 8
++  store i32 %num_instrs, ptr %num_instrs.addr.ascast, align 4
++  store i32 %peak_rank, ptr %peak_rank.addr.ascast, align 4
++  store i32 %total_meas_slots, ptr %total_meas_slots.addr.ascast, align 4
++  store i32 %num_observables, ptr %num_observables.addr.ascast, align 4
++  store i64 %seed, ptr %seed.addr.ascast, align 8
++  store i64 %shot_offset, ptr %shot_offset.addr.ascast, align 8
++  store i64 %shots, ptr %shots.addr.ascast, align 8
++  store ptr %block_counts, ptr %block_counts.addr.ascast, align 8
++  store ptr %fused_u2, ptr %fused_u2.addr.ascast, align 8
++  store ptr %fused_u4, ptr %fused_u4.addr.ascast, align 8
++  store ptr %observable_offsets, ptr %observable_offsets.addr.ascast, align 8
+
+@@ hunk 3/4 left 357..383 right 133..151 @@
+--- circuit_d3.1_emitted.c:357
++++ circuit_d3.2_clangO0.ll:133
+@@ -1,27 +1,19 @@
+-    v2_op_detector();
+-    v2_op_detector();
+-    v2_op_detector();
+-    v2_shot_aggregate(st, block_counts, num_observables, expected_obs_mask);
++  br label %return
++
++return:                                           ; preds = %if.end, %if.then
++  ret void
+ }
+ 
+-#define V2_REG_MAX_AMP 16
+-__attribute__((amdgpu_kernel, visibility("default")))
+-void clifft_v2_spec(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
+-    u32 total_meas_slots, u32 num_observables,
+-    u64 seed, u64 shot_offset, u64 shots,
+-    CV2BlockCounts* block_counts,
+-    const CV2FusedU2Entry* fused_u2, const CV2FusedU4Entry* fused_u4,
+-    const u32* observable_offsets, const u32* observable_targets,
+-    const CV2NoiseSite* noise_sites, const CV2Channel* noise_channels,
+-    const double* noise_hazards, u32 num_noise_sites, u32 expected_obs_mask,
+-    const CV2Mask* pauli_masks, const CV2ReadoutNoise* readout_noise,
+-    const u32* detector_offsets, const u32* detector_targets) {
+-    (void)peak_rank; (void)num_instrs; (void)instrs; (void)total_meas_slots;
+-    u64 shot_id = shot_offset + ((u64)v2_bid() * 256ul + (u64)__builtin_amdgcn_workitem_id_x());
+-    if (shot_id >= shots) return;
+-    V2State st; CV2Complex vloc[V2_REG_MAX_AMP]; CV2Complex sloc[V2_REG_MAX_AMP/2];
+-    spec_body(&st, vloc, sloc, V2_REG_MAX_AMP, shot_id, num_observables, seed, block_counts, fused_u2, fused_u4,
+-                  observable_offsets, observable_targets, noise_sites, noise_channels,
+-                  noise_hazards, num_noise_sites, pauli_masks, readout_noise,
+-                  detector_offsets, detector_targets, expected_obs_mask);
++; Function Attrs: convergent noinline nounwind optnone
++define internal i32 @v2_bid() #0 {
++entry:
++  %retval = alloca i32, align 4, addrspace(5)
++  %retval.ascast = addrspacecast ptr addrspace(5) %retval to ptr
++  %0 = call i32 @llvm.amdgcn.workgroup.id.x()
++  ret i32 %0
+ }
++
++; Function Attrs: nocallback nofree nosync nounwind speculatable willreturn memory(none)
++declare noundef range(i32 0, 1024) i32 @llvm.amdgcn.workitem.id.x() #1
++
++; Function Attrs: convergent noinline nounwind optnone
+
+@@ hunk 4/4 left 378..383 right 141..220 @@
+--- circuit_d3.1_emitted.c:378
++++ circuit_d3.2_clangO0.ll:141
+@@ -1,6 +1,80 @@
+-    V2State st; CV2Complex vloc[V2_REG_MAX_AMP]; CV2Complex sloc[V2_REG_MAX_AMP/2];
+-    spec_body(&st, vloc, sloc, V2_REG_MAX_AMP, shot_id, num_observables, seed, block_counts, fused_u2, fused_u4,
+-                  observable_offsets, observable_targets, noise_sites, noise_channels,
+-                  noise_hazards, num_noise_sites, pauli_masks, readout_noise,
+-                  detector_offsets, detector_targets, expected_obs_mask);
++entry:
++  %retval = alloca i32, align 4, addrspace(5)
++  %retval.ascast = addrspacecast ptr addrspace(5) %retval to ptr
++  %0 = call i32 @llvm.amdgcn.workgroup.id.x()
++  ret i32 %0
+ }
++
++; Function Attrs: nocallback nofree nosync nounwind speculatable willreturn memory(none)
++declare noundef range(i32 0, 1024) i32 @llvm.amdgcn.workitem.id.x() #1
++
++; Function Attrs: convergent noinline nounwind optnone
++define internal void @spec_body(ptr noundef %st, ptr noundef %v, ptr noundef %scratch, i32 noundef %amp_capacity, i64 noundef %shot_id, i32 noundef %num_observables, i64 noundef %seed, ptr noundef %block_counts, ptr noundef %fused_u2, ptr noundef %fused_u4, ptr noundef %observable_offsets, ptr noundef %observable_targets, ptr noundef %noise_sites, ptr noundef %noise_channels, ptr noundef %noise_hazards, i32 noundef %num_noise_sites, ptr noundef %pauli_masks, ptr noundef %readout_noise, ptr noundef %detector_offsets, ptr noundef %detector_targets, i32 noundef %expected_obs_mask) #0 {
++entry:
++  %st.addr.i7857 = alloca ptr, align 8, addrspace(5)
++  %v.addr.i7858 = alloca ptr, align 8, addrspace(5)
++  %active_k.addr.i7859 = alloca i32, align 4, addrspace(5)
++  %a.addr.i7860 = alloca i32, align 4, addrspace(5)
++  %b.addr.i7861 = alloca i32, align 4, addrspace(5)
++  %t.i7862 = alloca i32, align 4, addrspace(5)
++  %both.i = alloca i64, align 8, addrspace(5)
++  %iters.i7863 = alloca i64, align 8, addrspace(5)
++  %i.i7864 = alloca i64, align 8, addrspace(5)
++  %idx.i7865 = alloca i64, align 8, addrspace(5)
++  %c.i7866 = alloca %struct.CV2Complex, align 8, addrspace(5)
++  %px_a.i7867 = alloca i32, align 4, addrspace(5)
++  %px_b.i7868 = alloca i32, align 4, addrspace(5)
++  %st.addr.i7835 = alloca ptr, align 8, addrspace(5)
++  %v.addr.i7836 = alloca ptr, align 8, addrspace(5)
++  %active_k.addr.i7837 = alloca i32, align 4, addrspace(5)
++  %axis.addr.i7838 = alloca i32, align 4, addrspace(5)
++  %dagger.addr.i7839 = alloca i32, align 4, addrspace(5)
++  %t.i7840 = alloca i32, align 4, addrspace(5)
++  %ph.i7841 = alloca %struct.CV2Complex, align 8, addrspace(5)
++  %px.i7842 = alloca i32, align 4, addrspace(5)
++  %st.addr.i7815 = alloca ptr, align 8, addrspace(5)
++  %v.addr.i7816 = alloca ptr, align 8, addrspace(5)
++  %active_k.addr.i7817 = alloca i32, align 4, addrspace(5)
++  %axis.addr.i7818 = alloca i32, align 4, addrspace(5)
++  %dagger.addr.i7819 = alloca i32, align 4, addrspace(5)
++  %t.i7820 = alloca i32, align 4, addrspace(5)
++  %ph.i = alloca %struct.CV2Complex, align 8, addrspace(5)
++  %px.i7821 = alloca i32, align 4, addrspace(5)
++  %st.addr.i7757 = alloca ptr, align 8, addrspace(5)
++  %v.addr.i7758 = alloca ptr, align 8, addrspace(5)
++  %active_k.addr.i7759 = alloca i32, align 4, addrspace(5)
++  %ctrl.addr.i7760 = alloca i32, align 4, addrspace(5)
++  %target_mask.addr.i = alloca i64, align 8, addrspace(5)
++  %t.i7761 = alloca i32, align 4, addrspace(5)
++  %c_bit.i7762 = alloca i64, align 8, addrspace(5)
++  %half.i7763 = alloca i64, align 8, addrspace(5)
++  %idx.i7764 = alloca i64, align 8, addrspace(5)
++  %actual.i7765 = alloca i64, align 8, addrspace(5)
++  %vv.i = alloca %struct.CV2Complex, align 8, addrspace(5)
++  %tg.i = alloca i32, align 4, addrspace(5)
++  %px_c.i7766 = alloca i32, align 4, addrspace(5)
++  %px_t.i = alloca i32, align 4, addrspace(5)
++  %st.addr.i7707 = alloca ptr, align 8, addrspace(5)
++  %observable_offsets.addr.i7708 = alloca ptr, align 8, addrspace(5)
++  %observable_targets.addr.i7709 = alloca ptr, align 8, addrspace(5)
++  %idx.addr.i7710 = alloca i32, align 4, addrspace(5)
++  %obs_slot.addr.i7711 = alloca i32, align 4, addrspace(5)
++  %t.i7712 = alloca i32, align 4, addrspace(5)
++  %s0.i7713 = alloca i32, align 4, addrspace(5)
++  %e0.i7714 = alloca i32, align 4, addrspace(5)
++  %parity.i7715 = alloca i8, align 1, addrspace(5)
++  %k.i7716 = alloca i32, align 4, addrspace(5)
++  %st.addr.i7681 = alloca ptr, align 8, addrspace(5)
++  %observable_offsets.addr.i = alloca ptr, align 8, addrspace(5)
++  %observable_targets.addr.i = alloca ptr, align 8, addrspace(5)
++  %idx.addr.i = alloca i32, align 4, addrspace(5)
++  %obs_slot.addr.i = alloca i32, align 4, addrspace(5)
++  %t.i7682 = alloca i32, align 4, addrspace(5)
++  %s0.i = alloca i32, align 4, addrspace(5)
++  %e0.i = alloca i32, align 4, addrspace(5)
++  %parity.i = alloca i8, align 1, addrspace(5)
++  %k.i = alloca i32, align 4, addrspace(5)
++  %st.addr.i7623 = alloca ptr, align 8, addrspace(5)
++  %v.addr.i7624 = alloca ptr, align 8, addrspace(5)
++  %active_k.addr.i7625 = alloca i32, align 4, addrspace(5)
++  %c.addr.i7626 = alloca i32, align 4, addrspace(5)

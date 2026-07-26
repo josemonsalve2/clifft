@@ -1,0 +1,404 @@
+# v1 / frame_h: translate -> optO2
+# frame_h.3_translate.ll (562 lines) -> frame_h.4_optO2.ll (275 lines)
+# 4 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u frame_h.3_translate.ll frame_h.4_optO2.ll
+
+@@ hunk 1/4 left 62..101 right 64..85 @@
+--- frame_h.3_translate.ll:62
++++ frame_h.4_optO2.ll:64
+@@ -1,40 +1,22 @@
+-  %42 = fmul double 2.000000e+00, %12
++  %42 = fmul double %12, 2.000000e+00
+   %43 = fmul double %42, %41
+   %44 = fadd double %6, %43
+   ret double %44
+ }
+ 
+-define amdgpu_kernel void @compiled_mlir_kernel(i64 inreg %0, i64 inreg %1, i64 inreg %2, ptr noalias %3, ptr noalias %4, ptr noalias %5, ptr noalias %6, i64 inreg %7, i32 inreg %8, i32 inreg %9) {
+-  %11 = alloca i32, align 4, addrspace(5)
+-  %12 = addrspacecast ptr addrspace(5) %11 to ptr
+-  %13 = alloca i64, i32 4, align 8, addrspace(5)
+-  %14 = addrspacecast ptr addrspace(5) %13 to ptr
+-  %15 = alloca i64, align 8, addrspace(5)
+-  %16 = addrspacecast ptr addrspace(5) %15 to ptr
+-  %17 = alloca i64, i32 5, align 8, addrspace(5)
+-  %18 = addrspacecast ptr addrspace(5) %17 to ptr
+-  %19 = alloca i64, i32 5, align 8, addrspace(5)
+-  %20 = addrspacecast ptr addrspace(5) %19 to ptr
+-  %21 = alloca i32, align 4, addrspace(5)
+-  %22 = addrspacecast ptr addrspace(5) %21 to ptr
+-  %23 = alloca i8, align 1, addrspace(5)
+-  %24 = addrspacecast ptr addrspace(5) %23 to ptr
+-  %25 = alloca { float, float }, align 8, addrspace(5)
+-  %26 = addrspacecast ptr addrspace(5) %25 to ptr
+-  %27 = alloca i8, i32 4096, align 1, addrspace(5)
+-  %28 = addrspacecast ptr addrspace(5) %27 to ptr
+-  %29 = alloca i8, i32 8, align 1, addrspace(5)
+-  %30 = addrspacecast ptr addrspace(5) %29 to ptr
+-  %31 = call i32 @llvm.amdgcn.workitem.id.x()
+-  %32 = call i32 @llvm.amdgcn.workgroup.id.x()
+-  %33 = mul i32 %32, 256
+-  %34 = add i32 %33, %31
+-  %35 = zext i32 %34 to i64
+-  %36 = icmp uge i64 %35, %1
+-  br i1 %36, label %37, label %38
++; Function Attrs: mustprogress nofree norecurse nounwind willreturn
++define amdgpu_kernel void @compiled_mlir_kernel(i64 inreg %0, i64 inreg %1, i64 inreg %2, ptr noalias captures(none) %3, ptr noalias readnone captures(none) %4, ptr noalias readnone captures(none) %5, ptr noalias readnone captures(none) %6, i64 inreg %7, i32 inreg %8, i32 inreg %9) local_unnamed_addr #4 {
++  %.global = addrspacecast ptr %3 to ptr addrspace(1)
++  %11 = tail call i32 @llvm.amdgcn.workitem.id.x()
++  %12 = tail call i32 @llvm.amdgcn.workgroup.id.x()
++  %13 = shl i32 %12, 8
++  %14 = add i32 %13, %11
++  %15 = zext i32 %14 to i64
++  %.not = icmp ugt i64 %1, %15
++  br i1 %.not, label %.preheader.preheader, label %46
+ 
+-37:                                               ; preds = %10
+-  store i8 1, ptr %24, align 1
+-  store i8 0, ptr %30, align 1
+-  br label %151
+-
++.preheader.preheader:                             ; preds = %10
++  %16 = add i64 %0, %15
++  %17 = mul i64 %16, -7046029254386353131
++  %18 = add i64 %17, -7046029254386353131
++  %19 = xor i64 %18, %2
+
+@@ hunk 2/4 left 96..131 right 108..180 @@
+--- frame_h.3_translate.ll:96
++++ frame_h.4_optO2.ll:108
+@@ -1,36 +1,73 @@
++  %42 = uitofp nneg i64 %41 to double
++  %43 = fmul double %42, 0x3CA0000000000000
++  %44 = fcmp olt double %43, 5.000000e-01
++  %45 = zext i1 %44 to i64
++  br label %46
+ 
+-37:                                               ; preds = %10
+-  store i8 1, ptr %24, align 1
+-  store i8 0, ptr %30, align 1
+-  br label %151
++46:                                               ; preds = %10, %.preheader.preheader
++  %.0 = phi i64 [ %45, %.preheader.preheader ], [ 0, %10 ]
++  %47 = trunc nuw nsw i64 %.0 to i32
++  %48 = and i32 %11, 63
++  %49 = shl nuw nsw i32 %48, 2
++  %50 = xor i32 %49, 128
++  %51 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %50, i32 %47)
++  %52 = zext i32 %51 to i64
++  %53 = add nuw nsw i64 %.0, %52
++  %54 = trunc i64 %53 to i32
++  %55 = lshr i64 %53, 32
++  %56 = trunc nuw nsw i64 %55 to i32
++  %57 = xor i32 %49, 64
++  %58 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %57, i32 %54)
++  %59 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %57, i32 %56)
++  %60 = zext i32 %58 to i64
++  %61 = zext i32 %59 to i64
++  %62 = shl nuw i64 %61, 32
++  %63 = add nuw nsw i64 %53, %60
++  %64 = add i64 %63, %62
++  %65 = trunc i64 %63 to i32
++  %66 = lshr i64 %64, 32
++  %67 = trunc nuw i64 %66 to i32
++  %68 = xor i32 %49, 32
++  %69 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %68, i32 %65)
++  %70 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %68, i32 %67)
++  %71 = zext i32 %69 to i64
++  %72 = zext i32 %70 to i64
++  %73 = shl nuw i64 %72, 32
++  %74 = or disjoint i64 %73, %71
++  %75 = add i64 %74, %64
++  %76 = trunc i64 %75 to i32
++  %77 = lshr i64 %75, 32
++  %78 = trunc nuw i64 %77 to i32
++  %79 = xor i32 %49, 16
++  %80 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %79, i32 %76)
++  %81 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %79, i32 %78)
++  %82 = zext i32 %80 to i64
++  %83 = zext i32 %81 to i64
++  %84 = shl nuw i64 %83, 32
++  %85 = or disjoint i64 %84, %82
++  %86 = add i64 %85, %75
++  %87 = trunc i64 %86 to i32
++  %88 = lshr i64 %86, 32
++  %89 = trunc nuw i64 %88 to i32
++  %90 = xor i32 %49, 8
++  %91 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %90, i32 %87)
++  %92 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %90, i32 %89)
++  %93 = zext i32 %91 to i64
++  %94 = zext i32 %92 to i64
++  %95 = shl nuw i64 %94, 32
++  %96 = or disjoint i64 %95, %93
++  %97 = add i64 %96, %86
++  %98 = trunc i64 %97 to i32
++  %99 = lshr i64 %97, 32
++  %100 = trunc nuw i64 %99 to i32
++  %101 = xor i32 %49, 4
++  %102 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %101, i32 %98)
++  %103 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %101, i32 %100)
++  %104 = icmp eq i32 %48, 0
++  br i1 %104, label %105, label %115
+ 
+-38:                                               ; preds = %10
+-  store i64 0, ptr %18, align 4
+-  store i64 0, ptr %20, align 4
+-  %39 = getelementptr inbounds i64, ptr %18, i32 1
+-  store i64 0, ptr %39, align 4
+-  %40 = getelementptr inbounds i64, ptr %20, i32 1
+-  store i64 0, ptr %40, align 4
+-  %41 = getelementptr inbounds i64, ptr %18, i32 2
+-  store i64 0, ptr %41, align 4
+-  %42 = getelementptr inbounds i64, ptr %20, i32 2
+-  store i64 0, ptr %42, align 4
+-  %43 = getelementptr inbounds i64, ptr %18, i32 3
+-  store i64 0, ptr %43, align 4
+-  %44 = getelementptr inbounds i64, ptr %20, i32 3
+-  store i64 0, ptr %44, align 4
+-  %45 = getelementptr inbounds i64, ptr %18, i32 4
+-  store i64 0, ptr %45, align 4
+-  %46 = getelementptr inbounds i64, ptr %20, i32 4
+-  store i64 0, ptr %46, align 4
+-  store i32 0, ptr %22, align 4
+-  store i8 0, ptr %24, align 1
+-  store { float, float } { float 1.000000e+00, float 0.000000e+00 }, ptr %26, align 4
+-  store i8 0, ptr %30, align 1
+-  br label %47
+-
+-47:                                               ; preds = %50, %38
+-  %48 = phi i64 [ %52, %50 ], [ 0, %38 ]
+-  %49 = icmp ult i64 %48, 2
+-  br i1 %49, label %50, label %53
+-
++105:                                              ; preds = %46
++  %106 = lshr exact i32 %11, 6
++  %107 = zext i32 %103 to i64
++  %108 = shl nuw i64 %107, 32
++  %109 = zext i32 %102 to i64
+
+@@ hunk 3/4 left 132..211 right 190..238 @@
+--- frame_h.3_translate.ll:132
++++ frame_h.4_optO2.ll:190
+@@ -1,80 +1,49 @@
+-50:                                               ; preds = %47
+-  %51 = getelementptr inbounds i8, ptr %28, i64 %48
+-  store i8 0, ptr %51, align 1
+-  %52 = add i64 %48, 1
+-  br label %47
+ 
+-53:                                               ; preds = %47
+-  store i32 0, ptr %12, align 4
+-  %54 = add i64 %0, %35
+-  %55 = add i64 %54, 1
+-  %56 = mul i64 %55, -7046029254386353131
+-  %57 = xor i64 %2, %56
+-  store i64 %57, ptr %16, align 4
+-  %58 = load i64, ptr %16, align 4
+-  %59 = add i64 %58, -7046029254386353131
+-  store i64 %59, ptr %16, align 4
+-  %60 = lshr i64 %59, 30
+-  %61 = xor i64 %59, %60
+-  %62 = mul i64 %61, -4658895280553007687
+-  %63 = lshr i64 %62, 27
+-  %64 = xor i64 %62, %63
+-  %65 = mul i64 %64, -7723592293110705685
+-  %66 = lshr i64 %65, 31
+-  %67 = xor i64 %65, %66
+-  store i64 %67, ptr %14, align 4
+-  %68 = load i64, ptr %16, align 4
+-  %69 = add i64 %68, -7046029254386353131
+-  store i64 %69, ptr %16, align 4
+-  %70 = lshr i64 %69, 30
+-  %71 = xor i64 %69, %70
+-  %72 = mul i64 %71, -4658895280553007687
+-  %73 = lshr i64 %72, 27
+-  %74 = xor i64 %72, %73
+-  %75 = mul i64 %74, -7723592293110705685
+-  %76 = lshr i64 %75, 31
+-  %77 = xor i64 %75, %76
+-  %78 = getelementptr inbounds i64, ptr %14, i32 1
+-  store i64 %77, ptr %78, align 4
+-  %79 = load i64, ptr %16, align 4
+-  %80 = add i64 %79, -7046029254386353131
+-  store i64 %80, ptr %16, align 4
+-  %81 = lshr i64 %80, 30
+-  %82 = xor i64 %80, %81
+-  %83 = mul i64 %82, -4658895280553007687
+-  %84 = lshr i64 %83, 27
+-  %85 = xor i64 %83, %84
+-  %86 = mul i64 %85, -7723592293110705685
+-  %87 = lshr i64 %86, 31
+-  %88 = xor i64 %86, %87
+-  %89 = getelementptr inbounds i64, ptr %14, i32 2
+-  store i64 %88, ptr %89, align 4
+-  %90 = load i64, ptr %16, align 4
+-  %91 = add i64 %90, -7046029254386353131
+-  store i64 %91, ptr %16, align 4
+-  %92 = lshr i64 %91, 30
+-  %93 = xor i64 %91, %92
+-  %94 = mul i64 %93, -4658895280553007687
+-  %95 = lshr i64 %94, 27
+-  %96 = xor i64 %94, %95
+-  %97 = mul i64 %96, -7723592293110705685
+-  %98 = lshr i64 %97, 31
+-  %99 = xor i64 %97, %98
+-  %100 = getelementptr inbounds i64, ptr %14, i32 3
+-  store i64 %99, ptr %100, align 4
+-  %101 = getelementptr inbounds i8, ptr %28, i32 1
+-  %102 = getelementptr inbounds i64, ptr %18, i64 0
+-  %103 = load i64, ptr %102, align 4
+-  %104 = lshr i64 %103, 1
+-  %105 = and i64 %104, 1
+-  %106 = trunc i64 %105 to i1
+-  %107 = zext i1 %106 to i8
+-  store i8 %107, ptr %101, align 1
+-  %108 = load i64, ptr %14, align 4
+-  %109 = load i64, ptr %78, align 4
+-  %110 = load i64, ptr %89, align 4
+-  %111 = load i64, ptr %100, align 4
+-  %112 = add i64 %108, %111
+-  %113 = shl i64 %112, 23
+-  %114 = lshr i64 %112, 41
+-  %115 = or i64 %113, %114
++115:                                              ; preds = %105, %46
++  tail call void @llvm.amdgcn.s.barrier()
++  %116 = icmp samesign ult i32 %11, 4
++  br i1 %116, label %117, label %176
++
++117:                                              ; preds = %115
++  %118 = getelementptr inbounds nuw i64, ptr addrspace(3) @lds_red_passed, i32 %11
++  %119 = load i64, ptr addrspace(3) %118, align 8
++  %120 = getelementptr inbounds nuw i64, ptr addrspace(3) @lds_red_logical, i32 %11
++  %121 = load i64, ptr addrspace(3) %120, align 8
++  %122 = trunc i64 %119 to i32
++  %123 = lshr i64 %119, 32
++  %124 = trunc nuw i64 %123 to i32
++  %125 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %90, i32 %122)
++  %126 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %90, i32 %124)
++  %127 = zext i32 %125 to i64
++  %128 = zext i32 %126 to i64
++  %129 = shl nuw i64 %128, 32
++  %130 = add i64 %119, %127
++  %131 = add i64 %130, %129
++  %132 = trunc i64 %121 to i32
++  %133 = lshr i64 %121, 32
++  %134 = trunc nuw i64 %133 to i32
++  %135 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %90, i32 %132)
++  %136 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %90, i32 %134)
++  %137 = zext i32 %135 to i64
++  %138 = zext i32 %136 to i64
++  %139 = shl nuw i64 %138, 32
++  %140 = add i64 %121, %137
++  %141 = add i64 %140, %139
++  %142 = trunc i64 %130 to i32
++  %143 = lshr i64 %131, 32
++  %144 = trunc nuw i64 %143 to i32
++  %145 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %101, i32 %142)
++  %146 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %101, i32 %144)
++  %147 = trunc i64 %140 to i32
++  %148 = lshr i64 %141, 32
++  %149 = trunc nuw i64 %148 to i32
++  %150 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %101, i32 %147)
++  %151 = tail call i32 @llvm.amdgcn.ds.bpermute(i32 %101, i32 %149)
++  %152 = icmp eq i32 %11, 0
++  br i1 %152, label %153, label %176
++
++153:                                              ; preds = %117
++  %154 = zext i32 %151 to i64
++  %155 = shl nuw i64 %154, 32
++  %156 = zext i32 %150 to i64
++  %157 = add i64 %141, %156
+
+@@ hunk 4/4 left 248..327 right 253..265 @@
+--- frame_h.3_translate.ll:248
++++ frame_h.4_optO2.ll:253
+@@ -1,80 +1,13 @@
+-  br i1 %144, label %145, label %146
++  %172 = add i64 %171, %169
++  %173 = add i64 %172, %170
++  %174 = getelementptr i8, ptr addrspace(1) %.global, i64 16
++  %175 = atomicrmw add ptr addrspace(1) %174, i64 %173 syncscope("agent") monotonic, align 8
++  br label %176
+ 
+-145:                                              ; preds = %53
+-  store i8 1, ptr %24, align 1
+-  br label %146
++176:                                              ; preds = %117, %153, %115
++  ret void
++}
+ 
+-146:                                              ; preds = %145, %53
+-  %147 = load i8, ptr %101, align 1
+-  %148 = xor i8 0, %147
+-  %149 = load i8, ptr %30, align 1
+-  %150 = xor i8 %149, %148
+-  store i8 %150, ptr %30, align 1
+-  br label %151
++; Function Attrs: nocallback nofree nosync nounwind speculatable willreturn memory(none)
++declare i64 @llvm.fshl.i64(i64, i64, i64) #5
+ 
+-151:                                              ; preds = %37, %146
+-  %152 = load i8, ptr %24, align 1
+-  %153 = icmp eq i8 %152, 0
+-  %154 = zext i1 %153 to i64
+-  %155 = load i8, ptr %30, align 1
+-  %156 = icmp ne i8 %155, 0
+-  %157 = zext i1 %156 to i64
+-  %158 = and i64 %157, %154
+-  %159 = or i64 0, %158
+-  %160 = and i64 %159, %154
+-  %161 = trunc i64 %154 to i32
+-  %162 = lshr i64 %154, 32
+-  %163 = trunc i64 %162 to i32
+-  %164 = and i32 %31, 63
+-  %165 = xor i32 %164, 32
+-  %166 = shl i32 %165, 2
+-  %167 = call i32 @llvm.amdgcn.ds.bpermute(i32 %166, i32 %161)
+-  %168 = call i32 @llvm.amdgcn.ds.bpermute(i32 %166, i32 %163)
+-  %169 = zext i32 %167 to i64
+-  %170 = zext i32 %168 to i64
+-  %171 = shl i64 %170, 32
+-  %172 = or i64 %169, %171
+-  %173 = add i64 %154, %172
+-  %174 = trunc i64 %173 to i32
+-  %175 = lshr i64 %173, 32
+-  %176 = trunc i64 %175 to i32
+-  %177 = xor i32 %164, 16
+-  %178 = shl i32 %177, 2
+-  %179 = call i32 @llvm.amdgcn.ds.bpermute(i32 %178, i32 %174)
+-  %180 = call i32 @llvm.amdgcn.ds.bpermute(i32 %178, i32 %176)
+-  %181 = zext i32 %179 to i64
+-  %182 = zext i32 %180 to i64
+-  %183 = shl i64 %182, 32
+-  %184 = or i64 %181, %183
+-  %185 = add i64 %173, %184
+-  %186 = trunc i64 %185 to i32
+-  %187 = lshr i64 %185, 32
+-  %188 = trunc i64 %187 to i32
+-  %189 = xor i32 %164, 8
+-  %190 = shl i32 %189, 2
+-  %191 = call i32 @llvm.amdgcn.ds.bpermute(i32 %190, i32 %186)
+-  %192 = call i32 @llvm.amdgcn.ds.bpermute(i32 %190, i32 %188)
+-  %193 = zext i32 %191 to i64
+-  %194 = zext i32 %192 to i64
+-  %195 = shl i64 %194, 32
+-  %196 = or i64 %193, %195
+-  %197 = add i64 %185, %196
+-  %198 = trunc i64 %197 to i32
+-  %199 = lshr i64 %197, 32
+-  %200 = trunc i64 %199 to i32
+-  %201 = xor i32 %164, 4
+-  %202 = shl i32 %201, 2
+-  %203 = call i32 @llvm.amdgcn.ds.bpermute(i32 %202, i32 %198)
+-  %204 = call i32 @llvm.amdgcn.ds.bpermute(i32 %202, i32 %200)
+-  %205 = zext i32 %203 to i64
+-  %206 = zext i32 %204 to i64
+-  %207 = shl i64 %206, 32
+-  %208 = or i64 %205, %207
+-  %209 = add i64 %197, %208
+-  %210 = trunc i64 %209 to i32
+-  %211 = lshr i64 %209, 32
+-  %212 = trunc i64 %211 to i32
+-  %213 = xor i32 %164, 2
+-  %214 = shl i32 %213, 2
+-  %215 = call i32 @llvm.amdgcn.ds.bpermute(i32 %214, i32 %210)
+-  %216 = call i32 @llvm.amdgcn.ds.bpermute(i32 %214, i32 %212)

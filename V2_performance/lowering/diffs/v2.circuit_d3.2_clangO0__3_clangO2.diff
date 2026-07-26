@@ -1,0 +1,456 @@
+# v2 / circuit_d3: clangO0 -> clangO2
+# circuit_d3.2_clangO0.ll (19551 lines) -> circuit_d3.3_clangO2.ll (8132 lines)
+# 4 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u circuit_d3.2_clangO0.ll circuit_d3.3_clangO2.ll
+
+@@ hunk 1/4 left 61..112 right 31..110 @@
+--- circuit_d3.2_clangO0.ll:61
++++ circuit_d3.3_clangO2.ll:31
+@@ -1,52 +1,80 @@
+-  %pauli_masks.addr.ascast = addrspacecast ptr addrspace(5) %pauli_masks.addr to ptr
+-  %readout_noise.addr.ascast = addrspacecast ptr addrspace(5) %readout_noise.addr to ptr
+-  %detector_offsets.addr.ascast = addrspacecast ptr addrspace(5) %detector_offsets.addr to ptr
+-  %detector_targets.addr.ascast = addrspacecast ptr addrspace(5) %detector_targets.addr to ptr
+-  %shot_id.ascast = addrspacecast ptr addrspace(5) %shot_id to ptr
+-  %st.ascast = addrspacecast ptr addrspace(5) %st to ptr
+-  %vloc.ascast = addrspacecast ptr addrspace(5) %vloc to ptr
+-  %sloc.ascast = addrspacecast ptr addrspace(5) %sloc to ptr
+-  store ptr %instrs, ptr %instrs.addr.ascast, align 8
+-  store i32 %num_instrs, ptr %num_instrs.addr.ascast, align 4
+-  store i32 %peak_rank, ptr %peak_rank.addr.ascast, align 4
+-  store i32 %total_meas_slots, ptr %total_meas_slots.addr.ascast, align 4
+-  store i32 %num_observables, ptr %num_observables.addr.ascast, align 4
+-  store i64 %seed, ptr %seed.addr.ascast, align 8
+-  store i64 %shot_offset, ptr %shot_offset.addr.ascast, align 8
+-  store i64 %shots, ptr %shots.addr.ascast, align 8
+-  store ptr %block_counts, ptr %block_counts.addr.ascast, align 8
+-  store ptr %fused_u2, ptr %fused_u2.addr.ascast, align 8
+-  store ptr %fused_u4, ptr %fused_u4.addr.ascast, align 8
+-  store ptr %observable_offsets, ptr %observable_offsets.addr.ascast, align 8
+-  store ptr %observable_targets, ptr %observable_targets.addr.ascast, align 8
+-  store ptr %noise_sites, ptr %noise_sites.addr.ascast, align 8
+-  store ptr %noise_channels, ptr %noise_channels.addr.ascast, align 8
+-  store ptr %noise_hazards, ptr %noise_hazards.addr.ascast, align 8
+-  store i32 %num_noise_sites, ptr %num_noise_sites.addr.ascast, align 4
+-  store i32 %expected_obs_mask, ptr %expected_obs_mask.addr.ascast, align 4
+-  store ptr %pauli_masks, ptr %pauli_masks.addr.ascast, align 8
+-  store ptr %readout_noise, ptr %readout_noise.addr.ascast, align 8
+-  store ptr %detector_offsets, ptr %detector_offsets.addr.ascast, align 8
+-  store ptr %detector_targets, ptr %detector_targets.addr.ascast, align 8
+-  %0 = load i32, ptr %peak_rank.addr.ascast, align 4
+-  %1 = load i32, ptr %num_instrs.addr.ascast, align 4
+-  %2 = load ptr, ptr %instrs.addr.ascast, align 8
+-  %3 = load i32, ptr %total_meas_slots.addr.ascast, align 4
+-  %4 = load i64, ptr %shot_offset.addr.ascast, align 8
+-  %call = call i32 @v2_bid() #4
+-  %conv = zext i32 %call to i64
+-  %mul = mul i64 %conv, 256
+-  %5 = call i32 @llvm.amdgcn.workitem.id.x()
+-  %conv1 = zext i32 %5 to i64
+-  %add = add i64 %mul, %conv1
+-  %add2 = add i64 %4, %add
+-  store i64 %add2, ptr %shot_id.ascast, align 8
+-  %6 = load i64, ptr %shot_id.ascast, align 8
+-  %7 = load i64, ptr %shots.addr.ascast, align 8
+-  %cmp = icmp uge i64 %6, %7
+-  br i1 %cmp, label %if.then, label %if.end
+-
+-if.then:                                          ; preds = %entry
+-  br label %return
++  br i1 %cmp.not, label %if.end, label %cleanup
+ 
+ if.end:                                           ; preds = %entry
++  %sloc.ascast = addrspacecast ptr addrspace(5) %sloc to ptr
++  %vloc.ascast = addrspacecast ptr addrspace(5) %vloc to ptr
++  %st.ascast = addrspacecast ptr addrspace(5) %st to ptr
++  call void @llvm.lifetime.start.p5(i64 648, ptr addrspace(5) %st) #8
++  call void @llvm.lifetime.start.p5(i64 128, ptr addrspace(5) %vloc) #8
++  call void @llvm.lifetime.start.p5(i64 64, ptr addrspace(5) %sloc) #8
++  %arrayidx.1.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 8
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.1.i.i, align 8, !tbaa !4
++  %arrayidx.2.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 16
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.2.i.i, align 8, !tbaa !4
++  %arrayidx.3.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 24
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.3.i.i, align 8, !tbaa !4
++  %arrayidx.4.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 32
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.4.i.i, align 8, !tbaa !4
++  %arrayidx.5.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 40
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.5.i.i, align 8, !tbaa !4
++  %arrayidx.6.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 48
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.6.i.i, align 8, !tbaa !4
++  %arrayidx.7.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 56
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.7.i.i, align 8, !tbaa !4
++  %arrayidx.8.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 64
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.8.i.i, align 8, !tbaa !4
++  %arrayidx.9.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 72
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.9.i.i, align 8, !tbaa !4
++  %arrayidx.10.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 80
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.10.i.i, align 8, !tbaa !4
++  %arrayidx.11.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 88
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.11.i.i, align 8, !tbaa !4
++  %arrayidx.12.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 96
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.12.i.i, align 8, !tbaa !4
++  %arrayidx.13.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 104
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.13.i.i, align 8, !tbaa !4
++  %arrayidx.14.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 112
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.14.i.i, align 8, !tbaa !4
++  %arrayidx.15.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %vloc, i32 120
++  store <2 x float> zeroinitializer, ptr addrspace(5) %arrayidx.15.i.i, align 8, !tbaa !4
++  %pz.i3043.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 40
++  store i64 0, ptr addrspace(5) %st, align 8, !tbaa !8
++  store i64 0, ptr addrspace(5) %pz.i3043.i, align 8, !tbaa !8
++  %arrayidx9.1.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 8
++  store i64 0, ptr addrspace(5) %arrayidx9.1.i.i, align 8, !tbaa !8
++  %arrayidx11.1.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 48
++  store i64 0, ptr addrspace(5) %arrayidx11.1.i.i, align 8, !tbaa !8
++  %arrayidx9.2.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 16
++  store i64 0, ptr addrspace(5) %arrayidx9.2.i.i, align 8, !tbaa !8
++  %arrayidx11.2.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 56
++  store i64 0, ptr addrspace(5) %arrayidx11.2.i.i, align 8, !tbaa !8
++  %arrayidx9.3.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 24
++  store i64 0, ptr addrspace(5) %arrayidx9.3.i.i, align 8, !tbaa !8
++  %arrayidx11.3.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 64
++  store i64 0, ptr addrspace(5) %arrayidx11.3.i.i, align 8, !tbaa !8
++  %arrayidx9.4.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 32
++  store i64 0, ptr addrspace(5) %arrayidx9.4.i.i, align 8, !tbaa !8
++  %arrayidx11.4.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 72
++  store i64 0, ptr addrspace(5) %arrayidx11.4.i.i, align 8, !tbaa !8
++  %active_k.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 632
++  store i32 0, ptr addrspace(5) %active_k.i.i, align 8, !tbaa !10
++  %discarded.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 640
++  store i8 0, ptr addrspace(5) %discarded.i.i, align 8, !tbaa !13
++  store <2 x float> <float 1.000000e+00, float 0.000000e+00>, ptr addrspace(5) %vloc, align 8, !tbaa !4
++  %cmp2065.not.i.i = icmp eq i32 %num_observables, 0
++  br i1 %cmp2065.not.i.i, label %for.cond30.preheader.i.i, label %for.body23.lr.ph.i.i
++
++for.body23.lr.ph.i.i:                             ; preds = %if.end
++  %obs.i3044.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 624
++  br label %for.body23.i.i
++
++for.cond30.preheader.i.i:                         ; preds = %for.body23.i.i, %if.end
++  %meas.i3045.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 80
++  store i64 0, ptr addrspace(5) %meas.i3045.i, align 8, !tbaa !8
++  %arrayidx36.1.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 88
++  store i64 0, ptr addrspace(5) %arrayidx36.1.i.i, align 8, !tbaa !8
++  %arrayidx36.2.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 96
++  store i64 0, ptr addrspace(5) %arrayidx36.2.i.i, align 8, !tbaa !8
++  %arrayidx36.3.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 104
++  store i64 0, ptr addrspace(5) %arrayidx36.3.i.i, align 8, !tbaa !8
++  %arrayidx36.4.i.i = getelementptr inbounds nuw i8, ptr addrspace(5) %st, i32 112
+
+@@ hunk 2/4 left 136..215 right 7788..7830 @@
+--- circuit_d3.2_clangO0.ll:136
++++ circuit_d3.3_clangO2.ll:7788
+@@ -1,80 +1,43 @@
+   ret void
+ }
+ 
+-; Function Attrs: convergent noinline nounwind optnone
+-define internal i32 @v2_bid() #0 {
++; Function Attrs: mustprogress nofree noinline norecurse nosync nounwind willreturn memory(argmem: readwrite)
++define internal fastcc void @v2_op_readout_noise(ptr noundef captures(none) %st, ptr noundef readonly captures(none) %readout_noise, i32 noundef %idx) unnamed_addr #4 {
+ entry:
+-  %retval = alloca i32, align 4, addrspace(5)
+-  %retval.ascast = addrspacecast ptr addrspace(5) %retval to ptr
+-  %0 = call i32 @llvm.amdgcn.workgroup.id.x()
+-  ret i32 %0
+-}
++  %idxprom = zext i32 %idx to i64
++  %arrayidx = getelementptr inbounds nuw %struct.CV2ReadoutNoise, ptr %readout_noise, i64 %idxprom
++  %r.sroa.0.0.copyload = load i32, ptr %arrayidx, align 8, !tbaa !23
++  %r.sroa.43.0.arrayidx.sroa_idx = getelementptr inbounds nuw i8, ptr %arrayidx, i64 8
++  %r.sroa.43.0.copyload = load double, ptr %r.sroa.43.0.arrayidx.sroa_idx, align 8, !tbaa !17
++  %rng = getelementptr inbounds nuw i8, ptr %st, i64 592
++  %0 = load i64, ptr %rng, align 8, !tbaa !8
++  %arrayidx1.i.i = getelementptr inbounds nuw i8, ptr %st, i64 616
++  %1 = load i64, ptr %arrayidx1.i.i, align 8, !tbaa !8
++  %add.i.i = add i64 %1, %0
++  %or.i.i.i = tail call i64 @llvm.fshl.i64(i64 %add.i.i, i64 %add.i.i, i64 23)
++  %add3.i.i = add i64 %or.i.i.i, %0
++  %arrayidx4.i.i = getelementptr inbounds nuw i8, ptr %st, i64 600
++  %2 = load i64, ptr %arrayidx4.i.i, align 8, !tbaa !8
++  %shl.i.i = shl i64 %2, 17
++  %arrayidx6.i.i = getelementptr inbounds nuw i8, ptr %st, i64 608
++  %3 = load i64, ptr %arrayidx6.i.i, align 8, !tbaa !8
++  %xor.i.i = xor i64 %3, %0
++  %xor9.i.i = xor i64 %2, %1
++  %xor12.i.i = xor i64 %xor.i.i, %2
++  store i64 %xor12.i.i, ptr %arrayidx4.i.i, align 8, !tbaa !8
++  %xor15.i.i = xor i64 %xor9.i.i, %0
++  store i64 %xor15.i.i, ptr %rng, align 8, !tbaa !8
++  %xor17.i.i = xor i64 %xor.i.i, %shl.i.i
++  store i64 %xor17.i.i, ptr %arrayidx6.i.i, align 8, !tbaa !8
++  %or.i37.i.i = tail call i64 @llvm.fshl.i64(i64 %xor9.i.i, i64 %xor9.i.i, i64 45)
++  store i64 %or.i37.i.i, ptr %arrayidx1.i.i, align 8, !tbaa !8
++  %shr.i = lshr i64 %add3.i.i, 11
++  %conv.i = uitofp nneg i64 %shr.i to double
++  %mul.i = fmul double %conv.i, 0x3CA0000000000000
++  %cmp = fcmp olt double %mul.i, %r.sroa.43.0.copyload
++  br i1 %cmp, label %if.then, label %if.end
+ 
+-; Function Attrs: nocallback nofree nosync nounwind speculatable willreturn memory(none)
+-declare noundef range(i32 0, 1024) i32 @llvm.amdgcn.workitem.id.x() #1
+-
+-; Function Attrs: convergent noinline nounwind optnone
+-define internal void @spec_body(ptr noundef %st, ptr noundef %v, ptr noundef %scratch, i32 noundef %amp_capacity, i64 noundef %shot_id, i32 noundef %num_observables, i64 noundef %seed, ptr noundef %block_counts, ptr noundef %fused_u2, ptr noundef %fused_u4, ptr noundef %observable_offsets, ptr noundef %observable_targets, ptr noundef %noise_sites, ptr noundef %noise_channels, ptr noundef %noise_hazards, i32 noundef %num_noise_sites, ptr noundef %pauli_masks, ptr noundef %readout_noise, ptr noundef %detector_offsets, ptr noundef %detector_targets, i32 noundef %expected_obs_mask) #0 {
+-entry:
+-  %st.addr.i7857 = alloca ptr, align 8, addrspace(5)
+-  %v.addr.i7858 = alloca ptr, align 8, addrspace(5)
+-  %active_k.addr.i7859 = alloca i32, align 4, addrspace(5)
+-  %a.addr.i7860 = alloca i32, align 4, addrspace(5)
+-  %b.addr.i7861 = alloca i32, align 4, addrspace(5)
+-  %t.i7862 = alloca i32, align 4, addrspace(5)
+-  %both.i = alloca i64, align 8, addrspace(5)
+-  %iters.i7863 = alloca i64, align 8, addrspace(5)
+-  %i.i7864 = alloca i64, align 8, addrspace(5)
+-  %idx.i7865 = alloca i64, align 8, addrspace(5)
+-  %c.i7866 = alloca %struct.CV2Complex, align 8, addrspace(5)
+-  %px_a.i7867 = alloca i32, align 4, addrspace(5)
+-  %px_b.i7868 = alloca i32, align 4, addrspace(5)
+-  %st.addr.i7835 = alloca ptr, align 8, addrspace(5)
+-  %v.addr.i7836 = alloca ptr, align 8, addrspace(5)
+-  %active_k.addr.i7837 = alloca i32, align 4, addrspace(5)
+-  %axis.addr.i7838 = alloca i32, align 4, addrspace(5)
+-  %dagger.addr.i7839 = alloca i32, align 4, addrspace(5)
+-  %t.i7840 = alloca i32, align 4, addrspace(5)
+-  %ph.i7841 = alloca %struct.CV2Complex, align 8, addrspace(5)
+-  %px.i7842 = alloca i32, align 4, addrspace(5)
+-  %st.addr.i7815 = alloca ptr, align 8, addrspace(5)
+-  %v.addr.i7816 = alloca ptr, align 8, addrspace(5)
+-  %active_k.addr.i7817 = alloca i32, align 4, addrspace(5)
+-  %axis.addr.i7818 = alloca i32, align 4, addrspace(5)
+-  %dagger.addr.i7819 = alloca i32, align 4, addrspace(5)
+-  %t.i7820 = alloca i32, align 4, addrspace(5)
+-  %ph.i = alloca %struct.CV2Complex, align 8, addrspace(5)
+-  %px.i7821 = alloca i32, align 4, addrspace(5)
+-  %st.addr.i7757 = alloca ptr, align 8, addrspace(5)
+-  %v.addr.i7758 = alloca ptr, align 8, addrspace(5)
+-  %active_k.addr.i7759 = alloca i32, align 4, addrspace(5)
+-  %ctrl.addr.i7760 = alloca i32, align 4, addrspace(5)
+-  %target_mask.addr.i = alloca i64, align 8, addrspace(5)
+-  %t.i7761 = alloca i32, align 4, addrspace(5)
+-  %c_bit.i7762 = alloca i64, align 8, addrspace(5)
+-  %half.i7763 = alloca i64, align 8, addrspace(5)
+-  %idx.i7764 = alloca i64, align 8, addrspace(5)
+-  %actual.i7765 = alloca i64, align 8, addrspace(5)
+-  %vv.i = alloca %struct.CV2Complex, align 8, addrspace(5)
+-  %tg.i = alloca i32, align 4, addrspace(5)
+-  %px_c.i7766 = alloca i32, align 4, addrspace(5)
+-  %px_t.i = alloca i32, align 4, addrspace(5)
+-  %st.addr.i7707 = alloca ptr, align 8, addrspace(5)
+-  %observable_offsets.addr.i7708 = alloca ptr, align 8, addrspace(5)
+-  %observable_targets.addr.i7709 = alloca ptr, align 8, addrspace(5)
+-  %idx.addr.i7710 = alloca i32, align 4, addrspace(5)
+-  %obs_slot.addr.i7711 = alloca i32, align 4, addrspace(5)
+-  %t.i7712 = alloca i32, align 4, addrspace(5)
+-  %s0.i7713 = alloca i32, align 4, addrspace(5)
+-  %e0.i7714 = alloca i32, align 4, addrspace(5)
+-  %parity.i7715 = alloca i8, align 1, addrspace(5)
+-  %k.i7716 = alloca i32, align 4, addrspace(5)
+-  %st.addr.i7681 = alloca ptr, align 8, addrspace(5)
+-  %observable_offsets.addr.i = alloca ptr, align 8, addrspace(5)
+-  %observable_targets.addr.i = alloca ptr, align 8, addrspace(5)
+-  %idx.addr.i = alloca i32, align 4, addrspace(5)
+-  %obs_slot.addr.i = alloca i32, align 4, addrspace(5)
+-  %t.i7682 = alloca i32, align 4, addrspace(5)
+-  %s0.i = alloca i32, align 4, addrspace(5)
+-  %e0.i = alloca i32, align 4, addrspace(5)
+-  %parity.i = alloca i8, align 1, addrspace(5)
++if.then:                                          ; preds = %entry
++  %meas = getelementptr inbounds nuw i8, ptr %st, i64 80
++  %shr.i5 = lshr i32 %r.sroa.0.0.copyload, 6
++  %idxprom.i = zext nneg i32 %shr.i5 to i64
+
+@@ hunk 3/4 left 17491..17570 right 7822..7843 @@
+--- circuit_d3.2_clangO0.ll:17491
++++ circuit_d3.3_clangO2.ll:7822
+@@ -1,80 +1,22 @@
+-  %next_noise = getelementptr inbounds nuw %struct.V2State, ptr %1, i32 0, i32 6
+-  %2 = load i32, ptr %next_noise, align 4
+-  %cmp = icmp eq i32 %0, %2
++  %conv.i = uitofp nneg i64 %shr.i to double
++  %mul.i = fmul double %conv.i, 0x3CA0000000000000
++  %cmp = fcmp olt double %mul.i, %r.sroa.43.0.copyload
+   br i1 %cmp, label %if.then, label %if.end
+ 
+ if.then:                                          ; preds = %entry
+-  %3 = load ptr, ptr %st.addr.ascast, align 8
+-  %4 = load ptr, ptr %sites.addr.ascast, align 8
+-  %5 = load ptr, ptr %channels.addr.ascast, align 8
+-  %6 = load i32, ptr %site.addr.ascast, align 4
+-  call void @apply_noise_site(ptr noundef %3, ptr noundef %4, ptr noundef %5, i32 noundef %6) #4
+-  %7 = load i32, ptr %site.addr.ascast, align 4
+-  %add = add i32 %7, 1
+-  %8 = load ptr, ptr %st.addr.ascast, align 8
+-  %next_noise1 = getelementptr inbounds nuw %struct.V2State, ptr %8, i32 0, i32 6
+-  store i32 %add, ptr %next_noise1, align 4
+-  %9 = load ptr, ptr %st.addr.ascast, align 8
+-  %10 = load ptr, ptr %hazards.addr.ascast, align 8
+-  %11 = load i32, ptr %num_sites.addr.ascast, align 4
+-  call void @draw_next_noise(ptr noundef %9, ptr noundef %10, i32 noundef %11) #4
++  %meas = getelementptr inbounds nuw i8, ptr %st, i64 80
++  %shr.i5 = lshr i32 %r.sroa.0.0.copyload, 6
++  %idxprom.i = zext nneg i32 %shr.i5 to i64
++  %arrayidx.i = getelementptr inbounds nuw i64, ptr %meas, i64 %idxprom.i
++  %and.i = and i32 %r.sroa.0.0.copyload, 63
++  %sh_prom.i = zext nneg i32 %and.i to i64
++  %shl.i = shl nuw i64 1, %sh_prom.i
++  %4 = load i64, ptr %arrayidx.i, align 8, !tbaa !8
++  %xor.i = xor i64 %4, %shl.i
++  store i64 %xor.i, ptr %arrayidx.i, align 8, !tbaa !8
+   br label %if.end
+ 
+ if.end:                                           ; preds = %if.then, %entry
+-  call void @v2_barrier() #4
+   ret void
+ }
+ 
+-; Function Attrs: convergent noinline nounwind optnone
+-define internal void @v2_op_readout_noise(ptr noundef %st, ptr noundef %readout_noise, i32 noundef %idx) #0 {
+-entry:
+-  %st.addr = alloca ptr, align 8, addrspace(5)
+-  %readout_noise.addr = alloca ptr, align 8, addrspace(5)
+-  %idx.addr = alloca i32, align 4, addrspace(5)
+-  %t = alloca i32, align 4, addrspace(5)
+-  %r = alloca %struct.CV2ReadoutNoise, align 8, addrspace(5)
+-  %st.addr.ascast = addrspacecast ptr addrspace(5) %st.addr to ptr
+-  %readout_noise.addr.ascast = addrspacecast ptr addrspace(5) %readout_noise.addr to ptr
+-  %idx.addr.ascast = addrspacecast ptr addrspace(5) %idx.addr to ptr
+-  %t.ascast = addrspacecast ptr addrspace(5) %t to ptr
+-  %r.ascast = addrspacecast ptr addrspace(5) %r to ptr
+-  store ptr %st, ptr %st.addr.ascast, align 8
+-  store ptr %readout_noise, ptr %readout_noise.addr.ascast, align 8
+-  store i32 %idx, ptr %idx.addr.ascast, align 4
+-  %call = call i32 @v2_tid() #4
+-  store i32 %call, ptr %t.ascast, align 4
+-  %0 = load ptr, ptr %readout_noise.addr.ascast, align 8
+-  %1 = load i32, ptr %idx.addr.ascast, align 4
+-  %idxprom = zext i32 %1 to i64
+-  %arrayidx = getelementptr inbounds nuw %struct.CV2ReadoutNoise, ptr %0, i64 %idxprom
+-  call void @llvm.memcpy.p0.p0.i64(ptr align 8 %r.ascast, ptr align 8 %arrayidx, i64 16, i1 false)
+-  %2 = load ptr, ptr %st.addr.ascast, align 8
+-  %rng = getelementptr inbounds nuw %struct.V2State, ptr %2, i32 0, i32 3
+-  %arraydecay = getelementptr inbounds [4 x i64], ptr %rng, i64 0, i64 0
+-  %call1 = call double @rng_uniform(ptr noundef %arraydecay) #4
+-  %prob = getelementptr inbounds nuw %struct.CV2ReadoutNoise, ptr %r.ascast, i32 0, i32 1
+-  %3 = load double, ptr %prob, align 8
+-  %cmp = fcmp olt double %call1, %3
+-  br i1 %cmp, label %if.then, label %if.end
+-
+-if.then:                                          ; preds = %entry
+-  %4 = load ptr, ptr %st.addr.ascast, align 8
+-  %meas = getelementptr inbounds nuw %struct.V2State, ptr %4, i32 0, i32 2
+-  %arraydecay2 = getelementptr inbounds [64 x i64], ptr %meas, i64 0, i64 0
+-  %meas_idx = getelementptr inbounds nuw %struct.CV2ReadoutNoise, ptr %r.ascast, i32 0, i32 0
+-  %5 = load i32, ptr %meas_idx, align 8
+-  call void @mxor1(ptr noundef %arraydecay2, i32 noundef %5) #4
+-  br label %if.end
+-
+-if.end:                                           ; preds = %if.then, %entry
+-  call void @v2_barrier() #4
+-  ret void
+-}
+-
+-; Function Attrs: convergent noinline nounwind optnone
+-define internal void @v2_op_swap_meas_interfere(ptr noundef %st, ptr noundef %v, ptr noundef %scratch, i32 noundef %active_k, i32 noundef %from, i32 noundef %to, i32 noundef %slot, i8 noundef zeroext %flags) #0 {
+-entry:
+-  %st.addr = alloca ptr, align 8, addrspace(5)
+-  %v.addr = alloca ptr, align 8, addrspace(5)
+-  %scratch.addr = alloca ptr, align 8, addrspace(5)
+-  %active_k.addr = alloca i32, align 4, addrspace(5)
+
+@@ hunk 4/4 left 19202..19281 right 8089..8102 @@
+--- circuit_d3.2_clangO0.ll:19202
++++ circuit_d3.3_clangO2.ll:8089
+@@ -1,80 +1,14 @@
+-for.cond:                                         ; preds = %for.inc, %entry
+-  %3 = load i64, ptr %i.ascast, align 8
+-  %4 = load i64, ptr %iters.ascast, align 8
+-  %cmp = icmp ult i64 %3, %4
+-  br i1 %cmp, label %for.body, label %for.end
++attributes #7 = { nocallback nofree nosync nounwind speculatable willreturn memory(none) }
++attributes #8 = { nounwind }
++attributes #9 = { convergent nobuiltin nounwind "no-builtins" }
++attributes #10 = { convergent nobuiltin "no-builtins" }
++attributes #11 = { nobuiltin "no-builtins" }
+ 
+-for.body:                                         ; preds = %for.cond
+-  %5 = load i64, ptr %i.ascast, align 8
+-  %6 = load i32, ptr %axis.addr.ascast, align 4
+-  %call = call i64 @insert_zero_bit(i64 noundef %5, i32 noundef %6) #4
+-  %7 = load i64, ptr %axis_bit.ascast, align 8
+-  %or = or i64 %call, %7
+-  store i64 %or, ptr %idx.ascast, align 8
+-  %8 = load ptr, ptr %v.addr.ascast, align 8
+-  %9 = load i64, ptr %idx.ascast, align 8
+-  %arrayidx = getelementptr inbounds nuw %struct.CV2Complex, ptr %8, i64 %9
+-  %10 = load ptr, ptr %v.addr.ascast, align 8
+-  %11 = load i64, ptr %idx.ascast, align 8
+-  %arrayidx5 = getelementptr inbounds nuw %struct.CV2Complex, ptr %10, i64 %11
+-  %12 = load [2 x i32], ptr %arrayidx5, align 8
+-  %13 = load [2 x i32], ptr %phase1, align 8
+-  %call6 = call [2 x i32] @cmul([2 x i32] %12, [2 x i32] %13) #4
+-  store [2 x i32] %call6, ptr addrspace(5) %tmp, align 8
+-  call void @llvm.memcpy.p0.p5.i64(ptr align 8 %arrayidx, ptr addrspace(5) align 8 %tmp, i64 8, i1 false)
+-  br label %for.inc
++!llvm.module.flags = !{!0, !1, !2}
++!llvm.ident = !{!3}
+ 
+-for.inc:                                          ; preds = %for.body
+-  %14 = load i64, ptr %i.ascast, align 8
+-  %add = add i64 %14, 1
+-  store i64 %add, ptr %i.ascast, align 8
+-  br label %for.cond, !llvm.loop !30
+-
+-for.end:                                          ; preds = %for.cond
+-  call void @v2_barrier() #4
+-  ret void
+-}
+-
+-; Function Attrs: convergent noinline nounwind optnone
+-define internal i64 @scatter_bits_2(i64 noundef %val, i32 noundef %b1, i32 noundef %b2) #0 {
+-entry:
+-  %retval = alloca i64, align 8, addrspace(5)
+-  %val.addr = alloca i64, align 8, addrspace(5)
+-  %b1.addr = alloca i32, align 4, addrspace(5)
+-  %b2.addr = alloca i32, align 4, addrspace(5)
+-  %lo = alloca i32, align 4, addrspace(5)
+-  %hi = alloca i32, align 4, addrspace(5)
+-  %retval.ascast = addrspacecast ptr addrspace(5) %retval to ptr
+-  %val.addr.ascast = addrspacecast ptr addrspace(5) %val.addr to ptr
+-  %b1.addr.ascast = addrspacecast ptr addrspace(5) %b1.addr to ptr
+-  %b2.addr.ascast = addrspacecast ptr addrspace(5) %b2.addr to ptr
+-  %lo.ascast = addrspacecast ptr addrspace(5) %lo to ptr
+-  %hi.ascast = addrspacecast ptr addrspace(5) %hi to ptr
+-  store i64 %val, ptr %val.addr.ascast, align 8
+-  store i32 %b1, ptr %b1.addr.ascast, align 4
+-  store i32 %b2, ptr %b2.addr.ascast, align 4
+-  %0 = load i32, ptr %b1.addr.ascast, align 4
+-  %1 = load i32, ptr %b2.addr.ascast, align 4
+-  %cmp = icmp ult i32 %0, %1
+-  br i1 %cmp, label %cond.true, label %cond.false
+-
+-cond.true:                                        ; preds = %entry
+-  %2 = load i32, ptr %b1.addr.ascast, align 4
+-  br label %cond.end
+-
+-cond.false:                                       ; preds = %entry
+-  %3 = load i32, ptr %b2.addr.ascast, align 4
+-  br label %cond.end
+-
+-cond.end:                                         ; preds = %cond.false, %cond.true
+-  %cond = phi i32 [ %2, %cond.true ], [ %3, %cond.false ]
+-  store i32 %cond, ptr %lo.ascast, align 4
+-  %4 = load i32, ptr %b1.addr.ascast, align 4
+-  %5 = load i32, ptr %b2.addr.ascast, align 4
+-  %cmp1 = icmp ult i32 %4, %5
+-  br i1 %cmp1, label %cond.true2, label %cond.false3
+-
+-cond.true2:                                       ; preds = %cond.end
+-  %6 = load i32, ptr %b2.addr.ascast, align 4
+-  br label %cond.end4
+-
++!0 = !{i32 1, !"amdhsa_code_object_version", i32 600}
++!1 = !{i32 1, !"wchar_size", i32 4}
++!2 = !{i32 8, !"PIC Level", i32 2}
++!3 = !{!"clang version 21.0.0git (https://github.com/llvm/llvm-project.git 20d6375796073f6a0f0ea6abe05ce454a3d617ff)"}
++!4 = !{!5, !5, i64 0}

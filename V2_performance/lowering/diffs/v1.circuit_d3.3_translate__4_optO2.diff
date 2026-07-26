@@ -1,0 +1,488 @@
+# v1 / circuit_d3: translate -> optO2
+# circuit_d3.3_translate.ll (14875 lines) -> circuit_d3.4_optO2.ll (13747 lines)
+# 4 largest change hunks, 6 lines context, capped at 80 lines/side. Full diff: diff -u circuit_d3.3_translate.ll circuit_d3.4_optO2.ll
+
+@@ hunk 1/4 left 7067..7146 right 7841..7860 @@
+--- circuit_d3.3_translate.ll:7067
++++ circuit_d3.4_optO2.ll:7841
+@@ -1,80 +1,20 @@
+-  %5343 = add i64 %5246, 1
+-  br label %5245
++  %6026 = tail call i64 @llvm.fshl.i64(i64 %6022, i64 %6022, i64 45)
++  %.not4.i1412 = icmp ult i64 %6016, %7
++  %6027 = trunc i64 %6016 to i32
++  %6028 = select i1 %.not4.i1412, i32 %6027, i32 -1
++  br label %clifft_draw_next_noise.exit1413
+ 
+-5344:                                             ; preds = %5245
+-  br label %5345
++clifft_draw_next_noise.exit1413:                  ; preds = %6019, %._crit_edge3588, %5870
++  %.44 = phi i32 [ %.43, %5870 ], [ %6028, %6019 ], [ -1, %._crit_edge3588 ]
++  %.sroa.789.45 = phi i64 [ %5880, %5870 ], [ %6026, %6019 ], [ %5904, %._crit_edge3588 ]
++  %.sroa.526.45 = phi i64 [ %5879, %5870 ], [ %6025, %6019 ], [ %5903, %._crit_edge3588 ]
++  %.sroa.263.45 = phi i64 [ %5877, %5870 ], [ %6023, %6019 ], [ %5901, %._crit_edge3588 ]
++  %.sroa.02181.45 = phi i64 [ %5878, %5870 ], [ %6024, %6019 ], [ %5902, %._crit_edge3588 ]
++  %.sroa.0.128 = phi i64 [ %.sroa.0.125, %5870 ], [ %.sroa.0.129.lcssa, %6019 ], [ %.sroa.0.129.lcssa, %._crit_edge3588 ]
++  %promotealloca1707 = phi <5 x i64> [ %promotealloca1697, %5870 ], [ %promotealloca1702.lcssa, %6019 ], [ %promotealloca1702.lcssa, %._crit_edge3588 ]
++  br label %6029
+ 
+-5345:                                             ; preds = %5348, %5344
+-  %5346 = phi i64 [ %5363, %5348 ], [ 0, %5344 ]
+-  %5347 = icmp ult i64 %5346, 4
+-  br i1 %5347, label %5348, label %5364
+-
+-5348:                                             ; preds = %5345
+-  %5349 = and i64 %5346, 0
+-  %5350 = and i64 %5346, -1
+-  %5351 = shl i64 %5350, 1
+-  %5352 = or i64 %5349, %5351
+-  %5353 = and i64 %5352, 1
+-  %5354 = and i64 %5352, -2
+-  %5355 = shl i64 %5354, 1
+-  %5356 = or i64 %5353, %5355
+-  %5357 = or i64 %5356, 1
+-  %5358 = or i64 %5357, 2
+-  %5359 = getelementptr inbounds { float, float }, ptr %26, i64 %5357
+-  %5360 = load { float, float }, ptr %5359, align 4
+-  %5361 = getelementptr inbounds { float, float }, ptr %26, i64 %5358
+-  %5362 = load { float, float }, ptr %5361, align 4
+-  store { float, float } %5362, ptr %5359, align 4
+-  store { float, float } %5360, ptr %5361, align 4
+-  %5363 = add i64 %5346, 1
+-  br label %5345
+-
+-5364:                                             ; preds = %5345
+-  %5365 = load i64, ptr %216, align 4
+-  %5366 = lshr i64 %5365, 0
+-  %5367 = and i64 %5366, 1
+-  %5368 = trunc i64 %5367 to i1
+-  %5369 = load i64, ptr %3642, align 4
+-  %5370 = lshr i64 %5369, 1
+-  %5371 = and i64 %5370, 1
+-  %5372 = trunc i64 %5371 to i1
+-  %5373 = load i64, ptr %3636, align 4
+-  %5374 = zext i1 %5368 to i64
+-  %5375 = shl i64 %5374, 1
+-  %5376 = xor i64 %5373, %5375
+-  store i64 %5376, ptr %3636, align 4
+-  %5377 = load i64, ptr %222, align 4
+-  %5378 = zext i1 %5372 to i64
+-  %5379 = shl i64 %5378, 0
+-  %5380 = xor i64 %5377, %5379
+-  store i64 %5380, ptr %222, align 4
+-  br label %5381
+-
+-5381:                                             ; preds = %5384, %5364
+-  %5382 = phi i64 [ %5399, %5384 ], [ 0, %5364 ]
+-  %5383 = icmp ult i64 %5382, 4
+-  br i1 %5383, label %5384, label %5400
+-
+-5384:                                             ; preds = %5381
+-  %5385 = and i64 %5382, 0
+-  %5386 = and i64 %5382, -1
+-  %5387 = shl i64 %5386, 1
+-  %5388 = or i64 %5385, %5387
+-  %5389 = and i64 %5388, 3
+-  %5390 = and i64 %5388, -4
+-  %5391 = shl i64 %5390, 1
+-  %5392 = or i64 %5389, %5391
+-  %5393 = or i64 %5392, 1
+-  %5394 = or i64 %5393, 4
+-  %5395 = getelementptr inbounds { float, float }, ptr %26, i64 %5393
+-  %5396 = load { float, float }, ptr %5395, align 4
+-  %5397 = getelementptr inbounds { float, float }, ptr %26, i64 %5394
+-  %5398 = load { float, float }, ptr %5397, align 4
+-  store { float, float } %5398, ptr %5395, align 4
+-  store { float, float } %5396, ptr %5397, align 4
+-  %5399 = add i64 %5382, 1
+-  br label %5381
+-
+-5400:                                             ; preds = %5381
+-  %5401 = load i64, ptr %216, align 4
+-  %5402 = lshr i64 %5401, 0
++6029:                                             ; preds = %clifft_draw_next_noise.exit1413, %clifft_draw_next_noise.exit1417
++  %6030 = phi i64 [ 397, %clifft_draw_next_noise.exit1413 ], [ %.pre-phi4222, %clifft_draw_next_noise.exit1417 ]
++  %promotealloca17063622 = phi <5 x i64> [ %promotealloca1707, %clifft_draw_next_noise.exit1413 ], [ %promotealloca1703, %clifft_draw_next_noise.exit1417 ]
++  %.sroa.0.1313621 = phi i64 [ %.sroa.0.128, %clifft_draw_next_noise.exit1413 ], [ %.sroa.0.132, %clifft_draw_next_noise.exit1417 ]
+
+@@ hunk 2/4 left 9640..9719 right 10045..10084 @@
+--- circuit_d3.3_translate.ll:9640
++++ circuit_d3.4_optO2.ll:10045
+@@ -1,80 +1,40 @@
+-  %7377 = load i64, ptr %7376, align 4
+-  %7378 = load i64, ptr %46, align 4
+-  %7379 = xor i64 %7378, %7377
+-  store i64 %7379, ptr %46, align 4
+-  br label %7380
++  %7786 = fadd double %7779, %7785
++  %7787 = fcmp olt double %7776, %7786
++  %7788 = fcmp oge double %7776, %7779
++  %7789 = and i1 %7788, %7787
++  br i1 %7789, label %7790, label %7818
+ 
+-7380:                                             ; preds = %7340, %7330
+-  %7381 = add i64 %7327, 1
+-  br label %7326
++7790:                                             ; preds = %.lr.ph3748.1
++  %7791 = load i64, ptr addrspace(1) %7783, align 4
++  %7792 = xor i64 %7791, %.sroa.0.1603745.1
++  %7793 = getelementptr i8, ptr addrspace(1) %7783, i64 40
++  %7794 = load i64, ptr addrspace(1) %7793, align 4
++  %7795 = extractelement <5 x i64> %promotealloca17273746.1, i64 0
++  %7796 = xor i64 %7794, %7795
++  %7797 = insertelement <5 x i64> poison, i64 %7796, i64 0
++  %7798 = getelementptr i8, ptr addrspace(1) %7783, i64 48
++  %7799 = load i64, ptr addrspace(1) %7798, align 4
++  %7800 = extractelement <5 x i64> %promotealloca17273746.1, i64 1
++  %7801 = xor i64 %7799, %7800
++  %7802 = insertelement <5 x i64> %7797, i64 %7801, i64 1
++  %7803 = getelementptr i8, ptr addrspace(1) %7783, i64 56
++  %7804 = load i64, ptr addrspace(1) %7803, align 4
++  %7805 = extractelement <5 x i64> %promotealloca17273746.1, i64 2
++  %7806 = xor i64 %7804, %7805
++  %7807 = insertelement <5 x i64> %7802, i64 %7806, i64 2
++  %7808 = getelementptr i8, ptr addrspace(1) %7783, i64 64
++  %7809 = load i64, ptr addrspace(1) %7808, align 4
++  %7810 = extractelement <5 x i64> %promotealloca17273746.1, i64 3
++  %7811 = xor i64 %7809, %7810
++  %7812 = insertelement <5 x i64> %7807, i64 %7811, i64 3
++  %7813 = getelementptr i8, ptr addrspace(1) %7783, i64 72
++  %7814 = load i64, ptr addrspace(1) %7813, align 4
++  %7815 = extractelement <5 x i64> %promotealloca17273746.1, i64 4
++  %7816 = xor i64 %7814, %7815
++  %7817 = insertelement <5 x i64> %7812, i64 %7816, i64 4
++  br label %7818
+ 
+-7382:                                             ; preds = %7326
+-  store i32 480, ptr %12, align 4
+-  call void @clifft_draw_next_noise(ptr %12, ptr %14, ptr %4, i64 %7)
+-  br label %7383
+-
+-7383:                                             ; preds = %7382, %7292
+-  %7384 = load i32, ptr %22, align 4
+-  %7385 = zext i32 %7384 to i64
+-  %7386 = sub i64 %7385, 1
+-  %7387 = shl i64 1, %7386
+-  %7388 = icmp sgt i32 %7384, 0
+-  %7389 = select i1 %7388, i64 %7387, i64 0
+-  br label %7390
+-
+-7390:                                             ; preds = %7408, %7383
+-  %7391 = phi i64 [ %7409, %7408 ], [ 0, %7383 ]
+-  %7392 = icmp ult i64 %7391, %7389
+-  br i1 %7392, label %7393, label %7410
+-
+-7393:                                             ; preds = %7390
+-  %7394 = and i64 %7391, 0
+-  %7395 = and i64 %7391, -1
+-  %7396 = shl i64 %7395, 1
+-  %7397 = or i64 %7394, %7396
+-  %7398 = or i64 %7397, 1
+-  %7399 = and i64 %7397, 6
+-  %7400 = call i64 @llvm.ctpop.i64(i64 %7399)
+-  %7401 = and i64 %7400, 1
+-  %7402 = icmp ne i64 %7401, 0
+-  br i1 %7402, label %7403, label %7408
+-
+-7403:                                             ; preds = %7393
+-  %7404 = getelementptr inbounds { float, float }, ptr %26, i64 %7397
+-  %7405 = load { float, float }, ptr %7404, align 4
+-  %7406 = getelementptr inbounds { float, float }, ptr %26, i64 %7398
+-  %7407 = load { float, float }, ptr %7406, align 4
+-  store { float, float } %7407, ptr %7404, align 4
+-  store { float, float } %7405, ptr %7406, align 4
+-  br label %7408
+-
+-7408:                                             ; preds = %7403, %7393
+-  %7409 = add i64 %7391, 1
+-  br label %7390
+-
+-7410:                                             ; preds = %7390
+-  %7411 = load i64, ptr %222, align 4
+-  %7412 = lshr i64 %7411, 0
+-  %7413 = and i64 %7412, 1
+-  %7414 = trunc i64 %7413 to i1
+-  %7415 = load i64, ptr %3642, align 4
+-  %7416 = zext i1 %7414 to i64
+-  %7417 = shl i64 %7416, 1
+-  %7418 = xor i64 %7415, %7417
+-  store i64 %7418, ptr %3642, align 4
+-  %7419 = load i64, ptr %327, align 4
+-  %7420 = shl i64 %7416, 2
+-  %7421 = xor i64 %7419, %7420
+-  store i64 %7421, ptr %327, align 4
+-  %7422 = load i64, ptr %3636, align 4
+-  %7423 = lshr i64 %7422, 1
+-  %7424 = and i64 %7423, 1
+-  %7425 = trunc i64 %7424 to i1
+-  %7426 = xor i1 false, %7425
+-  %7427 = load i64, ptr %321, align 4
+-  %7428 = lshr i64 %7427, 2
+-  %7429 = and i64 %7428, 1
+-  %7430 = trunc i64 %7429 to i1
+-  %7431 = xor i1 %7426, %7430
+-  %7432 = load i64, ptr %216, align 4
+-  %7433 = zext i1 %7431 to i64
++7818:                                             ; preds = %7790, %.lr.ph3748.1
++  %.sroa.0.161.1 = phi i64 [ %7792, %7790 ], [ %.sroa.0.1603745.1, %.lr.ph3748.1 ]
++  %promotealloca1726.1 = phi <5 x i64> [ %7817, %7790 ], [ %promotealloca17273746.1, %.lr.ph3748.1 ]
++  %7819 = add nuw nsw i64 %7780, 1
+
+@@ hunk 3/4 left 11580..11659 right 11789..11868 @@
+--- circuit_d3.3_translate.ll:11580
++++ circuit_d3.4_optO2.ll:11789
+@@ -1,80 +1,80 @@
+-  %8853 = insertvalue { float, float } undef, float %8849, 0
+-  %8854 = insertvalue { float, float } %8853, float %8852, 1
+-  store { float, float } %8854, ptr %8843, align 4
+-  %8855 = add i64 %8835, 1
+-  br label %8834
++  %9157 = xor i64 %9155, %9036
++  %9158 = xor i64 %9156, %9037
++  %9159 = xor i64 %9155, %9154
++  %9160 = tail call i64 @llvm.fshl.i64(i64 %9156, i64 %9156, i64 45)
++  br label %clifft_draw_next_noise.exit1481
+ 
+-8856:                                             ; preds = %8834
+-  %8857 = load i64, ptr %3636, align 4
+-  %8858 = lshr i64 %8857, 1
+-  %8859 = and i64 %8858, 1
+-  %8860 = trunc i64 %8859 to i1
+-  %8861 = select i1 %8860, float 0xBFE6A09E60000000, float 0x3FE6A09E60000000
+-  %8862 = load i32, ptr %22, align 4
+-  %8863 = zext i32 %8862 to i64
+-  %8864 = sub i64 %8863, 1
+-  %8865 = shl i64 1, %8864
+-  %8866 = icmp sgt i32 %8862, 0
+-  %8867 = select i1 %8866, i64 %8865, i64 0
+-  br label %8868
+-
+-8868:                                             ; preds = %8871, %8856
+-  %8869 = phi i64 [ %8889, %8871 ], [ 0, %8856 ]
+-  %8870 = icmp ult i64 %8869, %8867
+-  br i1 %8870, label %8871, label %8890
+-
+-8871:                                             ; preds = %8868
+-  %8872 = and i64 %8869, 1
+-  %8873 = and i64 %8869, -2
+-  %8874 = shl i64 %8873, 1
+-  %8875 = or i64 %8872, %8874
+-  %8876 = or i64 %8875, 2
+-  %8877 = getelementptr inbounds { float, float }, ptr %26, i64 %8876
+-  %8878 = load { float, float }, ptr %8877, align 4
+-  %8879 = extractvalue { float, float } %8878, 0
+-  %8880 = extractvalue { float, float } %8878, 1
+-  %8881 = fmul float %8879, 0x3FE6A09E60000000
+-  %8882 = fmul float %8880, %8861
+-  %8883 = fsub float %8881, %8882
+-  %8884 = fmul float %8879, %8861
+-  %8885 = fmul float %8880, 0x3FE6A09E60000000
+-  %8886 = fadd float %8884, %8885
+-  %8887 = insertvalue { float, float } undef, float %8883, 0
+-  %8888 = insertvalue { float, float } %8887, float %8886, 1
+-  store { float, float } %8888, ptr %8877, align 4
+-  %8889 = add i64 %8869, 1
+-  br label %8868
+-
+-8890:                                             ; preds = %8868
+-  %8891 = load i32, ptr %22, align 4
+-  %8892 = zext i32 %8891 to i64
+-  %8893 = sub i64 %8892, 1
+-  %8894 = shl i64 1, %8893
+-  %8895 = icmp sgt i32 %8891, 0
+-  %8896 = select i1 %8895, i64 %8894, i64 0
+-  br label %8897
+-
+-8897:                                             ; preds = %8915, %8890
+-  %8898 = phi i64 [ %8916, %8915 ], [ 0, %8890 ]
+-  %8899 = icmp ult i64 %8898, %8896
+-  br i1 %8899, label %8900, label %8917
+-
+-8900:                                             ; preds = %8897
+-  %8901 = and i64 %8898, 0
+-  %8902 = and i64 %8898, -1
+-  %8903 = shl i64 %8902, 1
+-  %8904 = or i64 %8901, %8903
+-  %8905 = or i64 %8904, 1
+-  %8906 = and i64 %8904, 6
+-  %8907 = call i64 @llvm.ctpop.i64(i64 %8906)
+-  %8908 = and i64 %8907, 1
+-  %8909 = icmp ne i64 %8908, 0
+-  br i1 %8909, label %8910, label %8915
+-
+-8910:                                             ; preds = %8900
+-  %8911 = getelementptr inbounds { float, float }, ptr %26, i64 %8904
+-  %8912 = load { float, float }, ptr %8911, align 4
+-  %8913 = getelementptr inbounds { float, float }, ptr %26, i64 %8905
+-  %8914 = load { float, float }, ptr %8913, align 4
+-  store { float, float } %8914, ptr %8911, align 4
+-  store { float, float } %8912, ptr %8913, align 4
++clifft_draw_next_noise.exit1481:                  ; preds = %clifft_draw_next_noise.exit1481.loopexit, %._crit_edge3908, %clifft_draw_next_noise.exit1477
++  %.sroa.789.67 = phi i64 [ %.sroa.789.66, %clifft_draw_next_noise.exit1477 ], [ %9039, %._crit_edge3908 ], [ %9160, %clifft_draw_next_noise.exit1481.loopexit ]
++  %.sroa.526.67 = phi i64 [ %.sroa.526.66, %clifft_draw_next_noise.exit1477 ], [ %9038, %._crit_edge3908 ], [ %9159, %clifft_draw_next_noise.exit1481.loopexit ]
++  %.sroa.263.67 = phi i64 [ %.sroa.263.66, %clifft_draw_next_noise.exit1477 ], [ %9036, %._crit_edge3908 ], [ %9157, %clifft_draw_next_noise.exit1481.loopexit ]
++  %.sroa.02181.67 = phi i64 [ %.sroa.02181.66, %clifft_draw_next_noise.exit1477 ], [ %9037, %._crit_edge3908 ], [ %9158, %clifft_draw_next_noise.exit1481.loopexit ]
++  %.sroa.0.185 = phi i64 [ %9021, %clifft_draw_next_noise.exit1477 ], [ %.sroa.0.186.lcssa, %._crit_edge3908 ], [ %.sroa.0.186.lcssa, %clifft_draw_next_noise.exit1481.loopexit ]
++  %promotealloca1756 = phi <5 x i64> [ %promotealloca1766, %clifft_draw_next_noise.exit1477 ], [ %promotealloca1750.lcssa, %._crit_edge3908 ], [ %promotealloca1750.lcssa, %clifft_draw_next_noise.exit1481.loopexit ]
++  %9161 = lshr i64 %.sroa.0.185, 11
++  %9162 = and i64 %.sroa.0.185, 8
++  %.not450 = icmp eq i64 %9162, 0
++  %9163 = select i1 %.not450, float 0x3FE6A09E60000000, float 0xBFE6A09E60000000
++  %9164 = fmul float %6984, 0x3FE6A09E60000000
++  %9165 = fmul float %9163, %6987
++  %9166 = fsub float %9164, %9165
++  %9167 = fmul float %9163, %6984
++  %9168 = fmul float %6987, 0x3FE6A09E60000000
++  %9169 = fadd float %9167, %9168
++  %9170 = fmul float %7587, 0x3FE6A09E60000000
++  %9171 = fmul float %9163, %7590
++  %9172 = fsub float %9170, %9171
++  %9173 = fmul float %9163, %7587
++  %9174 = fmul float %7590, 0x3FE6A09E60000000
++  %9175 = fadd float %9173, %9174
++  %9176 = fmul float %7193, 0x3FE6A09E60000000
++  %9177 = fmul float %9163, %7196
++  %9178 = fsub float %9176, %9177
++  %9179 = fmul float %9163, %7193
++  %9180 = fmul float %7196, 0x3FE6A09E60000000
++  %9181 = fadd float %9179, %9180
++  %9182 = fmul float %7593, 0x3FE6A09E60000000
++  %9183 = fmul float %9163, %7596
++  %9184 = fsub float %9182, %9183
++  %9185 = fmul float %9163, %7593
++  %9186 = fmul float %7596, 0x3FE6A09E60000000
++  %9187 = fadd float %9185, %9186
++  %9188 = fmul float %7387, 0x3FE6A09E60000000
++  %9189 = fmul float %9163, %7390
++  %9190 = fsub float %9188, %9189
++  %9191 = fmul float %9163, %7387
++  %9192 = fmul float %7390, 0x3FE6A09E60000000
++  %9193 = fadd float %9191, %9192
++  %9194 = fmul float %7599, 0x3FE6A09E60000000
++  %9195 = fmul float %9163, %7602
++  %9196 = fsub float %9194, %9195
++  %9197 = fmul float %9163, %7599
++  %9198 = fmul float %7602, 0x3FE6A09E60000000
++  %9199 = fadd float %9197, %9198
++  %9200 = fmul float %7393, 0x3FE6A09E60000000
++  %9201 = fmul float %9163, %7396
++  %9202 = fsub float %9200, %9201
++  %9203 = fmul float %9163, %7393
++  %9204 = fmul float %7396, 0x3FE6A09E60000000
++  %9205 = fadd float %9203, %9204
++  %9206 = fmul float %7605, 0x3FE6A09E60000000
++  %9207 = fmul float %9163, %7608
++  %9208 = fsub float %9206, %9207
++  %9209 = fmul float %9163, %7605
++  %9210 = fmul float %7608, 0x3FE6A09E60000000
++  %9211 = fadd float %9209, %9210
++  %9212 = and i64 %.sroa.0.185, 4
++  %9213 = icmp ne i64 %9212, 0
++  %9214 = icmp ne i64 %9162, 0
++  %9215 = xor i1 %9213, %9214
++  %9216 = zext i1 %9215 to i64
++  %9217 = lshr i64 %.sroa.0.185, 4
++  %9218 = lshr i64 %.sroa.0.185, 6
++  %.lobit4513971 = xor i64 %9217, %9218
++  %9219 = xor i64 %.lobit4513971, %9161
++  %9220 = and i64 %9219, 1
++  %9221 = xor i64 %9220, %9216
++  %9222 = xor i64 %9221, %.sroa.0.185
++  %9223 = trunc i64 %9222 to i1
++  %9224 = select i1 %9223, float 0xBFE6A09E60000000, float 0x3FE6A09E60000000
++  %9225 = fmul float %7563, 0x3FE6A09E60000000
+
+@@ hunk 4/4 left 12799..12878 right 13690..13702 @@
+--- circuit_d3.3_translate.ll:12799
++++ circuit_d3.4_optO2.ll:13690
+@@ -1,80 +1,13 @@
++  %10865 = add i64 %10864, %10862
++  %10866 = add i64 %10865, %10863
++  %10867 = getelementptr i8, ptr addrspace(1) %.global1486, i64 16
++  %10868 = atomicrmw add ptr addrspace(1) %10867, i64 %10866 syncscope("agent") monotonic, align 8
++  br label %10869
+ 
+-9858:                                             ; preds = %9861, %9782
+-  %9859 = phi i64 [ %9879, %9861 ], [ 0, %9782 ]
+-  %9860 = icmp ult i64 %9859, %9857
+-  br i1 %9860, label %9861, label %9880
++10869:                                            ; preds = %10810, %10846, %10808
++  ret void
++}
+ 
+-9861:                                             ; preds = %9858
+-  %9862 = and i64 %9859, 3
+-  %9863 = and i64 %9859, -4
+-  %9864 = shl i64 %9863, 1
+-  %9865 = or i64 %9862, %9864
+-  %9866 = or i64 %9865, 4
+-  %9867 = getelementptr inbounds { float, float }, ptr %26, i64 %9866
+-  %9868 = load { float, float }, ptr %9867, align 4
+-  %9869 = extractvalue { float, float } %9868, 0
+-  %9870 = extractvalue { float, float } %9868, 1
+-  %9871 = fmul float %9869, 0x3FE6A09E60000000
+-  %9872 = fmul float %9870, %9851
+-  %9873 = fsub float %9871, %9872
+-  %9874 = fmul float %9869, %9851
+-  %9875 = fmul float %9870, 0x3FE6A09E60000000
+-  %9876 = fadd float %9874, %9875
+-  %9877 = insertvalue { float, float } undef, float %9873, 0
+-  %9878 = insertvalue { float, float } %9877, float %9876, 1
+-  store { float, float } %9878, ptr %9867, align 4
+-  %9879 = add i64 %9859, 1
+-  br label %9858
++; Function Attrs: nocallback nofree nosync nounwind speculatable willreturn memory(none)
++declare i64 @llvm.fshl.i64(i64, i64, i64) #6
+ 
+-9880:                                             ; preds = %9858
+-  %9881 = load i32, ptr %22, align 4
+-  %9882 = zext i32 %9881 to i64
+-  %9883 = sub i64 %9882, 1
+-  %9884 = shl i64 1, %9883
+-  %9885 = icmp sgt i32 %9881, 0
+-  %9886 = select i1 %9885, i64 %9884, i64 0
+-  br label %9887
+-
+-9887:                                             ; preds = %9905, %9880
+-  %9888 = phi i64 [ %9906, %9905 ], [ 0, %9880 ]
+-  %9889 = icmp ult i64 %9888, %9886
+-  br i1 %9889, label %9890, label %9907
+-
+-9890:                                             ; preds = %9887
+-  %9891 = and i64 %9888, 0
+-  %9892 = and i64 %9888, -1
+-  %9893 = shl i64 %9892, 1
+-  %9894 = or i64 %9891, %9893
+-  %9895 = or i64 %9894, 1
+-  %9896 = and i64 %9894, 10
+-  %9897 = call i64 @llvm.ctpop.i64(i64 %9896)
+-  %9898 = and i64 %9897, 1
+-  %9899 = icmp ne i64 %9898, 0
+-  br i1 %9899, label %9900, label %9905
+-
+-9900:                                             ; preds = %9890
+-  %9901 = getelementptr inbounds { float, float }, ptr %26, i64 %9894
+-  %9902 = load { float, float }, ptr %9901, align 4
+-  %9903 = getelementptr inbounds { float, float }, ptr %26, i64 %9895
+-  %9904 = load { float, float }, ptr %9903, align 4
+-  store { float, float } %9904, ptr %9901, align 4
+-  store { float, float } %9902, ptr %9903, align 4
+-  br label %9905
+-
+-9905:                                             ; preds = %9900, %9890
+-  %9906 = add i64 %9888, 1
+-  br label %9887
+-
+-9907:                                             ; preds = %9887
+-  %9908 = load i64, ptr %222, align 4
+-  %9909 = lshr i64 %9908, 0
+-  %9910 = and i64 %9909, 1
+-  %9911 = trunc i64 %9910 to i1
+-  %9912 = load i64, ptr %3642, align 4
+-  %9913 = zext i1 %9911 to i64
+-  %9914 = shl i64 %9913, 1
+-  %9915 = xor i64 %9912, %9914
+-  store i64 %9915, ptr %3642, align 4
+-  %9916 = load i64, ptr %362, align 4
+-  %9917 = shl i64 %9913, 3
+-  %9918 = xor i64 %9916, %9917
