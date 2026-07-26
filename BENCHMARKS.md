@@ -110,6 +110,34 @@ Ranks above are the **compiled** `peak_rank` (post-StatevectorSqueezePass, as
 measured by `V2_performance/scratch/rank_probe`), not the qubit count. The
 surface family squeezes hard — `surface_d11_t19` uses far more than 14 qubits.
 
+## Fixture Rank Census (measured 2026-07-26)
+
+`rank_probe` was run over **every** live fixture (353 files under
+`tests/fixtures/`, `tools/bench/fixtures/`, `docs/guide/circuits/`). Full
+results: `V2_performance/scratch/all_ranks.txt`. The distribution is lopsided:
+
+| compiled rank | files | tier |
+|---|---|---|
+| 0-1 | 326 | register |
+| 3-4 | 5 | register |
+| 7-10 | 11 | coop |
+| 11-14 | 5 | global |
+| 20-24 | 6 | global |
+
+**Only 22 of 353 fixtures reach rank >= 5**, i.e. only 22 exercise the coop or
+global tier at all. The other 331 collapse to rank 0-1 under
+StatevectorSqueezePass — including all 188 of `tests/fixtures/sweep/` and all
+56 of `tests/fixtures/rank_sweep/`, whose *filenames* advertise ranks they do
+not have (`rank_q17_r12_d1.stim` compiles to rank 1). Do not infer coverage
+from a fixture's name or qubit count; probe it.
+
+The benchmark matrix in `~/.claude/skills/benchmark-all/scripts/run_sweep.sh`
+is exactly those 22, plus 4 register-tier circuits for the low end. That is
+full coverage of every circuit in the tree that reaches coop or global.
+
+Nothing in the tree exceeds rank 24, so the top of the raised
+`kGlobalMaxPeakRank = 26` is not yet exercised by a fixture.
+
 ## StatevectorSqueezePass Impact
 
 The compiler's `StatevectorSqueezePass` (enabled by default) minimizes peak_rank:
