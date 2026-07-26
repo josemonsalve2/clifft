@@ -150,9 +150,17 @@ int main(int argc, char** argv) {
           "executable_load_agent_code_object");
     CHECK(hsa_executable_freeze(exec, nullptr), "executable_freeze");
 
+    // Symbol lookup: try the bare name, then "<name>.kd". Which one the runtime
+    // answers to depends on the code-object version -- the ELF carries BOTH a
+    // FUNC "bench_empty" and an OBJECT "bench_empty.kd" (the kernel descriptor),
+    // and ROCm 7.2.3 resolves the descriptor. hsa_kernel_dispatch.cc:186-195 in
+    // the production loader already does exactly this two-step; job 50501 lost
+    // the entire HSA arm to INVALID_SYMBOL_NAME because this copy did not.
     hsa_executable_symbol_t sym;
-    CHECK(hsa_executable_get_symbol_by_name(exec, "bench_empty", &gpu, &sym),
-          "get_symbol_by_name");
+    hsa_status_t sym_st = hsa_executable_get_symbol_by_name(exec, "bench_empty", &gpu, &sym);
+    if (sym_st != HSA_STATUS_SUCCESS)
+        sym_st = hsa_executable_get_symbol_by_name(exec, "bench_empty.kd", &gpu, &sym);
+    CHECK(sym_st, "get_symbol_by_name (tried \"bench_empty\" and \"bench_empty.kd\")");
     uint64_t kobj = 0;
     uint32_t priv = 0, group = 0, karg_size = 0;
     hsa_executable_symbol_get_info(sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kobj);
