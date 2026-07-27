@@ -1449,3 +1449,66 @@ but a real one: an auditor who runs `grep -c` concludes the row is wrong, and
 the ambiguity costs exactly as much to resolve as an error would. Where a count
 could plausibly be per-line or per-occurrence — types, substrings, anything that
 can repeat within a line — say which.
+
+---
+
+## §13.12 — Audit pass 14: report §8.6–§8.7 (`p7_lowering.md`, the f64 gulf)
+
+Fourteenth chapter audit, completing `p7_lowering.md`. 22 checks, one
+correction propagated across four sites.
+
+| # | claim | source | verdict |
+|---|---|---|---|
+| 1 | V1 ISA `v_*_f64` = 4,347 | `v1/circuit_d3.5_isa.s` | EXACT (script's own regex) |
+| 2 | V1 `v_*_f32` = 1,586, packed = 0 | ditto | EXACT |
+| 3 | V1 total instrs = 16,675 | ditto | EXACT |
+| 4 | V2 `v_*_f64` = 187 | `v2/circuit_d3.4_isa.s` | EXACT |
+| 5 | V2 f32 = 858, packed = 847 | ditto | EXACT |
+| 6 | V2 total instrs = 9,421 | ditto | EXACT |
+| 7 | "23× more f64" | derived | EXACT (23.2) |
+| 8 | A/B CSV both rows | `f64_attribution.csv` | VERBATIM |
+| 9 | `v_*_f32` identical across A and B | ditto | EXACT (1,586 = 1,586) |
+| 10 | 2,967 f64 moved = 68 % | derived | EXACT (68.3 %) |
+| 11 | 5,527 total instrs moved | derived | EXACT |
+| 12 | V2 `cscale`/`cnorm` + "Do NOT relax" | `v2_ops.h:193` | **WRONG → :206** (code verbatim) |
+| 13 | V1 `emit_cnorm` rationale comment | `mlir_emit.cc:826` | VERBATIM |
+| 14 | log-polynomial expansions = **52** | `circuit_d3.4_optO2.ll` | **WRONG → 54** |
+| 15 | count uniform across coefficients | ditto | CONFIRMED (54 for all three probed) |
+| 16 | CSV `log_expansions` column | `f64_attribution.csv` | **already said 54** |
+| 17 | "48 emitted call sites" | `circuit_d3.1_emitted.mlir` | EXACT (48 `draw_next_noise` calls) |
+| 18 | one shared `@clifft_log` definition | ditto | EXACT (1 def, 1 direct call) |
+| 19 | 37 f64 ops/copy → IR share | derived | RECOMPUTED 1,998 = 63.6 % (was 1,924 = 61.3 %) |
+| 20 | V2: 3 call sites, 3 relocations | `v2/circuit_d3.4_isa.s` | **EXACT** (3 `lo`/`hi` pairs at :269, :611, :1292) |
+| 21 | 459 `shufflevector` → 431 `v_pk_add_f32`, 416 `v_pk_mul_f32` | clangO2 + ISA | EXACT (3/3) |
+| 22 | V1 packed ops = 0 with or without log inlining | `f64_attribution.csv` | EXACT (0 in both A and B) |
+
+### The 52 that was 54
+
+The chapter's prose said **52** log-polynomial expansions and built two derived
+figures on it (1,924 IR ops, 61.3 %). The measured count is **54**, uniform
+across every coefficient probed — and the experiment's own CSV, printed three
+paragraphs above the prose, already carried `log_expansions,54` in both the
+header and the A row. The number was contradicted by the artifact quoted on the
+same page.
+
+The reconstruction offered for it ("48 emitted call sites; LLVM cloned 4 more")
+was arithmetic built backwards from the wrong total. The emitted MLIR really
+does have 48 `clifft_draw_next_noise` call sites and one shared `@clifft_log`
+definition; 48 + 1 direct call + 5 loop-unroll clones = 54. Corrected at all
+four sites (prose, figure caption, §8.5 hoist paragraph, §8.7 summary table)
+and the derived share recomputed to 1,998 ops = 63.6 %.
+
+The ISA-level 68 % is unaffected — it comes from the A/B experiment (4,347 −
+1,380), not from the per-copy multiplication.
+
+### Fourteenth method note: a derived number can contradict the artifact it is derived from, and the artifact wins.
+
+This is the first defect found where the correct value was **already printed in
+the same section**. The CSV block quoting `log_expansions,54` sits directly
+above prose asserting 52. Nothing went stale and no citation drifted; the author
+computed a plausible-looking reconstruction (48 + 4) and never diffed it against
+the column that measures the same thing. The general failure is treating a
+narrative explanation as independent confirmation of the number it explains —
+"48 call sites plus 4 clones" *sounds* like corroboration, but it was
+constructed to land on 52, so it could only ever agree. When a number has both a
+measured column and a story, check the column.
