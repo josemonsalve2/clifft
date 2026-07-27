@@ -164,9 +164,24 @@ turns `for(pc) switch(ins.opcode)` into straight-line calls, and the scalar unit
 stops computing branch targets. It is the single most consistent signal in the
 corpus.
 
+> **Precision note (2026-07-27).** The `circuit_d5_p0.001` SALU ratio of
+> **1.62** above is from the retracted `20260726T182433Z` run and does not
+> reproduce. Two other runs (`20260726T011254Z_fullbench-3way` and
+> `20260726T014859Z_all-tier5plus`) both give **1.468**. The SVM side is
+> byte-identical across all three (`SQ_INSTS_SALU = 2,404,746,573`); only V2's
+> count moves (3,531,312,912 → 3,891,138,310, +10.2 %), which is consistent
+> with the stale-cache binary of §0 rather than with measurement noise. Use
+> **1.47**, not 1.62. The qualitative claim — SALU *inverts* on this family —
+> is unaffected, and so is the L2 collapse.
+>
+> Corrected win-side range across all 20 winners:
+> **SALU ratio 0.110–0.361, i.e. a 2.8x–9.1x reduction** (the "3x-9x" above is
+> right to one significant figure but `four_t` reaches 9.1x and `qv24` only
+> 2.8x).
+
 **Verified:** the `circuit_d5` family is the *only* one where V2's VALU count
 goes **up** (2.2-2.3x) rather than down, the only one where SALU goes **up**
-(1.62x vs 0.11-0.36 everywhere else), and the only one where V2's L2 hit rate
+(1.47x vs 0.11-0.36 everywhere else), and the only one where V2's L2 hit rate
 **collapses** (98% -> 71.5%). All three invert together — and they invert on
 exactly the six circuits that ran `clifft_v2_coop`, the interpreter, because the
 correctness gate rejected their specialization. The SALU inversion is the
@@ -333,7 +348,16 @@ report:
   shape. That is a real, reportable weakness of the V2 runtime path — V2 has
   optimized its interpreter far less than SVM has, because the interpreter is
   meant to be the fallback, not the product.
-- The counter inversion in §3 (VALU 2.2-2.3x, SALU 1.62x, L2 hit 71.5% vs 98.0%)
+
+  > **Status update (2026-07-27):** this is still true *of the interpreter*, but
+  > it is no longer the observed end-to-end result for these six circuits. The
+  > gate failure that pinned them to the interpreter was the execution-only
+  > `s_barrier` (§6/§11.2); with `150d09f` the `coop_r10_n1720` gate verdict
+  > flips **0 → 1** on disk and the specializer is selected. Job 50389 measures
+  > **1.65x-1.76x** faster than the interpreter arm, which against these same
+  > SVM baselines implies ratios near **0.40** rather than 1.44. Quote the
+  > 1.44x only as "V2 interpreter vs SVM interpreter", never as "V2 vs SVM".
+- The counter inversion in §3 (VALU 2.2-2.3x, SALU 1.47x, L2 hit 71.5% vs 98.0%)
   is a property of `clifft_v2_coop`, **not** of `V2_NOISE_ATTR` call boundaries.
   The interpreter build compiles `v2_ops_body.inc` with `always_inline`
   throughout; there are no `noinline` ABI boundaries in the kernel that ran. The
