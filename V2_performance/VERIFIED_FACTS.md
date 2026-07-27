@@ -1309,3 +1309,77 @@ rather than read for plausibility. Note also which way the error ran: the
 misfiled circuit made the coop band look *better* (0.595 vs 0.530 upper bound is
 a worse ratio, so removing it tightened the band) — errors of convenience are
 not the only kind, and checking only the flattering numbers would have missed it.
+
+---
+
+## §14.0 — Job 50785: a silently truncated corpus, and the fence fix confirmed
+
+The first full-corpus re-run on post-fence, post-cache-fix HEAD (SLURM 50785,
+node `smci350-rck-g03-d13-21`) reported:
+
+```
+wrote 26 circuits to .../20260727T122423Z_unlabeled
+mean 0.539  median 0.518  wins 18/18
+```
+
+**"wins 18/18" over a 26-circuit corpus.** Eight circuits produced no usable
+data and the summary did not say so — it computed a mean and a median over the
+survivors and reported a perfect record.
+
+### Cause: stale fixture paths, not a GPU or profiling fault
+
+All eight failures (`four_t`, `cultivation_d5`, and all six QV circuits) hit
+paths that no longer exist in the tree:
+
+| bench_all.sh said | actual location |
+|---|---|
+| `tests/fixtures/highrank/qv2{0,1,2,3,4}*.stim` | `tests/fixtures/large/` |
+| `tests/fixtures/highrank/qv20_seed42.stim` | `tools/bench/fixtures/` |
+| `tests/fixtures/incremental/02_expand/four_t.stim` | `.../02_single_expand/` |
+| `tests/fixtures/large/cultivation_d5.stim` | `tests/fixtures/cultivation_d5.stim` |
+
+`rocprofv3` aborted on all five profiling passes per circuit (80 aborts in the
+log), with `2>/dev/null` swallowing every message. Fixed in `79d4463`, which
+also adds an existence check that exits non-zero before profiling.
+
+This also answers the open question from §13's earlier passes about why
+`four_t` and `cultivation_d5` "abort under rocprofv3 in the 101820Z run but
+succeeded in 062637Z and 182433Z": the fixtures were moved between those runs.
+It was never a profiler bug.
+
+### What the 18 surviving circuits do establish
+
+The run is not worthless — the paired cells that exist are valid, and they
+confirm the single most important post-fence claim. **All six `circuit_d5`
+circuits now run `clifft_v2_spec` and win:**
+
+| circuit | pre-fence (§1.2) | **job 50785** |
+|---|---|---|
+| `circuit_d5_p0.0005` | 1.451 (interp) | **0.842** (spec) |
+| `circuit_d5_p0.001` | 1.451 (interp) | **0.851** (spec) |
+| `circuit_d5_p0.002` | 1.451 (interp) | **0.843** (spec) |
+| `circuit_d5_p0.003` | 1.443 (interp) | **0.828** (spec) |
+| `circuit_d5_p0.005` | 1.448 (interp) | **0.811** (spec) |
+| `circuit_d3_p0.001` | 0.519 | **0.507** |
+
+The sign flip is real and measured on one node in one job: the six circuits
+that were V2's only losses are now wins. Note the magnitude, because §1.3(d)
+projected **~0.40** for these and the measurement says **~0.84**. The projection
+chained a `d13-21` A/B onto an `f13-21` corpus; the direct measurement does not.
+**§15 uses the direct number.** The 1.72–1.76× interpreter→specializer gain was
+correct; what was wrong was assuming the SVM baseline transferred across nodes.
+
+Job 50793 re-runs the full 26 with the paths fixed.
+
+### Method note: a summary that cannot report absence is not a summary.
+
+The harness had every piece of information needed to catch this — it knew the
+corpus was 26, it wrote 26 directories, and 8 of them had no CSV. It reported
+`18/18` because the win-rate was computed over *rows it managed to build*
+rather than over *rows it was asked to build*. A denominator taken from
+surviving data can never expose missing data. Worse, the failure was
+self-concealing in the flattering direction: dropping the six QV circuits
+(ratios 0.73–0.99, the weakest wins in the corpus) pulled the median from 0.678
+down to 0.518, so the truncation made the result look *better*. Any aggregate
+in this report must state its denominator and the expected denominator, and
+they must be compared.
