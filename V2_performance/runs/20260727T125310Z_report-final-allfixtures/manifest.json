@@ -1,0 +1,9 @@
+{
+  "run_id": "20260727T125310Z_report-final-allfixtures",
+  "label": "report-final-allfixtures",
+  "commit": "79d4463",
+  "branch": "mlir-v2",
+  "dirty": false,
+  "v2_specialize": true,
+  "n_circuits": 26
+}

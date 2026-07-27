@@ -1,0 +1,72 @@
+{
+ "circuit": "surface_d7_t15",
+ "v2": {
+  "kernel_name": "clifft_v2_spec",
+  "LDS_Block_Size": "13312",
+  "Scratch_Size": "288",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "96",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 11225332,
+  "total_kernel_ns": 11225332,
+  "domain_total_ns": 11225332,
+  "domain_calls": 1,
+  "hsa_total_ns": 23146147,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 189822842.0,
+   "SQ_BUSY_CYCLES": 740602166.0,
+   "SQ_INSTS_LDS": 121994619.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 756072883.0,
+   "SQ_INSTS_VALU": 1150317566.0,
+   "SQ_WAIT_INST_LDS": 55482127.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 22516258281.0,
+   "TCC_HIT_sum": 1714764981.0,
+   "TCC_MISS_sum": 40236800.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=97.7",
+   "wave_cycles/wave=562906"
+  ]
+ },
+ "svm": {
+  "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+  "LDS_Block_Size": "23040",
+  "Scratch_Size": "8",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 21997617,
+  "total_kernel_ns": 21997617,
+  "domain_total_ns": 22024257,
+  "domain_calls": 9,
+  "hsa_total_ns": 33466516,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 388066276.0,
+   "SQ_BUSY_CYCLES": 1526731550.0,
+   "SQ_INSTS_LDS": 107897543.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 5358640038.0,
+   "SQ_INSTS_VALU": 1911184025.0,
+   "SQ_WAIT_INST_LDS": 23145662.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 46644461863.0,
+   "TCC_HIT_sum": 14742717.0,
+   "TCC_MISS_sum": 135027.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=99.1",
+   "wave_cycles/wave=1166112"
+  ]
+ },
+ "v2_vs_svm_kernel_ratio": 0.51
+}

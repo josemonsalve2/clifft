@@ -1,0 +1,72 @@
+{
+ "circuit": "surface_d7_t10",
+ "v2": {
+  "kernel_name": "clifft_v2_spec",
+  "LDS_Block_Size": "13312",
+  "Scratch_Size": "288",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "80",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 11044197,
+  "total_kernel_ns": 11044197,
+  "domain_total_ns": 11044197,
+  "domain_calls": 1,
+  "hsa_total_ns": 23074796,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 183782772.0,
+   "SQ_BUSY_CYCLES": 718666304.0,
+   "SQ_INSTS_LDS": 112834639.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 726261899.0,
+   "SQ_INSTS_VALU": 1111555420.0,
+   "SQ_WAIT_INST_LDS": 50067632.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 21860757888.0,
+   "TCC_HIT_sum": 1695214701.0,
+   "TCC_MISS_sum": 39891265.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=97.7",
+   "wave_cycles/wave=546519"
+  ]
+ },
+ "svm": {
+  "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+  "LDS_Block_Size": "23040",
+  "Scratch_Size": "8",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 20673527,
+  "total_kernel_ns": 20673527,
+  "domain_total_ns": 20702926,
+  "domain_calls": 9,
+  "hsa_total_ns": 32170484,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 364556706.0,
+   "SQ_BUSY_CYCLES": 1434694960.0,
+   "SQ_INSTS_LDS": 94894923.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 4999960573.0,
+   "SQ_INSTS_VALU": 1824726627.0,
+   "SQ_WAIT_INST_LDS": 20510697.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 43805508377.0,
+   "TCC_HIT_sum": 14014259.0,
+   "TCC_MISS_sum": 134826.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=99.0",
+   "wave_cycles/wave=1095138"
+  ]
+ },
+ "v2_vs_svm_kernel_ratio": 0.534
+}

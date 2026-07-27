@@ -1,0 +1,72 @@
+{
+ "circuit": "circuit_d5_p0.001",
+ "v2": {
+  "kernel_name": "clifft_v2_spec",
+  "LDS_Block_Size": "13312",
+  "Scratch_Size": "336",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 8599770,
+  "total_kernel_ns": 8599770,
+  "domain_total_ns": 8599770,
+  "domain_calls": 1,
+  "hsa_total_ns": 20151905,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 116084677.0,
+   "SQ_BUSY_CYCLES": 434971403.0,
+   "SQ_INSTS_LDS": 79143318.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 376074607.0,
+   "SQ_INSTS_VALU": 624812055.0,
+   "SQ_WAIT_INST_LDS": 36712810.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 13228779029.0,
+   "TCC_HIT_sum": 993413209.0,
+   "TCC_MISS_sum": 87552417.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=91.9",
+   "wave_cycles/wave=330719"
+  ]
+ },
+ "svm": {
+  "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+  "LDS_Block_Size": "23040",
+  "Scratch_Size": "8",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 10158402,
+  "total_kernel_ns": 10158402,
+  "domain_total_ns": 10190361,
+  "domain_calls": 11,
+  "hsa_total_ns": 21717776,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 180265989.0,
+   "SQ_BUSY_CYCLES": 705339776.0,
+   "SQ_INSTS_LDS": 118245952.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 2404746573.0,
+   "SQ_INSTS_VALU": 977174958.0,
+   "SQ_WAIT_INST_LDS": 27497093.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 21489531433.0,
+   "TCC_HIT_sum": 3868636.0,
+   "TCC_MISS_sum": 79756.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=98.0",
+   "wave_cycles/wave=537238"
+  ]
+ },
+ "v2_vs_svm_kernel_ratio": 0.847
+}

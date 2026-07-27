@@ -1,0 +1,49 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 50709
+--------------------------------------------
+/scratch/jmonsalv is not exists. Please contact System Admin..
+RUN_DIR=/shared/jmonsalv/quantum/clifft_rl/clifft/V2_performance/runs/20260727T101820Z_postcachefix-headerkeyed
+=== frame_h (shots=20000) ===
+  v2 done
+  svm done
+=== four_t (shots=20000) ===
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081203 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081226 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081248 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081287 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081326 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081390 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081407 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081433 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081467 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3081504 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== circuit_d3_p0.001 (shots=20000) ===
+  v2 done
+  svm done
+=== surface_d7_t5 (shots=20000) ===
+  v2 done
+  svm done
+=== qv10 (shots=20000) ===
+  v2 done
+  svm done
+=== cultivation_d5 (shots=20000) ===
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084272 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084277 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084282 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084289 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084296 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084306 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084311 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084316 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084323 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50709/slurm_script: line 116: 3084332 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== circuit_d5_p0.0005 (shots=10000) ===
+  v2 done
+  svm done
+=== circuit_d5_p0.001 (shots=10000) ===
+[2026-07-27T10:20:10.316] error: *** JOB 50709 ON smci350-rck-g03-f13-21 CANCELLED AT 2026-07-27T10:20:10 DUE to SIGNAL Terminated ***

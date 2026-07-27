@@ -1,0 +1,7 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 50781
+--------------------------------------------
+RUN_DIR=/shared/jmonsalv/quantum/clifft_rl/clifft/V2_performance/runs/20260727T121817Z_report-final-v2
+[100%] Built target run_v2
+[2026-07-27T12:18:58.113] error: *** JOB 50781 ON smci350-rck-g03-d13-21 CANCELLED AT 2026-07-27T12:18:58 DUE to SIGNAL Terminated ***

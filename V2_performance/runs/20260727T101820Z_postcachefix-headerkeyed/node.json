@@ -1,0 +1,7 @@
+{
+  "slurm_job_id": 50709,
+  "node": "smci350-rck-g03-f13-21",
+  "partition": "mi350x-es",
+  "arch": "gfx950",
+  "note": "mi350x-es is heterogeneous. Do NOT compare ratios across nodes."
+}

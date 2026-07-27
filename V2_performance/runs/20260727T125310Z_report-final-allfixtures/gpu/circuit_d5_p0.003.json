@@ -1,0 +1,72 @@
+{
+ "circuit": "circuit_d5_p0.003",
+ "v2": {
+  "kernel_name": "clifft_v2_spec",
+  "LDS_Block_Size": "13312",
+  "Scratch_Size": "336",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 8808786,
+  "total_kernel_ns": 8808786,
+  "domain_total_ns": 8808786,
+  "domain_calls": 1,
+  "hsa_total_ns": 20747596,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 119082617.0,
+   "SQ_BUSY_CYCLES": 455795781.0,
+   "SQ_INSTS_LDS": 83328275.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 382809139.0,
+   "SQ_INSTS_VALU": 654860970.0,
+   "SQ_WAIT_INST_LDS": 38212628.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 13835915543.0,
+   "TCC_HIT_sum": 988404144.0,
+   "TCC_MISS_sum": 93586867.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=91.4",
+   "wave_cycles/wave=345898"
+  ]
+ },
+ "svm": {
+  "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::BlockCounts*)",
+  "LDS_Block_Size": "23040",
+  "Scratch_Size": "8",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "2560000",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 10516110,
+  "total_kernel_ns": 10516110,
+  "domain_total_ns": 10549069,
+  "domain_calls": 11,
+  "hsa_total_ns": 21953892,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 185906558.0,
+   "SQ_BUSY_CYCLES": 724968341.0,
+   "SQ_INSTS_LDS": 123640047.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 2410243969.0,
+   "SQ_INSTS_VALU": 1004746580.0,
+   "SQ_WAIT_INST_LDS": 29301058.0,
+   "SQ_WAVES": 40000.0,
+   "SQ_WAVE_CYCLES": 22106603262.0,
+   "TCC_HIT_sum": 4514502.0,
+   "TCC_MISS_sum": 109527.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=97.6",
+   "wave_cycles/wave=552665"
+  ]
+ },
+ "v2_vs_svm_kernel_ratio": 0.838
+}

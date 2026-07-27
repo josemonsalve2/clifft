@@ -1,0 +1,167 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 50785
+--------------------------------------------
+RUN_DIR=/shared/jmonsalv/quantum/clifft_rl/clifft/V2_performance/runs/20260727T122423Z_unlabeled
+[100%] Built target run_v2
+=== frame_h (shots=20000) ===
+  v2 done
+  svm done
+=== four_t (shots=20000) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 4190234 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4190340 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4190447 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4190599 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4190747 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 4191056 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4191184 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4191291 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4191433 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 4191575 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== circuit_d3_p0.001 (shots=20000) ===
+  v2 done
+  svm done
+=== surface_d7_t5 (shots=20000) ===
+  v2 done
+  svm done
+=== qv10 (shots=20000) ===
+  v2 done
+  svm done
+=== cultivation_d5 (shots=20000) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 28267 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 28368 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 28474 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 28630 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 28782 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 29092 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 29190 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 29295 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 29437 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 29578 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== circuit_d5_p0.0005 (shots=10000) ===
+  v2 done
+  svm done
+=== circuit_d5_p0.001 (shots=10000) ===
+  v2 done
+  svm done
+=== circuit_d5_p0.002 (shots=10000) ===
+  v2 done
+  svm done
+=== circuit_d5_p0.003 (shots=10000) ===
+  v2 done
+  svm done
+=== circuit_d5_p0.005 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d7_t10 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d11_t10 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d7_t15 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d9_t10 (shots=10000) ===
+  v2 done
+  svm done
+=== surface_d7_t19 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d9_t15 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d9_t19 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d11_t15 (shots=5000) ===
+  v2 done
+  svm done
+=== surface_d11_t19 (shots=5000) ===
+  v2 done
+  svm done
+=== qv20_seed42 (shots=2000) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 131281 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131286 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131291 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131298 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131306 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 131318 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131323 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131328 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131335 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131342 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== qv20_L8_seed42 (shots=2000) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 131359 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131364 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131369 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131376 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131383 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 131393 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131398 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 131538 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132367 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132922 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== qv21_L8_seed42 (shots=2000) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 132939 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132944 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132949 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132956 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132963 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 132974 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132979 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132984 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132991 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 132998 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== qv22_L6_seed42 (shots=1000) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 133015 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133020 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133025 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133032 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133040 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 133052 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133057 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133062 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133069 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133076 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== qv23_L5_seed42 (shots=1000) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 133093 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133098 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133103 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133110 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133117 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 133133 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133138 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133143 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133150 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133157 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+=== qv24_L4_seed42 (shots=500) ===
+/var/spool/slurmd/job50785/slurm_script: line 116: 133174 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133179 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133184 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133191 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133198 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  v2 done
+/var/spool/slurmd/job50785/slurm_script: line 116: 133208 Aborted                 timeout 300 rocprofv3 --kernel-trace --stats --output-format csv -d "$outdir/kt" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133213 Aborted                 timeout 300 rocprofv3 --hsa-core-trace --stats --output-format csv -d "$outdir/hsa" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133218 Aborted                 timeout 300 rocprofv3 --pmc $PMC_A --output-format csv -d "$outdir/pmcA" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133225 Aborted                 timeout 300 rocprofv3 --pmc $PMC_B --output-format csv -d "$outdir/pmcB" -- $cmd > /dev/null 2>&1
+/var/spool/slurmd/job50785/slurm_script: line 116: 133232 Aborted                 timeout 300 rocprofv3 --pmc $PMC_C --output-format csv -d "$outdir/pmcC" -- $cmd > /dev/null 2>&1
+  svm done
+wrote 26 circuits to /shared/jmonsalv/quantum/clifft_rl/clifft/V2_performance/runs/20260727T122423Z_unlabeled
+mean 0.539  median 0.518  wins 18/18
+DONE /shared/jmonsalv/quantum/clifft_rl/clifft/V2_performance/runs/20260727T122423Z_unlabeled
