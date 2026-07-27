@@ -1017,3 +1017,40 @@ Side effect: the audit surfaced seven `rank 11-19` comments left behind by
 `b266f80`'s cap raise, across `README.md`, `hip_sampler.hip`, `kernel_codegen.h`,
 `kernel_cache.h`, `coop_interpreter.c`, `v2_kernel.cc` and `v2_specializer.cc`.
 Fixed in `2cf495d` (comment-only).
+
+### 13.6 Audit-pass-8 (2026-07-27) — report §6 (V2: the architecture)
+
+**Four corrections, all citation/count defects; no wrong measurements.** §6 is
+the chapter with the most *source* citations rather than the most numbers, and
+that is where its defects are.
+
+| check | result |
+|---|---|
+| `V2.md:104-132` three-loop rules, incl. "256–512 groups at rank 10" | verbatim, all four rules |
+| 41 opcodes total, 35 handled by the specializer switch | exact |
+| the 6 unhandled are the five `*_FORCED` variants + `OP_EXP_VAL` | exact — enumerated by diffing the enum against the switch |
+| `v2_specializer.cc` citations :26-97, :92-93, :127, :166-170, :172-225, :42-56, :35-36 | all land correctly |
+| `v2_ops.h:115-139` for the tier-macro block | **stale — the block is at `128-152`**; 115–121 is the tail of `V2State`. Quote verbatim. Corrected. |
+| `reg_circuit_d3.c`: 383 lines, 344 `v2_op_*` calls in 16–360 | exact, and 344 is also the whole-file count |
+| every `ir_density.csv` row, incl. V1's 55–2,407 and Hybrid's 15–56 | exact, all 7 rows |
+| "all three forward an identical **20**-argument list" | **wrong on both readings** — `spec_body` takes 21 parameters and the `fwd` string carries 16. Rewritten to state both precisely. |
+| the five-step compile pipeline, incl. the full oclc control set | verbatim from `v2_compile_cache.cc:151-176` |
+| the `Do NOT add vectorize/unroll/fast-math` instruction | verbatim at :155-156 |
+| cache key `csrc|clang|arch|bitcode_dir|device_header_ident` at :125-127 | verbatim |
+| the three hashed device headers | exact — `v2_ops.h`, `v2_ops_body.inc`, `device_abi.h` |
+| Hybrid's `-O2 -ffast-math` at `kernel_cache.cc:115` | exact |
+| gate code at `v2_kernel.cc:370-398`, three-level caching, shape key at :366-367, fallback at :399-403, `V2_SPECIALIZE` at :358 | all exact |
+| stale cache: 36 verdicts, 2 failures, both `coop_r10_n1720` | exact |
+| current cache: "6 of 6 pass" | **grown to 16 of 16** as the §15 run repopulates it. Updated, and the new shape-pairs explained as `device_header_ident` working. |
+| §6.4's "§15 documents the benchmark run that destroyed." | truncated sentence and wrong cross-ref; it is §11.1. Fixed. |
+| resident-pool table, all 16 ranks 11–26 | exact, incl. the 0.02–6.00 MiB span and the rank-20 knee |
+| "the five measurable rows reproduce in `Grid_Size_X ÷ 256`" | exact on all five: 2048/2048/1360/680/336/168 vs observed |
+| `GpuComplex` = 8 B at `gpu_types.h:38-41`; `kNumXCDs = 8` | exact |
+
+**Eighth method note: a line citation is a claim with a short half-life.** Both
+citation defects here (`v2_ops.h:115-139`, and §7's `v2_ops.h:222-223` last
+pass) point into the *same file*, which has been edited repeatedly during this
+work — and in both cases the quoted text was correct while the line numbers had
+drifted. Quotes survive refactoring; line numbers do not. Where a citation must
+be precise, cite a symbol name as well as a span, so a reader who lands in the
+wrong place can still find the right one.
