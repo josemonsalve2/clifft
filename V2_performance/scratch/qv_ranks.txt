@@ -1,0 +1,5 @@
+tests/fixtures/large/qv20_L8_seed42.stim  peak_rank=20  qubits=20  instrs=387  meas=20  obs=0
+tests/fixtures/large/qv21_L8_seed42.stim  peak_rank=21  qubits=21  instrs=393  meas=21  obs=0
+tests/fixtures/large/qv22_L6_seed42.stim  peak_rank=22  qubits=22  instrs=359  meas=22  obs=0
+tests/fixtures/large/qv23_L5_seed42.stim  peak_rank=23  qubits=23  instrs=335  meas=23  obs=0
+tests/fixtures/large/qv24_L4_seed42.stim  peak_rank=24  qubits=24  instrs=320  meas=24  obs=0
