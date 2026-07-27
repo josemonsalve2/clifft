@@ -1185,3 +1185,54 @@ most to say, because the mechanism that produces it is the mechanism the
 chapter spends §5 explaining. Where a range excludes a row, either state the
 exclusion criterion or widen the range — and before doing either, ask whether
 the outlier is the finding.
+
+---
+
+## §13.9 — Audit pass 11: report §2 (`p2_svm.md`, "The SVM: what is actually being simulated")
+
+Eleventh chapter audit. 216 lines, 18 checks. One correction (citation drift).
+This is the cleanest chapter audited so far.
+
+| # | claim | citation | verdict |
+|---|---|---|---|
+| 1 | factored state `\|psi> = gamma·U_C·P·(\|phi>_A ⊗ \|0>_D)` | `svm.h:92-103` | VERBATIM |
+| 2 | localized instruction set, no basis spans | `backend.h:21-23` | VERBATIM |
+| 3 | **41 opcodes** + `NUM_OPCODES` sentinel | `backend.h:25-86` | EXACT (41 counted; sentinel at :85) |
+| 4 | Frame family = 6 | — | EXACT |
+| 5 | Array family = 13 | — | EXACT |
+| 6 | Expansion family = 4 | — | EXACT |
+| 7 | Measurement family = 5 | — | EXACT |
+| 8 | Forced variants = 5 | — | EXACT |
+| 9 | Classical/noise = 8 | — | EXACT |
+| 10 | 6+13+4+5+5+8 = 41 | — | EXACT, partitions the real list with no leftovers |
+| 11 | instruction is 32 B, static_assert'd | `backend.h:163` | VERBATIM |
+| 12 | two per 64-byte cache line | `backend.h:92` | VERBATIM |
+| 13 | seven payload variants A–G + `raw[24]` | `backend.h:138-160` | EXACT, offsets as documented |
+| 14 | computed-goto dispatch table, sized 256 | `svm_kernels.inl:2191-2196` | VERBATIM |
+| 15 | `random_double` conversion + CRITICAL comment | `svm.h:148-150` | VERBATIM |
+| 16 | V2 RNG transliteration | `v2_ops.h:143-164` | **WRONG → 155-177** (code verbatim) |
+| 17 | xoshiro256++ / SplitMix64, Blackman–Vigna | `svm.h:21-34` | VERBATIM |
+| 18 | `SQ_INSTS_MFMA` = 0.0 in 51 of 52 cells; 52nd unmeasured | `20260726T182433Z` | **EXACT — re-derived independently** |
+
+### The MFMA claim re-derived
+
+The chapter's most load-bearing quantitative claim in §2 is that the matrix
+cores are untouched. Re-parsed all `gpu/*.json` in the post-dust run: **51 cells
+carry `SQ_INSTS_MFMA` and all 51 are exactly 0.0**; the 52nd (`qv24_L4_seed42`,
+SVM side) has an empty counter block. The chapter's phrasing already
+distinguishes "unmeasured" from "nonzero" for that cell, which is the correct
+and non-obvious call — an author rounding to "MFMA is 0 everywhere" would have
+been making a claim about a cell with no data behind it.
+
+### Eleventh method note: correct hedging is invisible, and worth naming when found.
+
+Ten passes have catalogued numbers that were wrong and caveats that went stale.
+This one found the opposite: a claim whose author had already noticed that one
+of 52 cells was empty, and wrote "*unmeasured* rather than nonzero" instead of
+sweeping it into the majority. Verifying it cost the same as verifying a wrong
+claim would have, and produced no edit — which is the point. An audit that only
+records defects gives a false picture of a document's reliability, and offers no
+model of what a well-made claim looks like. The 41-opcode partition is the same
+shape: it does not merely assert a total, it asserts six family counts that sum
+to it, so the arithmetic is checkable and every family is falsifiable
+separately. That is how to write a number that can be audited.
