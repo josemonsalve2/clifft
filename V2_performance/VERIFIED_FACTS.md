@@ -20,6 +20,16 @@ Ground rules used when auditing:
 
 ## 0. INVALIDATION NOTICE — the 20260726T182433Z baseline dispatched stale kernels
 
+> **Resolved (2026-07-27, audit pass 17).** The re-measurement named at the
+> bottom of this section was itself superseded twice: job 50505 →
+> job 50785 (silently ran 18 of 26, see §14.0) → **job 50793**, which is the
+> canonical corpus. **§14.1 is the authoritative version of §1–§3 and §6.**
+> Everything below in this section is retained because the invalidation
+> *argument* is what the report's §11.4 pitfall is built on — but no number
+> in §1, §2, §3 or §6 should be quoted without checking §14.1 first.
+> Note also that job 50469 ran on `f13-21` and job 50793 on `d13-21`;
+> absolute microseconds are not comparable across the two, ratios are.
+
 > **Everything in §1–§3, §6 and §10 that comes from
 > `runs/20260726T182433Z_report-final-postdust/` is under re-measurement.**
 > Read this section before quoting any number below it.
@@ -57,8 +67,13 @@ Ground rules used when auditing:
 
 ## 1. The measurement baseline
 
-> ⚠️ **Invalid — see §0.** Superseded by job 50505. Retained verbatim because
-> the invalidation argument in §0 refers to it.
+> ⚠️ **Invalid — see §0.** Superseded by **job 50793** (`20260727T125310Z_report-final-allfixtures`,
+> node `smci350-rck-g03-d13-21`, commit `79d4463` clean, 26/26 circuits, zero
+> `rocprofv3` aborts) — recorded in full in **§14.1**. The intermediate
+> re-measurements (50505, 50785) are also superseded; 50785 silently ran 18 of
+> 26 (§14.0). Retained verbatim because the invalidation argument in §0 refers
+> to it, and because the preemption caveat below is the reason `qv24_L4/svm`
+> counters are absent from *this* run and present in 50793.
 
 | | |
 |---|---|
@@ -86,6 +101,12 @@ appear as `-` in every counter table.
 ---
 
 ## 2. Headline result — V2/SVM kernel-time ratio (lower = V2 faster)
+
+> ⚠️ **Superseded by §14.1 (job 50793).** Every ratio below was measured on a
+> stale-cache binary (§0) and on a different node. In the canonical run V2
+> wins **26 of 26**; the six `circuit_d5`/`cultivation_d5` losses at ~1.44
+> below become wins at **0.786–0.856** once the fence fix is actually in the
+> dispatched kernel. Retained because §6's argument is built on these rows.
 
 Source: `runs/20260726T182433Z_report-final-postdust/summary.md`.
 
@@ -140,6 +161,39 @@ that MFMA is applicable here is unsupported by this corpus.
 ---
 
 ## 3. Where the time actually goes — hardware counters
+
+> ⚠️ **Superseded by job 50793.** The canonical values for the same rows are
+> below; the original table is kept underneath because §3's *argument* (SALU
+> collapses where V2 wins; SALU inverts on `circuit_d5`) is quoted elsewhere.
+> The argument survives on the left half and **dies on the right**: with the
+> fence fix, `circuit_d5` no longer inverts — its SALU ratio is 0.16, in the
+> middle of the winning band, because it now runs the specializer.
+>
+> Source: `runs/20260727T125310Z_report-final-allfixtures/summary.json`,
+> job 50793, node `d13-21`, commit `79d4463`. Recomputed cell by cell.
+>
+> | circuit | ratio | VALU V2/SVM | SALU V2/SVM | L2 hit V2 | L2 hit SVM |
+> |---|---|---|---|---|---|
+> | frame_h | 0.742 | 0.43 | 0.22 | 52.2% | 66.8% |
+> | four_t | 0.587 | 0.43 | **0.11** | 52.3% | 74.4% |
+> | qv10 | 0.319 | 0.44 | 0.20 | 99.6% | 99.8% |
+> | surface_d11_t15 | 0.258 | 0.48 | 0.14 | 98.7% | 98.3% |
+> | surface_d9_t19 | 0.264 | 0.48 | 0.14 | 97.4% | 90.0% |
+> | surface_d7_t5 | 0.608 | 0.74 | 0.17 | 99.2% | 98.9% |
+> | circuit_d3_p0.001 | 0.509 | 0.82 | 0.15 | 95.3% | 98.1% |
+> | qv20_seed42 | 0.850 | 0.82 | 0.34 | 69.9% | 69.9% |
+> | qv23_L5_seed42 | 0.990 | 0.86 | **0.36** | 68.0% | 68.1% |
+> | circuit_d5_p0.001 | **0.847** | **0.64** | **0.16** | 91.9% | 98.0% |
+> | cultivation_d5 | **0.786** | **0.66** | **0.16** | 90.9% | 98.9% |
+>
+> Two things changed and one did not. **Changed:** the `circuit_d5` family's
+> VALU ratio fell 2.29 → 0.64 and its SALU ratio 1.62 → 0.16, because the row
+> now measures `clifft_v2_spec` instead of `clifft_v2_coop`. **Changed:**
+> `frame_h`'s ratio moved 0.626 → 0.742 — a 10 µs kernel on a different node,
+> at the resolution floor. **Unchanged:** the SALU collapse on every winner,
+> 0.110–0.361 across all 26, and the L2 deficit on the `circuit_d5` family
+> (91–92 % V2 vs 98–99 % SVM), which *persists* even now that V2 wins the row.
+> The cache story and the dispatch story are independent.
 
 Source: `summary.json`, counters `SQ_INSTS_VALU`, `SQ_INSTS_SALU`,
 `SQ_INSTS_LDS`, `SQ_WAVES`, `TCC_HIT_sum`, `TCC_MISS_sum`.
@@ -316,6 +370,23 @@ Rendered stage pairs, all in `lowering/diffs/` as `.diff` (hunk-scoped) and
 ---
 
 ## 6. The `circuit_d5` regression — what actually ran
+
+> ⚠️ **Outcome reversed by job 50793; the diagnosis stands.** §6 correctly
+> established *what ran* (the interpreter, because the gate rejected the
+> specialization) and *why the gate rejected it* was later traced to the
+> execution-only `s_barrier` (§7). On the canonical corpus, with `150d09f`
+> actually in the dispatched binary, **all six circuits run `clifft_v2_spec`
+> and all six are wins at 0.786–0.856** (§14.1). The `.gate` verdict for
+> `coop_r10_n1720` is now `1`.
+>
+> So: §6.1 and §6.2 are correct history. §6.3's headline — "the 1.44× is V2's
+> interpreter vs SVM's interpreter" — is correct, and is now the *only* way
+> that number may be quoted. §6.4's Amdahl bound on noise density is real but
+> was never the binding constraint: the family gains 1.65–1.76× from
+> specialization (job 50389) despite 19.1 % noise ops. §6.6's closing line —
+> "the specializer is still incorrect on this shape" — is **retracted**; it was
+> a barrier bug, not a specializer bug, and open items (1) and (2) are answered
+> by §7 and by report §11.3.
 
 > **Correction (audit pass 2).** An earlier draft of this section attributed the
 > 1.44-1.46x loss to `noinline` noise ops inside the *specialized* kernel. That
@@ -620,11 +691,11 @@ notes via `llvm-readelf --notes` on every distinct `.hsaco`.
 - **Global tier is where it hurts.** The three worst kernels in the entire
   corpus are `global_r22`/`r23`/`r24`: `sgpr_spill` 762 / 662 / 594,
   `vgpr_spill` 136 / 199 / 152. These are exactly `qv22`/`qv23`/`qv24`, whose
-  ratios are 0.981 / 0.990 / 0.880 — the three circuits where V2's win
+  ratios are 0.980 / 0.990 / 0.882 (job 50793) — the three circuits where V2's win
   vanishes. The correlation between heavy spilling and lost speedup is the
   cleanest scaling-limit story in the corpus and should be a figure.
 - **Register tier's worst is `reg_r4_n344`**: `vgpr_spill 88`, `scratch 1024`.
-  That is `circuit_d3_p0.001` — which still wins at 0.525, so spilling alone is
+  That is `circuit_d3_p0.001` — which still wins at 0.509 (job 50793), so spilling alone is
   not disqualifying at this size.
 
 ### 10a. Spill mechanism — what the data RULES OUT (2026-07-27)
@@ -1824,3 +1895,123 @@ the wrong circuits from memory of the argument rather than from the sorted list
 — and it pointed, once sorted, at a *different* real finding (§14.7 and §14.8
 are the same six circuits seen through two counters). Sorting the residual cost
 one line of Python and changed which section of the chapter it belonged to.
+
+## §13.15 — audit pass 17: report §10–§13, 34 checks
+
+Covers the four chapters written before the ledger discipline was established
+that had not yet been re-derived: §10 (extending past rank 19), §11 (pitfalls),
+§12 (the gap), §13 (HSA vs HIP). Every quantitative claim was recomputed from
+the artifact — `.hsaco` metadata, `llvm-objdump` output, the raw job logs, the
+committed tools — rather than read out of prose or a commit message.
+
+### The chapter that was actually wrong: §13.4a
+
+The report's HSA chapter carried a table of "V2 kernel time vs the 4,671 ns
+dispatch saving," sourced from the two `f13-21` runs. Two of its rows were
+**interpreter** times:
+
+| circuit | table said | canonical run (50793) | ratio |
+|---|---|---|---|
+| `circuit_d5_p0.001` | 14.76 ms | **8.600 ms** | 1.72× |
+| `cultivation_d5` | 30.15 ms | **16.42 ms** | 1.84× |
+
+Both circuits compile to `coop_r10_n1720`, whose `.gate` verdict in those runs
+was the stale pre-fence **failure** (§11.4 of the report / §0 here) — so V2 fell
+back to the interpreter for exactly that shape, and the table was quoting the
+interpreter under a heading about the specialized kernel. The derived
+percentages barely moved (0.032 % → 0.054 %) so no conclusion changed, but the
+absolute times described a different kernel than the surrounding text.
+
+The same table's `n_dispatches = 1` assumption was upgraded from an assertion to
+a measurement: all 26 circuits in job 50793 report exactly 1.
+
+### The gap that was found, not corrected: a fifth pitfall
+
+`72aee12` fixes `ClifftAmdgcn.cmake`, whose `add_custom_command` listed
+`DEPENDS "${_src}"` — the `.c` file only, with no header scanning. Since
+`coop_interpreter.c` is ~150 lines wrapping the whole op library, the headers
+*are* the kernel, and an incremental build kept linking the previous one. This
+is the **same failure mode** as the specializer cache-key bug in §11.4 of the
+report: *the identity of a compiled artifact omitted the headers that define
+it*. It was not in the report at all. Now §11.5.
+
+The timestamps are the finding. Barrier fix `150d09f` at 07-26 06:33; CMake fix
+`72aee12` at 07-26 **06:36**; specializer cache fix `009df59` at 07-26 **22:14**.
+Three minutes versus sixteen hours, for the same class of bug, on the same day.
+The build-system instance broke a verification that was being actively watched
+and was caught immediately; the runtime instance returned plausible numbers and
+contaminated a full benchmark sweep.
+
+### Re-derived and confirmed unchanged
+
+| # | claim | verdict |
+|---|---|---|
+| 1 | census: 353 fixtures, 22 at rank ≥ 5 | ✓ `all_ranks.txt` line count and sort |
+| 2 | full rank distribution (82/244/3/2/3/8/2/1/1/1/2/1/1/1/1) | ✓ exact, all 15 rows |
+| 3 | nothing compiles to rank 2, 5, 6, 8, 9, 15–19 | ✓ absent from the sorted uniq |
+| 4 | coop tier is exactly 11 fixtures: 3 at rank 7, 8 at rank 10 | ✓ listed |
+| 5 | `sweep` (188) + `rank_sweep` (56) all squeeze to 0–1 | ✓ 24 at rank 0, 220 at rank 1 |
+| 6 | `rank19_q100_d10_wide` compiles to peak_rank 1 | ✓ |
+| 7 | `rank_q17_r12_d1.stim` compiles to rank 1 | ✓ |
+| 8 | all 15 `global_*` rows in `kernel_resources.csv` | ✓ every cell |
+| 9 | the 3 spillers are the 3 shortest kernels in the tier | ✓ 359/335/320 vs 4,296–16,521 |
+| 10 | rank 20–21 is the only sub-cap region (104–106 VGPR) | ✓ |
+| 11 | top 3 SGPR spillers and top 3 VGPR spillers in the 89-kernel corpus | ✓ same three kernels, both metrics |
+| 12 | rank-21 vs rank-22 emitted C is structurally identical | ✓ **zero** unique lines after normalizing numeric literals |
+| 13 | opcode mix 169/80/42 vs 142/66/44 | ✓ grep counts |
+| 14 | `amp_capacity` 2097152 vs 4194304 the only difference | ✓ `:428` / `:394` |
+| 15 | tier wrapper is rank-independent | ✓ `v2_specializer.cc:196-224` |
+| 16 | HBM budget block quoted verbatim | ✓ `v2_kernel.cc:432-446` |
+| 17 | `kGlobalMaxPeakRank = 26`, `kNumXCDs = 8`, cap ≤ 30 | ✓ `gpu_types.h:17,29` + comment |
+| 18 | `b266f80` touches exactly 4 files; `emit_global_kernel.cc` OOB | ✓ commit body |
+| 19 | gate pool/shot tapering (512 cap, 1000/250 shots) | ✓ `6960527` diff |
+| 20 | pre/post-fence binaries: identical spill/sgpr/scratch | ✓ msgpack `.note` parsed from both `.hsaco` |
+| 21 | pre/post-fence binary sizes +1152/+1088/+1024 | ✓ |
+| 22 | interpreter A/B: 5,629 → 5,848 instructions, +3.89 % | ✓ rebuilt from source, barrier body only |
+| 23 | interpreter barriers 80, in-flight 50 → 0 | ✓ |
+| 24 | register tier unaffected by the fence | ✓ **identical by md5**, 4,457 instructions |
+| 25 | specialized 1,509 barriers, 1,400 in-flight pre-fix, 0 post | ✓ under 5 window definitions (24/32/48/64/unbounded) |
+| 26 | the 95.4 % figure does not reproduce | ✓ 1,400 under every definition; 1,509 and 1,460 are the degenerate ones |
+| 27 | fence perf table, 6 circuits, 1.65–1.76× | ✓ medians recomputed from job 50389 |
+| 28 | selftest: interp 0/6, spec 4/6 diverge | ✓ job 50361 verbatim |
+| 29 | noise-inline A/B makes it worse: 5/6, seed 99 off-by-3 | ✓ same log |
+| 30 | stale cache: 36 kernels, 32 on 07-25, 4 on 07-26 ≤ 01:48 | ✓ mtimes |
+| 31 | dust A/B shot-0 outcomes, both arms, both circuits | ✓ job 50444 |
+| 32 | Q1 36/36 exact, zero mismatches | ✓ job 50453 |
+| 33 | every Q2 z-score and rel_gap | ✓ all 8 rows |
+| 34 | all six dispatch modes, spreads, and derived ratios | ✓ job 50507 CSVs: 1.738×, 4.74×, 31.3×, 2.727×, 1.108× |
+
+### Corrected
+
+| # | claim | correction |
+|---|---|---|
+| A | §10.6 timings sourced from job 50469 (`f13-21`) | **repointed to job 50793** (`d13-21`), the run §14/§15 use. The report was quoting two different nodes for the same circuits on a heterogeneous partition. 50469 demoted to corroboration, agreeing within 1.3 % |
+| B | pre/post-fence diff 83.9 / 83.0 / 82.9 % | **83.8 / 82.9 / 82.8 %** — recomputed with `cmp -l` |
+| C | butterfly dust model "~36× lower, median 3.2e-16, tail ~5e-15" | **~48× lower, median 2.9e-16, tail 2.7e-15**; rank-1 median is exactly **0** |
+| D | §9/§14/§15 LDS: 13,312 with 248 B "reclaimed by later changes" | 13,312 is 13,064 **rounded up to a 256-byte reporting granule**; global tier confirms independently (784 → 1,024) |
+| E | MFMA = 0 on "51 of 52 cells, 52nd unmeasured" | job 50793 has **all 52**, none missing |
+| F | two §11.1 cross-references in `p5_v2_arch.md` | both meant §11.4 (the cache bug), not §11.1 (the noise regression) |
+| G | this ledger's own §0–§3, §6 and §10 still quoted job 50469 | banners added pointing at **§14.1 / job 50793**; §3 carries the recomputed counter table inline; §6's "the specializer is still incorrect on this shape" **retracted**; §10's three ratios corrected to 0.980/0.990/0.882 and 0.509 |
+
+### Seventeenth method note
+
+*A stale number and a stale conclusion fail differently, and the number is
+harder to catch.* §13.4a's conclusion — "dispatch overhead is negligible for
+V2's production workloads" — was correct, is still correct, and survives the
+correction unchanged. That is exactly why the wrong numbers sat in it: nothing
+downstream depended on them closely enough to break. The only way they surfaced
+was recomputing every cell against the canonical run, including the cells in
+chapters whose *argument* was never in doubt.
+
+The corollary for §13.14's finding that all four earlier errors flattered the
+result: this pass's errors did not. B, C and E are all small and two of them
+make the story slightly *worse* (a lower dust floor is a larger margin, but a
+smaller headline number). D and F are bookkeeping. A is the only one with teeth,
+and it was a provenance error rather than a numerical one — the numbers were
+real measurements of real kernels, just from the wrong machine.
+
+G is the ledger auditing itself. §0 was written *as* an invalidation notice and
+then went stale in exactly the way it warns about: it named job 50505 as the
+re-measurement, 50505 was superseded by 50785, 50785 silently ran 18 of 26, and
+50793 is the actual answer — but §0 still pointed at the first link in that
+chain. A document whose job is to record supersession has to record its own.
