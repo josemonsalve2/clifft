@@ -840,3 +840,36 @@ figure appeared in the commit message, in the script header comment, and in the
 report, which reads like corroboration but is a single unreproducible source
 copied forward. The counting code that produced it was never committed. Prefer
 committing the *measurement script* over the *measured number*.
+
+### 13.2 Audit-pass-4 (2026-07-27) — report §12 (the f32/f64 gap)
+
+Everything in §12 reproduces except one under-specified table. Confirmed
+exactly: the `CV2Complex` typedef (`device_abi.h:35`), the `sample_branch`
+excerpt (`v2_ops.h`), `V2_DUST_EPS 1e-11` vs `kDustEpsilon = 1e-18`
+(`svm_internal.h:46`), §12.3's A/B arms (`dust_50444.log`, node `f13-21`),
+§12.4 Q1 at 36/36 exact over 12 seeds × 3 circuits, and the whole §12.4 Q2
+convergence table (`verify_50453.log:47-59`).
+
+| claim | source | correction | evidence |
+|---|---|---|---|
+| dust floor is 9.7e-15 / 1.42e-14 median, 1.2e-13 low-rank tail | `V2_DUST_EPS` comment prose, report §12.2 | **numbers stand**, but they are a *statistical envelope*, not the kernel's arithmetic; direct butterfly simulation puts the floor **~36× lower** (3.2e-16 median, ~5e-15 tail) | `tools/dust_floor.py`, both models |
+
+The four rows reproduce to the digit under `--model residual` (9.730e-15 /
+1.222e-13, 1.315e-14 / 5.048e-14, 1.422e-14 / 1.586e-14, 1.422e-14 / 1.476e-14),
+which is what makes the provenance recoverable at all: "residual model" turned
+out to be literal. It assumes each analytically-zero output carries a relative
+error at full `eps` and that the errors never cancel, giving `eps²` times a
+weighted mean of `Exp(1)`. `--model butterfly` instead simulates
+`fl(fl(u·a) + fl(v·b))` over fp32 amplitudes that cancel exactly in fp64.
+
+**Fourth method note: an estimator is part of the measurement.** This table had
+the same defect as the 95.4 % figure — prose, no committed generator — but here
+the numbers were *right*; what was missing was the model that produced them. A
+value like "1.42e-14" carries no indication of whether it is an upper envelope
+or a simulation, and the two differ by 1.5 decades. The decision is unaffected
+(both models agree on rank-independence, on the tail being widest at *low* rank,
+and on depth-insensitivity — `--depth 256` moves medians <5 % — so `1e-11`
+clears the conservative floor by 2 decades and the simulated one by ~4), but
+"the margin is 2 decades" and "the margin is 4 decades" are different claims.
+**State the estimator alongside the number, or commit the script that encodes
+it.**

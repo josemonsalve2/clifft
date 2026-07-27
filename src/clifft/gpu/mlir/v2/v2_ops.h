@@ -77,19 +77,32 @@ enum { FLAG_SIGN = 1u << 0, FLAG_IDENTITY = 1u << 2, FLAG_EXPECTED_ONE = 1u << 3
 // Sizing. A branch probability is a sum of `half = 1 << (active_k - 1)` squared
 // fp32 magnitudes. The rounding error is RELATIVE to each amplitude, so the
 // dust floor does not grow with the term count -- summing more terms averages
-// the residuals rather than accumulating them. Measured (residual model,
-// p1/total over 2000 trials per rank):
+// the residuals rather than accumulating them. Measured by
+// V2_performance/tools/dust_floor.py (p1/total over 2000 trials per rank):
 //
 //     rank  1 -> 9.7e-15 median, 1.2e-13 max      rank 12 -> 1.42e-14, 1.6e-14
 //     rank  4 -> 1.3e-14 median, 5.8e-14 max      rank 26 -> 1.42e-14, 1.5e-14
 //
 // It concentrates on fp32_eps^2 = 1.42e-14 and the spread TIGHTENS with rank;
 // the low-rank tail is the widest at ~1.2e-13. So one constant covers the whole
-// 1..26 range. 1e-11 sits ~2 decades above that tail and ~5 decades below the
-// smallest probability fp32 can carry meaningfully, leaving a wide margin on
-// both sides. Genuine small probabilities (the SVM comment cites R_ZZ angles
-// producing ~1e-16) are not representable in fp32 storage in the first place,
-// so nothing real is lost to the clamp.
+// 1..26 range.
+//
+// Those rows come from the tool's default --model residual, a STATISTICAL model
+// that assumes every term rounds at full eps and that the errors never cancel:
+// resid_i = a_i * eps * z_i, so p1/total = eps^2 * a weighted mean of Exp(1).
+// It is an upper envelope. Directly simulating the butterfly the kernel
+// actually performs (--model butterfly) puts the true floor ~36x lower, near
+// 3e-16 with a ~5e-15 low-rank tail. Both agree on everything this constant
+// rests on -- rank-independence, the tail being widest at LOW rank, and
+// insensitivity to circuit depth (<5% across 256 gates) -- and differ only in
+// absolute location, so 1e-11 is sized against the conservative one and clears
+// the simulated one by ~4 decades.
+//
+// So 1e-11 sits ~2 decades above that tail and ~5 decades below the smallest
+// probability fp32 can carry meaningfully, leaving a wide margin on both sides.
+// Genuine small probabilities (the SVM comment cites R_ZZ angles producing
+// ~1e-16) are not representable in fp32 storage in the first place, so nothing
+// real is lost to the clamp.
 #define V2_DUST_EPS    1e-11
 
 // ----- per-shot classical state ----------------------------------------------
