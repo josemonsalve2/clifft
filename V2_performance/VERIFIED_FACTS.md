@@ -1054,3 +1054,75 @@ work — and in both cases the quoted text was correct while the line numbers ha
 drifted. Quotes survive refactoring; line numbers do not. Where a citation must
 be precise, cite a symbol name as well as a span, so a reader who lands in the
 wrong place can still find the right one.
+
+---
+
+## §13.7 — Audit pass 9: report §5 (`p4_v1.md`, "V1: the MLIR backend and its failure")
+
+Ninth chapter audit. 451 lines, 26 checks. Three corrections, one of them a
+cross-fixture confusion that had propagated into a derived estimate.
+
+| # | claim | citation | verdict |
+|---|---|---|---|
+| 1 | `mlir_emit.cc` ~3,425 lines | — | EXACT (3,427) |
+| 2 | emit-time host `for` loop | `mlir_emit.cc:2377` | VERBATIM |
+| 3 | dialect census, 10 cells | — | EXACT (`llvm.func` 6/7, rest 0/0) |
+| 4 | op census 240/192/73/68 | — | EXACT |
+| 5 | emitted `frame_h` 947 lines | — | EXACT |
+| 6 | three stock passes, zero custom | `mlir_codegen.cc:65-67,172,239` | EXACT |
+| 7 | no-op pass diff = 2 banner lines | `v1_passes/` | EXACT (608→608) |
+| 8 | 947→736→608, const 240→59 | `v1_passes/` | EXACT |
+| 9 | four `d11err` lines | `d11err_49530.log:19-22` | VERBATIM |
+| 10 | IR-size row line number | `d11err_49530.log:20` | **WRONG → :19** |
+| 11 | seven `fullsweep` rows, 5 NOCOMPILE | `fullsweep_49529.log` | VERBATIM |
+| 12 | "22 circuits pass" | `fullsweep_49529.log` | **WRONG → 18** |
+| 13 | nine `perf2` rows | `perf2_49532.log` | EXACT |
+| 14 | perf table = 10,000-shot run | — | **UNSUPPORTED → removed** |
+| 15 | 7 OOM kills, `--shots 10` abort | `perf2_49532.log` | VERBATIM |
+| 16 | tier ceilings 4,192/608/115,224 | `gt19_49517.log:8-11` | EXACT |
+| 17 | `private=115224` is *global*, not register | `gt19_49517.log:11` | CONFIRMED (chapter's mis-attribution finding is itself correct) |
+| 18 | six scratch/VGPR/occupancy cells | `matrix.csv` | EXACT (all 7 v1 rows) |
+| 19 | `glob_surface_d7_t19` compile 221.48 s | `matrix.csv` | EXACT |
+| 20 | size-adaptive fallback thresholds | `mlir_kernel_cache.cc:105-131` | VERBATIM + logic matches summary |
+| 21 | "40MB+ IR from U2/U4 inlining" | `mlir_kernel_cache.cc:88-92` | VERBATIM |
+| 22 | alignment-8 excluded from register tier | `mlir_emit.cc:216-218` | VERBATIM |
+| 23 | `reg_r3_n16432` row, zero spills | `kernel_resources.csv:36` | EXACT (appears twice, :36 and :89) |
+| 24 | 19.9 MB IR from that circuit | `d11err_49530.log:19` | EXACT (19,856,511 B) |
+| 25 | five-file duplication table | — | ALL FIVE EXIST, all carry `MULTI_CNOT` |
+| 26 | `MULTI_CNOT` post-mortem | `mlir_array_ops.inc:428-435` | VERBATIM |
+| 27 | `qv20_seed42` = 387 instrs | — | **WRONG FIXTURE → 418** |
+| 28 | `qv10` 2,407 lines/instr | `matrix.csv` | EXACT (336,988 ÷ 140) |
+| 29 | surface "~56 lines/instr" | `matrix.csv` | EXACT (239,803 ÷ 4,296 = 55.8) |
+
+### The qv20 correction
+
+The chapter's IR-bloat table attributed **387 instructions** to `qv20_seed42`.
+That number is real, but it belongs to a *different file*:
+`tests/fixtures/large/qv20_L8_seed42.stim` (`scratch/qv_ranks.txt:1`). The
+circuit that actually failed NOCOMPILE in `fullsweep_49529.log:33` is
+`tools/bench/fixtures/qv20_seed42.stim` — the only `.stim` in that directory —
+which `classify_circuits_48989.log:358` counts at **418**. Both files are
+20-qubit QV circuits with confusable names, and the wrong one was 8% smaller.
+Corrected to 418, and the derived estimate from 0.9 M to 1.0 M lines.
+
+### One defect found in the source, not the report
+
+The post-mortem comment at `mlir_array_ops.inc:429` cites its specification as
+`svm_kernels.inl:502/exec_frame_cnot`. Line 502 is the `for` loop header; the
+`exec_frame_cnot` call is at :504, and the function itself is defined at :67.
+The chapter quotes the comment verbatim and is correct to do so — the drift is
+in the source. Left as-is: the symbol name in the citation still resolves, which
+is exactly the mitigation the eighth method note recommended.
+
+### Ninth method note: a name is not an identifier.
+
+Two fixtures named `qv20_seed42.stim` and `qv20_L8_seed42.stim` sit in
+different directories with different instruction counts, and a table row keyed
+on the short name silently picked up the wrong one — then propagated it into an
+estimate, where it looked like an independent calculation confirming the table.
+The earlier notes were about numbers going stale and citations drifting. This
+one is different: nothing changed, and the number was always wrong, because the
+key was ambiguous at the moment it was written. Where two artifacts share a
+prefix, cite the path, not the name — and treat any figure *derived* from a
+disputed cell as disputed too, since a derivation launders a bad input into
+what reads like corroboration.
