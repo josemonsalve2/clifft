@@ -1626,3 +1626,81 @@ measure both, even when only one is what you set out to study. Second: a claim
 about *instructions* cannot be evidenced by a count of *registers* — they are
 different quantities, and here they moved in opposite directions in the very
 case offered as proof.
+
+---
+
+## §14.1 — Job 50793: the authoritative 26-circuit corpus
+
+Run `20260727T125310Z_report-final-allfixtures`, SLURM job **50793**, node
+`smci350-rck-g03-d13-21`, partition `mi350x-es`, gfx950, commit `79d4463`
+(clean), `V2_SPECIALIZE=1`, **26 circuits, zero `rocprofv3` aborts**.
+
+This supersedes job 50785 (§14.0), which silently ran 18 of 26. It is the
+authoritative dataset for report §14 and §15.
+
+**Headline: mean 0.626, median 0.670, wins 26/26.** Every circuit in the corpus
+is now a V2 win, including all six `circuit_d5` variants and `cultivation_d5`,
+which the pre-fence baseline lost at ~1.44.
+
+| circuit | V2 µs | SVM µs | ratio | VALU r | SALU r | waves r |
+|---|---:|---:|---:|---:|---:|---:|
+| surface_d11_t19 | 20,423 | 79,842 | **0.256** | 0.490 | 0.138 | 4.000 |
+| surface_d11_t15 | 19,589 | 75,947 | 0.258 | 0.482 | 0.138 | 4.000 |
+| surface_d9_t19 | 11,926 | 45,208 | 0.264 | 0.482 | 0.137 | 4.000 |
+| surface_d9_t15 | 11,369 | 41,325 | 0.275 | 0.492 | 0.140 | 4.000 |
+| surface_d7_t19 | 6,247 | 20,152 | 0.310 | 0.500 | 0.142 | 4.000 |
+| qv10 | 1,386 | 4,350 | 0.319 | 0.445 | 0.198 | 1.000 |
+| surface_d11_t10 | 37,986 | 81,369 | 0.467 | 0.594 | 0.139 | 1.000 |
+| surface_d9_t10 | 21,632 | 44,094 | 0.491 | 0.601 | 0.142 | 1.000 |
+| circuit_d3_p0.001 | 221 | 434 | 0.509 | 0.817 | 0.150 | 1.000 |
+| surface_d7_t15 | 11,225 | 21,998 | 0.510 | 0.602 | 0.141 | 1.000 |
+| surface_d7_t10 | 11,044 | 20,674 | 0.534 | 0.609 | 0.145 | 1.000 |
+| four_t | 13.1 | 22.3 | 0.587 | 0.432 | **0.110** | 1.000 |
+| surface_d7_t5 | 2,051 | 3,372 | 0.608 | 0.735 | 0.167 | 1.000 |
+| qv20_L8_seed42 | 1,583,246 | 2,162,954 | 0.732 | 0.830 | 0.344 | 2.689 |
+| qv21_L8_seed42 | 2,977,386 | 4,045,316 | 0.736 | 0.835 | 0.345 | 1.712 |
+| frame_h | 12.1 | 16.3 | 0.742 | 0.429 | 0.218 | 1.000 |
+| cultivation_d5 | 16,421 | 20,901 | 0.786 | 0.663 | 0.161 | 1.000 |
+| circuit_d5_p0.005 | 8,727 | 10,714 | 0.815 | 0.663 | 0.161 | 1.000 |
+| circuit_d5_p0.003 | 8,809 | 10,516 | 0.838 | 0.652 | 0.159 | 1.000 |
+| circuit_d5_p0.002 | 8,730 | 10,319 | 0.846 | 0.646 | 0.158 | 1.000 |
+| circuit_d5_p0.001 | 8,600 | 10,158 | 0.847 | 0.639 | 0.156 | 1.000 |
+| qv20_seed42 | 1,804,649 | 2,123,250 | 0.850 | 0.821 | 0.345 | 1.790 |
+| circuit_d5_p0.0005 | 8,643 | 10,102 | 0.856 | 0.636 | 0.156 | 1.000 |
+| qv24_L4_seed42 | 7,241,815 | 8,211,443 | 0.882 | 0.863 | **0.361** | 0.749 |
+| qv22_L6_seed42 | 3,179,445 | 3,243,842 | 0.980 | 0.855 | 0.349 | 0.340 |
+| qv23_L5_seed42 | 6,086,167 | 6,146,952 | 0.990 | 0.861 | 0.357 | 1.517 |
+
+### Confirmed at full corpus scale
+
+1. **`SQ_INSTS_MFMA = 0.0` on all 52 backend×circuit cells.** §1's hedge — "51
+   of 52 measured; the 52nd (`qv24_L4_seed42`, SVM side) is unmeasured" — is
+   superseded. It is now measured, and it is zero. Both backends are pure
+   butterfly; neither touches the matrix cores.
+
+2. **SALU falls faster than VALU on 26 of 26 circuits.** Range 0.110
+   (`four_t`, 9.1×) to 0.361 (`qv24_L4`, 2.8×). The absolute scalar reduction
+   exceeds the vector reduction by ~3.8× on the surface family
+   (`surface_d11_t19`: −8,691 M SALU against −2,275 M VALU). This is the
+   corpus-scale form of the retraction in §13.13.
+
+3. **The fence fix holds on every affected circuit.** All six `circuit_d5`
+   variants and `cultivation_d5` now dispatch `clifft_v2_spec` and win at
+   0.786–0.856. The §1.3(d) *projection* of ~0.40 was wrong by roughly 2× in the
+   flattering direction; the direct measurement is ~0.84.
+
+4. **The QV family remains the weak band, 0.732–0.990**, and is where the
+   `waves` ratio inverts: `qv22_L6` runs V2 at 0.340× the SVM wave count and
+   still only reaches 0.980. Fewer, longer waves. Worth §16 follow-up.
+
+### Denominator discipline
+
+`n_circuits: 26` in `manifest.json`, 26 records in `summary.json`, 26 rows in
+`summary.md`, `wins 26/26`. Expected denominator and actual denominator agree
+and are both stated — the check §14.0 was written to force.
+
+### Node caveat, restated
+
+This job ran on `d13-21`. Report §1–§10's absolute timings come from `f13-21`.
+V2/SVM *ratios* within this job are sound (both arms, same job, same node);
+absolute microsecond figures must not be compared across the two chapters.
