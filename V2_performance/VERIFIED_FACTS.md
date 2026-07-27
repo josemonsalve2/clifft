@@ -682,6 +682,59 @@ of what the specializer emits, not of the fences around it.
 
 ---
 
+## 10b. gfx950 has 160 KB of LDS per CU, not 64 KB (2026-07-27)
+
+Found while auditing report §9.3. **Every occupancy figure in the P1 commit
+messages and in `plans/claude_plan.md` / `gpu/gpu_kernel_static_characterization.md`
+is derived from a 64 KB LDS budget that is wrong for this chip.**
+
+Measured by binary-searching the largest `address_space(3)` array the build
+toolchain accepts (`clang 21.0.0git` from `LLVM_PREFIX`, the same one
+`ClifftAmdgcn.cmake` uses):
+
+| arch | max LDS/workgroup |
+|---|---|
+| gfx90a | 65,473 B |
+| gfx942 | 65,473 B |
+| **gfx950** | **163,681 B** |
+
+Overshooting by one byte prints the constant: `error: local memory (163844)
+exceeds limit (163840) in 'k'`.
+
+LLVM's own `; Occupancy:` comment, 256-thread workgroup (so waves/SIMD == wg/CU):
+
+| LDS bytes | gfx942 | gfx950 |
+|---|---|---|
+| 8,704 (global tier) | 7 | **8** |
+| 13,312 (after P1b) | 4 | **8** |
+| 16,896 (after P1a) | 3 | **8** |
+| 25,088 (P0 baseline) | 2 | **6** |
+| 32,768 | 2 | 5 |
+| 65,536 | 1 | 2 |
+
+The model is `min(8, 163840 / LDS)`, verified against LLVM at every step
+boundary (first drop below 8 is at 20,992 B; `163840/20992 = 7`). Sweeping
+`amdgpu_num_vgpr` from 32 to 256 changes nothing in the gfx950 column, so VGPRs
+are not binding either.
+
+**Consequences.**
+- The claimed "2 → 3 → 4 wg/CU" is exactly right for **gfx942** and wrong for
+  the node the benchmarks ran on. Both P1 steps moved inside the flat region:
+  8 wg/CU before, 8 wg/CU after.
+- The `LDS_Block_Size` measurements themselves (25,088 → 16,896 → 13,312,
+  `tools/ldscheck_50017.log` / `ldscheck_50021.log`) are correct. Only the
+  inference from them is wrong.
+- The ~10 % gain on coop circuits in the `after-P0-P1` run is real but **not
+  attributable** — that run also contains P0's topology change, and the two are
+  not separable in the archive.
+- Today's HEAD reports `.group_segment_fixed_size: 13064` in the coop kernel's
+  ELF metadata, 248 B below the P1b figure.
+- `gpu_kernel_static_characterization.md:77-78,148,151` state "64 KB LDS/CU" as
+  a premise and conclude LDS is "the binding occupancy constraint". **On gfx950
+  it is not.** Do not quote those lines without this correction.
+
+---
+
 ## 11. Stale claims found during the audit
 
 Recorded because these documents are still in-tree and still cited by name.
@@ -728,7 +781,8 @@ useful, **[unverified]** as stated.
 | ~~`coop_r10_n1720` specialization is incorrect~~ | **retracted (§0)** — the failing verdicts were computed on the pre-fence binary; `435213e` measured the post-fence gate passing |
 | `V2_SPEC_NOISE_INLINE=1` A/B on current HEAD | not run; now a *correctness* probe (does the gate pass?), not a performance one (§6.6) |
 | V2 coop **interpreter** vs SVM interpreter parity | V2's is ~1.44x slower on the one shape where it has to run; never an optimization target (§6.3) |
-| Node identity for runs before `20260726T182433Z` | unrecoverable; cross-run deltas carry node variance |
+| ~~Node identity for runs before `20260726T182433Z`~~ | **recovered via `sacct` (2026-07-27)**: runs 1–8 on `smci350-rck-g03-d13-21`, runs 9–12 on `smci350-rck-g03-f13-21`. Ratios are same-job so they stand; the column-8→9 *delta* carries a node change as well as a code change |
+| Coop specializer gain over interpreter | commit `60d5728` claims 5.5×/7.6×; **the archive gives 3.54×/3.72×** and the commit figures do not reproduce. Use the archive |
 
 ---
 
@@ -745,3 +799,22 @@ first commit, each traceable to data:
 
 The pattern to carry into the report: **`summary.json` records `v2.kernel_name`
 per circuit. Any performance claim about "V2" must state which V2 it means.**
+
+### 13.1 Audit-pass-3 (2026-07-27) — report §8/§9 against the archive
+
+| claim | source | correction | evidence |
+|---|---|---|---|
+| P1 raised occupancy 2 → 4 wg/CU | `d873997`, `7802423`, both plans | 8 → 8 on gfx950; the figure is a gfx942 result | §10b |
+| coop specializer is 5.5×/7.6× over the interpreter | `60d5728` | 3.54× / 3.72× | last-interpreter vs first-spec run, kernel identity from trace |
+| the noise fence took `surface_d7_t15` 1.427 → 0.503 | report §9.5 | **1.793 → 0.503**; the 1.427 cell is gate-polluted and already partly specialized | VALU 4.71e9 / 3.49e9 / 1.15e9 across the three runs |
+| `qv10`'s 0.252 → 0.310 unexplained | report §9.1 | the noise fence: VGPR 24 → 36 while **VALU falls** 5.10e8 → 5.02e8 | five runs, all `d13-21`, SVM side flat at 4317–4388 µs |
+| P0 preceded P1 | report §9 ordering | **P1 shipped 25 min before P0** (04:46/04:50 vs 05:11) | `git log --reverse` |
+
+**Method note that generalizes.** Every archived run kept its `rocprofv3`
+kernel trace, and the kernel *name* plus *dispatch count* in that trace is a
+stronger fact than any summary ratio: it says which code path produced the
+number. `20260725T162524Z_noise-fenced-gated` is the only run in which any
+circuit dispatched two different kernels — interpreter ×1 plus spec ×2 — which
+identifies the gate-pollution artifact from the artifacts alone, without needing
+the commit message that explains it. **Check `raw/<circ>/<engine>/kt/` before
+attributing any step in a progression table.**
