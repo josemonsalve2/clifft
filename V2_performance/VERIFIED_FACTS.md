@@ -574,10 +574,58 @@ notes via `llvm-readelf --notes` on every distinct `.hsaco`.
   That is `circuit_d3_p0.001` — which still wins at 0.525, so spilling alone is
   not disqualifying at this size.
 
+### 10a. Spill mechanism — what the data RULES OUT (2026-07-27)
+
+Added while writing report §10.6. The natural explanation for the rank-22 break
+— "the specializer emits one call per instruction, so longer circuits carry more
+live scalars until the SGPR budget breaks" — is **refuted by this same CSV**.
+
+Global-tier kernels sorted by emitted instruction count (`n` in the filename):
+
+| rank | instrs | VGPR | AGPR | SGPR | vgpr_spill | sgpr_spill |
+|---|---|---|---|---|---|---|
+| 14 | 16,521 | 128 | 64 | 106 | 0 | 4 |
+| 11 | 16,415 | 128 | 64 | 106 | 0 | 4 |
+| 13 | 9,359 | 128 | 64 | 106 | 0 | 4 |
+| 12 | 4,296 | 128 | 64 | 106 | 0 | 0–4 |
+| 20 | 418 | 104 | 40 | 106 | 0 | 0 |
+| 21 | 393 | 104 | 40 | 106 | 0 | 0 |
+| 22 | 359 | 128 | 64 | 108 | 136 | 762 |
+| 23 | 335 | 128 | 64 | 108 | 199 | 662 |
+| 24 | 320 | 128 | 64 | 108 | 152 | 594 |
+
+**The three spilling kernels are the three SHORTEST in the tier.** Rank 14 emits
+46× more instructions than rank 22 and spills 4 SGPRs. The correlation with
+instruction count runs backwards. Any claim of the form "qv24 does better
+because it has fewer instructions" is unsupported — fewest instructions is the
+norm among spillers.
+
+Also ruled out: **it is not a source-level difference.** Diffing the emitted C
+for `global_r21_n393` vs `global_r22_n359` with numeric literals normalized
+(`sed -E 's/[0-9]+/N/g'`) shows an identical preprocessor preamble, identical
+`spec_body` shape, and a near-identical opcode mix. The global tier wrapper is
+rank-independent by construction (`v2_specializer.cc:196-224`). The only
+differing constant is `amp_capacity` (2097152ull → 4194304ull).
+
+Still open: crossing 2^22 coincides with the allocator moving from VGPR 104-106
+/ AGPR 40-42 to the VGPR 128 / AGPR 64 cap. Since `SQ_INSTS_MFMA = 0` and CDNA
+repurposes AGPRs as overflow when MFMA is unused, the pattern is *consistent
+with* AGPR overflow exhausting at the cap and falling through to scratch — but
+this is **inference from resource metadata, not a verified mechanism.** Do not
+state it as cause. The next step is an LLVM allocation study at the 21/22
+boundary.
+
 Dedup note: the spec cache is content-hashed, so an identical `.hsaco` appears
 under `build-v2-nohip/v2_spec_cache/` and under every per-run scratch cache. The
 script dedupes by basename (`awk -F/ '!seen[$NF]++'`), one row per distinct
 kernel.
+
+**Cache-invalidation status of this section: UNAFFECTED.** The §11.4 stale-cache
+bug does not touch these numbers. Verified directly: the pre-fence and
+post-fence `.hsaco` for `global_r22/r23/r24` differ in 84 % of their bytes and
+by +1,152 bytes, yet report byte-identical `vgpr_spill`, `sgpr_spill`,
+`sgpr_count` and `private_segment_fixed_size`. Register pressure is a property
+of what the specializer emits, not of the fences around it.
 
 ---
 
