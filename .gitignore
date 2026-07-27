@@ -80,3 +80,24 @@ build-v2-deps/
 .rocprofv3/
 .rocm_include_shim/
 stale/
+
+# V2 scratch build/compile-cache trees — hundreds of MB of .bc/.o/.hsaco that
+# rebuild from the specializer. The digested evidence (gate verdicts, CSVs,
+# summary JSON) is tracked; the object files are not.
+V2_performance/scratch/*/
+V2_performance/history/stale_spec_cache_*/**/*.bc
+V2_performance/history/stale_spec_cache_*/**/*.o
+V2_performance/history/stale_spec_cache_*/**/*.c
+V2_performance/dispatch_bench/hip_dispatch_bench
+V2_performance/dispatch_bench/hsa_dispatch_bench
+build-cpu/
+build-cpu-*/
+build-check-local/
+build-mlir-check/
+build-test-reorg/
+build-v2-scratch/
+persistent_dispatch_*.out
+persistent_dispatch_*.err
+V2_performance/history/stale_spec_cache_*/**/*.hsaco
+!V2_performance/history/stale_spec_cache_*/**/global_r2[234]_n*.hsaco
+V2_performance/lowering/.scratch/
