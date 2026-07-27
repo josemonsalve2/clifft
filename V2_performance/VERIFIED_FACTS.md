@@ -1126,3 +1126,62 @@ key was ambiguous at the moment it was written. Where two artifacts share a
 prefix, cite the path, not the name — and treat any figure *derived* from a
 disputed cell as disputed too, since a derivation launders a bad input into
 what reads like corroboration.
+
+---
+
+## §13.8 — Audit pass 10: report §3–§4 (`p3_gpu_svm.md`, GPU SVM + Hybrid)
+
+Tenth chapter audit. 254 lines, 24 checks. Three corrections, all citation or
+range drift; no fabricated data found.
+
+| # | claim | citation | verdict |
+|---|---|---|---|
+| 1 | `execute_shot` is a `for(pc) switch` | `hip_sampler.hip:728-731` | VERBATIM |
+| 2 | tier constants 4 / 10 / 26 | `gpu_types.h:8-18` | EXACT |
+| 3 | register tier entry, `v[16]` in VGPRs | `hip_sampler.hip:153,1778` | EXACT (`sample_kernel`) |
+| 4 | coop tier entry | `hip_sampler.hip:1861` | EXACT (`sample_kernel_coop`) |
+| 5 | global tier entry | `hip_sampler.hip:1937` | EXACT (`sample_kernel_global_coop`) |
+| 6 | coop LDS declarations | `hip_sampler.hip:1861-1885` | VERBATIM (elided subset, faithful) |
+| 7 | `v` 1024 amps = 8 KB | — | EXACT |
+| 8 | `scratch` 512 amps = 4 KB | — | EXACT |
+| 9 | `meas` 4096 slots = 4 KB | `kMaxMeas=4096` | EXACT |
+| 10 | `red0`+`red1` = 4 KB | 256 × f64 × 2 | EXACT |
+| 11 | global tier leaves `scatter_lut` OFF | `hip_sampler.hip:1937+` | **CONFIRMED** — declares meas/px/pz/red0/red1, no scatter_lut |
+| 12 | SVM 6-step butterfly + LDS combine | `hip_sampler.hip:948` | VERBATIM (`coop_reduce2` at :940) |
+| 13 | V2 mirror span | `v2_ops.h:224-247` | **WRONG → 224-262** |
+| 14 | ABI summation-order comment | `v2_ops.h:222-223` | **WRONG → 235-236** (text verbatim) |
+| 15 | `ds_bpermute` in emitted ISA | `spec_examples/*/S4_meas_active.s` | CONFIRMED (32 each, = 6 steps × 2 f64 × 2 halves) |
+| 16 | four `svm-opt-*` tags | `git tag` | EXACT, all four present |
+| 17 | `UsedFunctions` per-opcode booleans | `kernel_codegen.h:17-50` | EXACT |
+| 18 | Hybrid compile cmd, `-ffast-math` | `kernel_cache.cc:105-170` | VERBATIM |
+| 19 | Hybrid dispatches via HSA not hipModuleLoad | `kernel_cache.cc:191` | VERBATIM ("replaces hipModuleLoad + hipModuleGetFunction") |
+| 20 | four-row Hybrid-vs-SVM table | `reference_v1.md:270-278` | EXACT, all 12 cells |
+| 21 | five-row density table, 15 cells | `ir_density.csv` | EXACT (55.75 → "55.8" correct rounding) |
+| 22 | V2 converges to "1.00–1.11" | `ir_density.csv` | **WRONG → 1.00–1.27** (`coop_qv10` = 1.27) |
+| 23 | "15–55× difference" | derived | **WRONG → 14–44×** (per-circuit ratios 13.9–43.9) |
+| 24 | Hybrid density 15.4–55.8, no scale improvement | `ir_density.csv` | EXACT |
+
+### The 1.00–1.11 correction
+
+The chapter's closing argument stated V2's lines-per-instruction converges to
+**1.00–1.11 on every circuit large enough to matter**. Four of the five large
+circuits do; `coop_qv10` sits at **1.27**, and it is excluded by no stated
+criterion — it is the second-largest coop circuit in the table. The range was
+read off the Clifford-dominated rows and the QV row was passed over.
+
+This matters beyond the digit, because `qv10` is exactly the circuit where the
+chapter's own §5 argument says density is decided: QV circuits are nearly all
+fused unitaries, the one gate family V2 still expands past one line. Widening
+the range to 1.00–1.27 and naming why `qv10` is the outlier turns a swept-under
+row into the argument's supporting detail. The derived "15–55×" was the same
+error compounded — the true per-circuit span is 13.9× to 43.9×.
+
+### Tenth method note: a range is a claim about its endpoints, and outliers are where the mechanism lives.
+
+Summarizing a column as "1.00–1.11" is an assertion about *every* row, and it
+was checked against most of them. The tempting reading of the outlier is that
+it is noise to be excluded; the correct reading was that it is the row with the
+most to say, because the mechanism that produces it is the mechanism the
+chapter spends §5 explaining. Where a range excludes a row, either state the
+exclusion criterion or widen the range — and before doing either, ask whether
+the outlier is the finding.
