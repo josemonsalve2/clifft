@@ -1383,3 +1383,69 @@ self-concealing in the flattering direction: dropping the six QV circuits
 down to 0.518, so the truncation made the result look *better*. Any aggregate
 in this report must state its denominator and the expected denominator, and
 they must be compared.
+
+---
+
+## §13.11 — Audit pass 13: report §8.1–§8.4 (`p7_lowering.md`, progressive lowering)
+
+Thirteenth chapter audit, covering the sections not touched when §8.5 was
+corrected earlier. 30 checks, one correction (an ambiguous counting basis).
+
+| # | claim | source | verdict |
+|---|---|---|---|
+| 1–13 | thirteen diff sizes, 16 → 576 lines | `lowering/diffs/*.diff` | **ALL 13 EXACT** |
+| 14 | V1 `circuit_d3` stages 23002/14257/14875/13747/17802 | `lowering/v1/` | EXACT (5/5) |
+| 15 | V2 `circuit_d3` stages 383/19551/8132/10398 | `lowering/v2/` | EXACT (4/4) |
+| 16 | V1 `frame_h` stages 947/606/562/275/524 | `lowering/v1/` | EXACT (5/5) |
+| 17 | "1.7× smaller kernel from a 60× smaller source" | derived | EXACT (1.71, 60.1) |
+| 18 | `render_diffs.py` methodology quote | `render_diffs.py:8-13` | VERBATIM |
+| 19 | pass snapshots 736 / 608 / 608 | `v1_passes/…/` | EXACT |
+| 20 | `llvm.mlir.constant` 240 → 59 | census | EXACT |
+| 21 | `llvm.and` 54 → 9 | census | EXACT |
+| 22 | `llvm.shl` 73 → 34 | census | EXACT |
+| 23 | `llvm.xor` 68 → 29 | census | EXACT |
+| 24 | `llvm.ptr` 192 → 160 | census | **AMBIGUOUS — occurrences, not lines (136 → 118)** |
+| 25 | duplicated `llvm.lshr %33, %35`, CSE'd to one | `v1pass…cse.diff:45,56,98` | VERBATIM |
+| 26 | `convert-func-to-llvm` diff is banner-only, 16 lines | `v1pass…convert.diff` | VERBATIM, whole file |
+| 27 | 10 `alloca`/`addrspacecast` pairs at translate | `frame_h.3_translate.ll` | EXACT (10 allocas, incl. `alloca i8, i32 4096` at :85) |
+| 28 | promoted to SSA by `-O2` | `frame_h.4_optO2.ll` | **EXACT — 10 → 0 allocas** |
+| 29 | gains `mustprogress nofree norecurse nounwind willreturn`, `noalias … captures(none)` | ditto | VERBATIM |
+| 30 | `circuit_d3` collapse only 7.6 % | derived | EXACT |
+
+### "LLVM did this, not MLIR" — the claim, checked directly
+
+§8.4's central assertion is that MLIR's three passes left every `alloca`
+standing and LLVM removed them all. Counted per pass snapshot:
+
+```
+0_canonicalize.mlir   alloca = 10
+1_cse.mlir            alloca = 10
+2_convert-func-to-llvm.mlir  alloca = 10
+frame_h.4_optO2.ll    alloca = 0
+```
+
+Ten in, ten out, across all three MLIR passes; zero after LLVM's `-O2`. The
+chapter's phrasing ("The MLIR stage had the same `alloca`s in front of it for
+two passes and left every one of them standing") is exactly right, and this is
+the strongest single piece of evidence in the chapter.
+
+### The `llvm.ptr` counting basis
+
+Four census rows count one op per line and are unambiguous. The fifth counts
+`llvm.ptr`, which is a *type*: it appears twice on every `getelementptr` line,
+so 192 occurrences span 136 lines (160 over 118 after opt). Both numbers are
+correct; the table just did not say which basis it used, and a reader
+re-deriving the row with `grep -c` gets a different answer than the author, who
+used `grep -o`. Annotated the row rather than changing it — the occurrence count
+is the more meaningful one for a type — and moved it last so the four op rows
+read consistently.
+
+### Thirteenth method note: state the counting basis, or the number is unreproducible.
+
+Every other number in this chapter can be re-derived by one obvious command.
+This one had two obvious commands giving two different answers, with nothing in
+the table to say which was meant. That is a weaker defect than a wrong number
+but a real one: an auditor who runs `grep -c` concludes the row is wrong, and
+the ambiguity costs exactly as much to resolve as an error would. Where a count
+could plausibly be per-line or per-occurrence — types, substrings, anything that
+can repeat within a line — say which.
