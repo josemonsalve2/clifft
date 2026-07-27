@@ -7,22 +7,44 @@
 set -u
 cd "$(dirname "$0")"
 
+# SSA-name character class. clang emits names with a leading '.' and an embedded
+# '-' (%.atomictmp, %atomic-temp), so both must be in the class -- an earlier
+# version omitted them and undercounted alloca by 3 at -O0.
+NAME='[0-9a-zA-Z_.-]+'
+
 hist() {  # $1 = file, $2 = kind (mlir|ll|isa)
     case "$2" in
         mlir) grep -oE '\bllvm\.[a-z_.]+' "$1" | sort | uniq -c | sort -rn ;;
-        ll)   grep -oE '^\s+(%[0-9a-zA-Z_.]+ = )?[a-z][a-z0-9_.]*' "$1" \
-                  | sed -E 's/^\s+//; s/^%[0-9a-zA-Z_.]+ = //' | sort | uniq -c | sort -rn ;;
+        ll)   grep -oE "^\s+(%$NAME = )?[a-z][a-z0-9_.]*" "$1" \
+                  | sed -E "s/^\s+//; s/^%$NAME = //" | sort | uniq -c | sort -rn ;;
         isa)  grep -oE '^\s+[a-z][a-z0-9_]*' "$1" | sed -E 's/^\s+//' \
                   | sort | uniq -c | sort -rn ;;
     esac
 }
 
+# Ops that must ALWAYS be emitted, even when they fall outside the top-N
+# histogram. A stage that eliminates an op drives it down the ranking, so
+# truncating the histogram makes "optimized away" indistinguishable from "still
+# there but rare" -- and a missing CSV row reads as zero. alloca at -O2 ranks
+# 36th with 3 occurrences and was misreported as 0 for exactly this reason.
+ALWAYS='alloca addrspacecast call shufflevector'
+TOPN=30
+
 emit() {  # pipeline circuit stage file kind
     local p=$1 c=$2 s=$3 f=$4 k=$5
     [ -f "$f" ] || return 0
     local n; n=$(wc -l < "$f")
-    hist "$f" "$k" | head -30 | while read -r cnt op; do
-        echo "$p,$c,$s,$n,$op,$cnt"
+    local h; h=$(hist "$f" "$k")
+    { echo "$h" | head -$TOPN
+      # Append any ALWAYS op not already in the top N (count 0 if truly absent,
+      # which is now an assertion rather than an artifact of truncation).
+      for op in $ALWAYS; do
+          echo "$h" | head -$TOPN | awk -v o="$op" '$2==o {f=1} END{exit !f}' && continue
+          local cnt; cnt=$(echo "$h" | awk -v o="$op" '$2==o {print $1; exit}')
+          echo "  ${cnt:-0} $op"
+      done
+    } | while read -r cnt op; do
+        [ -n "$op" ] && echo "$p,$c,$s,$n,$op,$cnt"
     done
 }
 

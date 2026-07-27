@@ -29,6 +29,10 @@ v1,circuit_d3,1_emitted,23002,llvm.mul,77
 v1,circuit_d3,1_emitted,23002,llvm.mlir.undef,65
 v1,circuit_d3,1_emitted,23002,llvm.fsub,59
 v1,circuit_d3,1_emitted,23002,llvm.amdgcn.ds.bpermute,45
+v1,circuit_d3,1_emitted,23002,alloca,0
+v1,circuit_d3,1_emitted,23002,addrspacecast,0
+v1,circuit_d3,1_emitted,23002,call,0
+v1,circuit_d3,1_emitted,23002,shufflevector,0
 v1,circuit_d3,2_opt,14257,llvm.ptr,6074
 v1,circuit_d3,2_opt,14257,llvm.load,2586
 v1,circuit_d3,2_opt,14257,llvm.store,1519
@@ -59,6 +63,10 @@ v1,circuit_d3,2_opt,14257,llvm.mul,77
 v1,circuit_d3,2_opt,14257,llvm.fsub,59
 v1,circuit_d3,2_opt,14257,llvm.amdgcn.ds.bpermute,45
 v1,circuit_d3,2_opt,14257,llvm.fpext,30
+v1,circuit_d3,2_opt,14257,alloca,0
+v1,circuit_d3,2_opt,14257,addrspacecast,0
+v1,circuit_d3,2_opt,14257,call,0
+v1,circuit_d3,2_opt,14257,shufflevector,0
 v1,circuit_d3,3_translate,14875,load,2586
 v1,circuit_d3,3_translate,14875,store,1519
 v1,circuit_d3,3_translate,14875,xor,1364
@@ -89,10 +97,11 @@ v1,circuit_d3,3_translate,14875,fptrunc,10
 v1,circuit_d3,3_translate,14875,alloca,10
 v1,circuit_d3,3_translate,14875,addrspacecast,10
 v1,circuit_d3,3_translate,14875,fneg,5
+v1,circuit_d3,3_translate,14875,shufflevector,0
 v1,circuit_d3,4_optO2,13747,fmul,2108
 v1,circuit_d3,4_optO2,13747,fadd,1411
 v1,circuit_d3,4_optO2,13747,xor,1247
-v1,circuit_d3,4_optO2,13747,phi,1025
+v1,circuit_d3,4_optO2,13747,phi,1041
 v1,circuit_d3,4_optO2,13747,load,626
 v1,circuit_d3,4_optO2,13747,getelementptr,626
 v1,circuit_d3,4_optO2,13747,add,606
@@ -119,6 +128,10 @@ v1,circuit_d3,4_optO2,13747,fneg,56
 v1,circuit_d3,4_optO2,13747,sitofp,54
 v1,circuit_d3,4_optO2,13747,fdiv,54
 v1,circuit_d3,4_optO2,13747,sub,53
+v1,circuit_d3,4_optO2,13747,alloca,0
+v1,circuit_d3,4_optO2,13747,addrspacecast,4
+v1,circuit_d3,4_optO2,13747,call,0
+v1,circuit_d3,4_optO2,13747,shufflevector,0
 v1,circuit_d3,5_isa,17802,v_xor_b32_e32,2197
 v1,circuit_d3,5_isa,17802,s_mov_b32,1699
 v1,circuit_d3,5_isa,17802,v_add_f64,1438
@@ -149,6 +162,10 @@ v1,circuit_d3,5_isa,17802,s_mov_b64,164
 v1,circuit_d3,5_isa,17802,v_fma_f64,162
 v1,circuit_d3,5_isa,17802,global_load_dwordx2,148
 v1,circuit_d3,5_isa,17802,s_and_saveexec_b64,146
+v1,circuit_d3,5_isa,17802,alloca,0
+v1,circuit_d3,5_isa,17802,addrspacecast,0
+v1,circuit_d3,5_isa,17802,call,0
+v1,circuit_d3,5_isa,17802,shufflevector,0
 v1,frame_h,1_emitted,947,llvm.mlir.constant,240
 v1,frame_h,1_emitted,947,llvm.ptr,192
 v1,frame_h,1_emitted,947,llvm.shl,73
@@ -179,6 +196,10 @@ v1,frame_h,1_emitted,947,llvm.noalias,4
 v1,frame_h,1_emitted,947,llvm.mlir.global,3
 v1,frame_h,1_emitted,947,llvm.mlir.addressof,3
 v1,frame_h,1_emitted,947,llvm.atomicrmw,3
+v1,frame_h,1_emitted,947,alloca,0
+v1,frame_h,1_emitted,947,addrspacecast,0
+v1,frame_h,1_emitted,947,call,0
+v1,frame_h,1_emitted,947,shufflevector,0
 v1,frame_h,2_opt,606,llvm.ptr,160
 v1,frame_h,2_opt,606,llvm.mlir.constant,59
 v1,frame_h,2_opt,606,llvm.zext,52
@@ -209,6 +230,10 @@ v1,frame_h,2_opt,606,llvm.noalias,4
 v1,frame_h,2_opt,606,llvm.mlir.global,3
 v1,frame_h,2_opt,606,llvm.mlir.addressof,3
 v1,frame_h,2_opt,606,llvm.atomicrmw,3
+v1,frame_h,2_opt,606,alloca,0
+v1,frame_h,2_opt,606,addrspacecast,0
+v1,frame_h,2_opt,606,call,0
+v1,frame_h,2_opt,606,shufflevector,0
 v1,frame_h,3_translate,562,zext,52
 v1,frame_h,3_translate,562,call,47
 v1,frame_h,3_translate,562,trunc,45
@@ -238,6 +263,7 @@ v1,frame_h,3_translate,562,phi,1
 v1,frame_h,3_translate,562,fsub,1
 v1,frame_h,3_translate,562,fdiv,1
 v1,frame_h,3_translate,562,fcmp,1
+v1,frame_h,3_translate,562,shufflevector,0
 v1,frame_h,4_optO2,275,add,26
 v1,frame_h,4_optO2,275,tail,23
 v1,frame_h,4_optO2,275,zext,21
@@ -264,6 +290,9 @@ v1,frame_h,4_optO2,275,phi,1
 v1,frame_h,4_optO2,275,fdiv,1
 v1,frame_h,4_optO2,275,fcmp,1
 v1,frame_h,4_optO2,275,addrspacecast,1
+v1,frame_h,4_optO2,275,alloca,0
+v1,frame_h,4_optO2,275,call,0
+v1,frame_h,4_optO2,275,shufflevector,0
 v1,frame_h,5_isa,524,s_mov_b32,42
 v1,frame_h,5_isa,524,v_lshl_add_u64,24
 v1,frame_h,5_isa,524,v_xor_b32_e32,20
@@ -294,10 +323,14 @@ v1,frame_h,5_isa,524,v_or_b32_e32,2
 v1,frame_h,5_isa,524,v_lshlrev_b32_e32,2
 v1,frame_h,5_isa,524,v_fmac_f64_e32,2
 v1,frame_h,5_isa,524,v_div_scale_f64,2
+v1,frame_h,5_isa,524,alloca,0
+v1,frame_h,5_isa,524,addrspacecast,0
+v1,frame_h,5_isa,524,call,0
+v1,frame_h,5_isa,524,shufflevector,0
 v2,circuit_d3,2_clangO0,19551,load,4898
 v2,circuit_d3,2_clangO0,19551,store,2488
-v2,circuit_d3,2_clangO0,19551,alloca,2268
-v2,circuit_d3,2_clangO0,19551,addrspacecast,2259
+v2,circuit_d3,2_clangO0,19551,alloca,2271
+v2,circuit_d3,2_clangO0,19551,addrspacecast,2262
 v2,circuit_d3,2_clangO0,19551,call,1770
 v2,circuit_d3,2_clangO0,19551,getelementptr,977
 v2,circuit_d3,2_clangO0,19551,br,784
@@ -324,6 +357,7 @@ v2,circuit_d3,2_clangO0,19551,fsub,4
 v2,circuit_d3,2_clangO0,19551,fpext,4
 v2,circuit_d3,2_clangO0,19551,atomicrmw,3
 v2,circuit_d3,2_clangO0,19551,uitofp,1
+v2,circuit_d3,2_clangO0,19551,shufflevector,0
 v2,circuit_d3,3_clangO2,8132,store,1103
 v2,circuit_d3,3_clangO2,8132,load,1014
 v2,circuit_d3,3_clangO2,8132,xor,705
@@ -333,7 +367,7 @@ v2,circuit_d3,3_clangO2,8132,shufflevector,459
 v2,circuit_d3,3_clangO2,8132,fmul,448
 v2,circuit_d3,3_clangO2,8132,and,412
 v2,circuit_d3,3_clangO2,8132,icmp,281
-v2,circuit_d3,3_clangO2,8132,phi,247
+v2,circuit_d3,3_clangO2,8132,phi,251
 v2,circuit_d3,3_clangO2,8132,fadd,225
 v2,circuit_d3,3_clangO2,8132,fsub,222
 v2,circuit_d3,3_clangO2,8132,or,133
@@ -354,6 +388,7 @@ v2,circuit_d3,3_clangO2,8132,addrspacecast,8
 v2,circuit_d3,3_clangO2,8132,trunc,6
 v2,circuit_d3,3_clangO2,8132,ret,5
 v2,circuit_d3,3_clangO2,8132,fpext,4
+v2,circuit_d3,3_clangO2,8132,alloca,3
 v2,circuit_d3,4_isa,10398,v_mov_b32_e32,1276
 v2,circuit_d3,4_isa,10398,v_xor_b32_e32,1109
 v2,circuit_d3,4_isa,10398,s_waitcnt,488
@@ -384,3 +419,7 @@ v2,circuit_d3,4_isa,10398,v_lshrrev_b32_e32,72
 v2,circuit_d3,4_isa,10398,s_swappc_b64,69
 v2,circuit_d3,4_isa,10398,v_lshl_add_u64,68
 v2,circuit_d3,4_isa,10398,v_lshrrev_b64,65
+v2,circuit_d3,4_isa,10398,alloca,0
+v2,circuit_d3,4_isa,10398,addrspacecast,0
+v2,circuit_d3,4_isa,10398,call,0
+v2,circuit_d3,4_isa,10398,shufflevector,0
