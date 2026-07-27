@@ -1,19 +1,48 @@
 Welcome to SLURM
 --------------------------------------------
-current Job id 50474
+current Job id 50507
 --------------------------------------------
 # node=smci350-rck-g03-d13-21 arch=gfx950 rocm=/opt/rocm-7.2.3
 built bench_empty.hsaco
-hsa_dispatch_bench.cc: In function ‘int main(int, char**)’:
-hsa_dispatch_bench.cc:131:62: error: invalid conversion from ‘const char*’ to ‘hsa_file_t’ {aka ‘int’} [-fpermissive]
-  131 |     CHECK(hsa_code_object_reader_create_from_file(hsaco.c_str(), &reader),
-      |                                                   ~~~~~~~~~~~^~
-      |                                                              |
-      |                                                              const char*
-hsa_dispatch_bench.cc:31:28: note: in definition of macro ‘CHECK’
-   31 |         hsa_status_t s_ = (expr);                                          \
-      |                            ^~~~
-In file included from hsa_dispatch_bench.cc:19:
-/opt/rocm-7.2.3/include/hsa/hsa.h:4113:16: note:   initializing argument 1 of ‘hsa_status_t hsa_code_object_reader_create_from_file(hsa_file_t, hsa_code_object_reader_t*)’
- 4113 |     hsa_file_t file,
-      |     ~~~~~~~~~~~^~~~
+=== HSA ===
+# arch=gfx950 queue_size=4096 kernarg_seg=40 priv=0 group=0 iters=2000 reps=5
+mode,rep,ns_per_dispatch
+naive,0,198919.7
+naive,1,201621.7
+naive,2,203587.4
+naive,3,193931.4
+naive,4,191614.6
+persistent,0,6332.8
+persistent,1,6329.4
+persistent,2,6323.2
+persistent,3,6324.8
+persistent,4,6319.7
+batched16,0,2326.0
+batched16,1,2318.4
+batched16,2,2318.2
+batched16,3,2317.9
+batched16,4,2318.3
+=== HIP ===
+hip_dispatch_bench.hip:63:13: warning: ignoring return value of type 'hipError_t' declared with 'nodiscard' attribute [-Wunused-value]
+   63 |             hipDeviceSynchronize();
+      |             ^~~~~~~~~~~~~~~~~~~~~~
+hip_dispatch_bench.hip:74:13: warning: ignoring return value of type 'hipError_t' declared with 'nodiscard' attribute [-Wunused-value]
+   74 |             hipStreamSynchronize(stream);
+# arch=gfx950:sramecc+:xnack- hip_runtime_version=70253211 iters=2000 reps=5
+mode,rep,ns_per_dispatch
+sync,0,13668.2
+sync,1,10739.1
+sync,2,10731.1
+sync,3,10744.8
+sync,4,10734.4
+stream_sync,0,10992.5
+stream_sync,1,11001.8
+stream_sync,2,10991.7
+stream_sync,3,11000.3
+stream_sync,4,10996.8
+launch_only,0,2106.2
+launch_only,1,2088.3
+launch_only,2,2090.4
+launch_only,3,2085.3
+launch_only,4,2094.5
+DONE

@@ -1,0 +1,17 @@
+# arch=gfx950 queue_size=4096 kernarg_seg=40 priv=0 group=0 iters=2000 reps=5
+mode,rep,ns_per_dispatch
+naive,0,198919.7
+naive,1,201621.7
+naive,2,203587.4
+naive,3,193931.4
+naive,4,191614.6
+persistent,0,6332.8
+persistent,1,6329.4
+persistent,2,6323.2
+persistent,3,6324.8
+persistent,4,6319.7
+batched16,0,2326.0
+batched16,1,2318.4
+batched16,2,2318.2
+batched16,3,2317.9
+batched16,4,2318.3

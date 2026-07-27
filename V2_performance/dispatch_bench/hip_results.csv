@@ -1,0 +1,17 @@
+# arch=gfx950:sramecc+:xnack- hip_runtime_version=70253211 iters=2000 reps=5
+mode,rep,ns_per_dispatch
+sync,0,13668.2
+sync,1,10739.1
+sync,2,10731.1
+sync,3,10744.8
+sync,4,10734.4
+stream_sync,0,10992.5
+stream_sync,1,11001.8
+stream_sync,2,10991.7
+stream_sync,3,11000.3
+stream_sync,4,10996.8
+launch_only,0,2106.2
+launch_only,1,2088.3
+launch_only,2,2090.4
+launch_only,3,2085.3
+launch_only,4,2094.5
