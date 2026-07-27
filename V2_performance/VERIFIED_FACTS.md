@@ -963,3 +963,57 @@ checkable if the reader can recover *which* run that was for each row. It was
 recoverable here only because `runs/` keeps all twelve and encodes the node in
 the trace path. **When a derived number's baseline varies by row, name the
 baseline in the row.**
+
+### 13.5 Audit-pass-7 (2026-07-27) — report §10 (extending past rank 19)
+
+**Three data corrections, one of them retiring a caveat that was no longer
+true.** All of §10's structural claims verify; two table cells and one unit
+mismatch did not.
+
+| check | result |
+|---|---|
+| `kGlobalMaxPeakRank = 26` in `gpu_types.h:17` and the `<= 30` u32 constraint | exact, quote verbatim |
+| `b266f80` four-file table, incl. each file's stated role | verbatim from the commit message |
+| the `scratch_v` full-vs-half-stride latent OOB | verbatim |
+| 32 GB budget block quoted from `v2_kernel.cc` | verbatim, still current |
+| 12 bytes/amplitude; 6 MB/wg @ r19; 768 MB/wg @ r26; 2,048 × 512 MB = 1 TB | all recompute exactly |
+| §10.1 "6 MB per resident workgroup" at rank 19 | **unit mismatch** — the stride shown governs `global_v` alone, which is 4 MB at rank 19; 6 MB is slice+scratch. The 512 MB and 1 TB figures downstream are slice-only, so slice-only is the self-consistent framing. Corrected, with both conventions named. |
+| `6960527` gate sizing: fixed 64 wg / 5,000 shots, pool capped 512, taper 1,000 @ r20–21 and 250 @ r22+, `V2_GATE_SHOTS` | verbatim, and the taper is live in `v2_kernel.cc:136-139` |
+| `4b9efc7`: `rank19_q100_d10_wide` → peak_rank 1; QV ranks 20/21/22/23/24 | verbatim |
+| census: 353 fixtures, all 15 rank rows, both subtotals | exact |
+| the absent ranks (2, 5, 6, 8, 9, 15–19) | exact — precisely the complement of the observed set |
+| sweep (188) and rank_sweep (56) all squeeze to rank 0–1; `rank_q17_r12_d1` → rank 1 | exact |
+| "eleven coop fixtures, **eight** of which are the `circuit_d5` sweep" | **wrong — the sweep has 5 members.** The eleven are 3 × `surface_*_t10` at rank 7 plus 8 at rank 10 (5 `circuit_d5`, `qv10`, `cultivation_d5`, `surface_d7_t15`). Corrected. |
+| all 15 `global_*` rows of `kernel_resources.csv` (rank/instrs/VGPR/AGPR/SGPR/spills/scratch) | exact, row for row |
+| "the three worst-spilling kernels in the entire 89-kernel corpus" | exact — top 3 by SGPR spill (762/662/594, next is 47) *and* top 3 by VGPR spill (199/152/136, next is 88) |
+| rank 20–21 is the only region not at the VGPR 128 / AGPR 64 cap | exact |
+| all six qv timing rows vs raw `total_kernel_ns` | exact |
+| qv20 scratch column | **two cells swapped** — the run reports `qv20_seed42` = 96 and `qv20_L8_seed42` = 112, the table had them reversed. Corrected. |
+| pre/post binary sizes 217,424→218,576 / 190,480→191,568 / 172,880→173,904 | exact |
+| "83.9 / 83.0 / 82.9 % of bytes differing" | exact, counting differing bytes against the larger binary |
+| every resource equality in the provenance table (136=136, 762=762, 108=108, 448=448, …) | verified directly from both binaries with `llvm-readelf --notes` |
+| `amp_capacity` 2097152ull (r21) vs 4194304ull (r22) = 2²¹ vs 2²² | exact |
+| opcode mix 169/80/42 vs 142/66/44 | exact |
+| tier wrapper rank-independent apart from `amp_cap` (`v2_specializer.cc:196-224`) | confirmed by reading the emitter |
+| `SQ_INSTS_MFMA = 0` throughout | exact — all 52 engine-entries of the postdust run |
+
+**The retired caveat.** §10.6 carried a provenance block calling its timing
+columns "provisional" because they predated the fence fix, with a note that the
+post-fix re-run would be the arbiter. That re-run had already happened: the
+published cells come from `20260726T182433Z_report-final-postdust` at commit
+`f565075`, and `git merge-base --is-ancestor 150d09f f565075` confirms the fence
+is an ancestor. Three pre-fence runs bracket the published ratios within 0.6 %,
+all four on the same node `f13-21`. The block now reports the resolution.
+
+**Seventh method note: a caveat has a lifetime too.** Every other defect this
+audit found was a number that was wrong from the start. This one was a *correct*
+statement that a later run falsified — the table was re-sourced to post-fence
+data without the paragraph above it being revisited. Stale hedges are harder to
+catch than stale numbers, because they read as diligence: a reader who checks
+the caveat's reasoning finds it sound and stops there. **When a run supersedes
+the data behind a caveat, the caveat is part of what got superseded.**
+
+Side effect: the audit surfaced seven `rank 11-19` comments left behind by
+`b266f80`'s cap raise, across `README.md`, `hip_sampler.hip`, `kernel_codegen.h`,
+`kernel_cache.h`, `coop_interpreter.c`, `v2_kernel.cc` and `v2_specializer.cc`.
+Fixed in `2cf495d` (comment-only).
