@@ -86,11 +86,11 @@ PMC_C="SQ_BUSY_CYCLES,GRBM_GUI_ACTIVE,SQ_WAIT_INST_LDS,SQ_WAVE_CYCLES"
 # band; ratios are per-circuit so the counts need not match across rows.
 CIRCS=(
 "tests/fixtures/incremental/01_frame_only/frame_h.stim 20000"
-"tests/fixtures/incremental/02_expand/four_t.stim 20000"
+"tests/fixtures/incremental/02_single_expand/four_t.stim 20000"
 "tests/fixtures/large/circuit_d3_p0.001.stim 20000"
 "tests/fixtures/large/surface_d7_t5.stim 20000"
 "tests/fixtures/qv10.stim 20000"
-"tests/fixtures/large/cultivation_d5.stim 20000"
+"tests/fixtures/cultivation_d5.stim 20000"
 "tests/fixtures/large/circuit_d5_p0.0005.stim 10000"
 "tests/fixtures/large/circuit_d5_p0.001.stim 10000"
 "tests/fixtures/large/circuit_d5_p0.002.stim 10000"
@@ -105,12 +105,12 @@ CIRCS=(
 "tests/fixtures/large/surface_d9_t19.stim 5000"
 "tests/fixtures/large/surface_d11_t15.stim 5000"
 "tests/fixtures/large/surface_d11_t19.stim 5000"
-"tests/fixtures/highrank/qv20_seed42.stim 2000"
-"tests/fixtures/highrank/qv20_L8_seed42.stim 2000"
-"tests/fixtures/highrank/qv21_L8_seed42.stim 2000"
-"tests/fixtures/highrank/qv22_L6_seed42.stim 1000"
-"tests/fixtures/highrank/qv23_L5_seed42.stim 1000"
-"tests/fixtures/highrank/qv24_L4_seed42.stim 500"
+"tools/bench/fixtures/qv20_seed42.stim 2000"
+"tests/fixtures/large/qv20_L8_seed42.stim 2000"
+"tests/fixtures/large/qv21_L8_seed42.stim 2000"
+"tests/fixtures/large/qv22_L6_seed42.stim 1000"
+"tests/fixtures/large/qv23_L5_seed42.stim 1000"
+"tests/fixtures/large/qv24_L4_seed42.stim 500"
 )
 
 prof() {  # $1=outdir  rest=cmd
@@ -128,6 +128,14 @@ for entry in "${CIRCS[@]}"; do
   c=$(echo "$entry" | awk '{print $1}'); s=$(echo "$entry" | awk '{print $2}')
   name=$(basename "$c" .stim)
   echo "=== $name (shots=$s) ==="
+  # Fail loudly on a stale fixture path. Job 50785 lost 8 of 26 circuits to
+  # renamed fixtures: rocprofv3 aborted on every pass, stderr went to
+  # /dev/null, and the summary reported "wins 18/18" over a silently
+  # truncated corpus. A missing input must not look like a clean result.
+  if [ ! -f "$c" ]; then
+    echo "  *** FIXTURE MISSING: $c -- aborting run ***" >&2
+    exit 1
+  fi
   prof "$RAW/$name/v2"  "$V2  --circuit $c --shots $s --seed 1"
   echo "  v2 done"
   prof "$RAW/$name/svm" "$SVM --circuit $c --shots $s --seed 1 --no-postselection"
