@@ -28,7 +28,7 @@ gpu/
 │   ├── emit_instructions   Straight-line instruction emitters (register + coop)
 │   ├── emit_register_kernel   Register-tier kernel generator (rank ≤ 4)
 │   ├── emit_coop_kernel       LDS/coop-tier kernel generator (rank 5-10)
-│   ├── emit_global_kernel     Global/HBM-tier kernel generator (rank 11-19)
+│   ├── emit_global_kernel     Global/HBM-tier kernel generator (rank 11-26)
 │   ├── kernel_cache     clang++ compilation pipeline + disk cache
 │   └── ops/             Per-category device function string literals (.inc)
 │       ├── frame_ops.inc        Pauli frame tracking (CNOT, CZ, H, S, SWAP)
@@ -62,7 +62,7 @@ The default path. `hip_sampler.hip` contains three `__global__` kernels that int
 The `--hybrid` path. `kernel_codegen.cc` walks the flattened bytecode and emits a complete, self-contained HIP C++ source file with straight-line calls — no switch dispatch. The source is compiled by `clang++` at runtime and loaded via HSA. Three tiers handle different amplitude array sizes:
 - **Register tier** (rank ≤ 4): amplitudes in thread-private registers
 - **LDS/Coop tier** (rank 5-10): amplitudes in LDS, 256 threads cooperate per shot
-- **Global/HBM tier** (rank 11-19): amplitudes in HBM, per-XCD work stealing
+- **Global/HBM tier** (rank 11-26): amplitudes in HBM, per-XCD work stealing
 
 ### MLIR Codegen (`mlir/`)
 An experimental alternative to the HIP text-emission path.  Instead of generating HIP C++ source, this backend emits textual MLIR (LLVM dialect), then invokes `mlir-opt` and `mlir-translate` as subprocesses to produce LLVM-IR, which is compiled by `llc` + `lld` into a `.hsaco`.  No MLIR C++ library linkage is needed — only the command-line tools.

@@ -2337,7 +2337,7 @@ SurvivorResult gpu_sample_survivors(const CompiledModule& program, uint64_t shot
                     coop_blocks * block_size, block_size,
                     &kargs, sizeof(kargs));
             } else if (options.hybrid && flat.peak_rank <= kGlobalMaxPeakRank) {
-                // Compiled megakernel via persistent HSA dispatch (global-coop tier, rank 11-19)
+                // Compiled megakernel via persistent HSA dispatch (global-coop tier, rank 11-26)
                 static HsaLoadedKernel hsa_ck_global{};
                 static PersistentDispatcher pd_global;
                 if (!hsa_ck_global.valid) {

@@ -194,7 +194,7 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
           << "              V2_MAX_AMP, shot_id, " << fwd << ");\n"
           << "}\n";
     } else {  // SpecTier::Global
-        // Global tier (rank 11-19): amplitudes in HBM (one slice per resident
+        // Global tier (rank 11-26): amplitudes in HBM (one slice per resident
         // workgroup), classical state in LDS, shots drained via a single atomic
         // work-steal counter. Same spec_body (scatter index math constant-folded
         // by the emitted constant operands — the primary lever: it removes the

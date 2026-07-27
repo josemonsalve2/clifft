@@ -135,7 +135,7 @@ void clifft_v2_coop(const CV2Instr* instrs, u32 num_instrs, u32 peak_rank,
 }
 
 // =============================================================================
-// GLOBAL tier kernel (rank 11-19). Amplitudes in HBM; single global atomic work
+// GLOBAL tier kernel (rank 11-26). Amplitudes in HBM; single global atomic work
 // queue drains all shots.
 // =============================================================================
 __attribute__((amdgpu_kernel, visibility("default")))

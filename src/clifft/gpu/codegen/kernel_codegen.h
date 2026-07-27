@@ -103,7 +103,7 @@ std::string generate_compiled_kernel(const FlattenedProgram& flat);
 std::string generate_compiled_kernel_coop(const FlattenedProgram& flat);
 
 /// Generate a global-coop HIP kernel source string for the given program —
-/// global-memory tier (peak_rank 11–19).
+/// global-memory tier (peak_rank 11–26).
 /// Amplitude array lives in HBM global_v; uses per-XCD work stealing.
 /// The kernel function is named "compiled_sample_kernel_global" with signature:
 ///   __global__ void compiled_sample_kernel_global(

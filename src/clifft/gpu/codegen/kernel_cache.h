@@ -18,7 +18,7 @@ HsaLoadedKernel compile_or_load_kernel(const FlattenedProgram& flat);
 HsaLoadedKernel compile_or_load_kernel_coop(const FlattenedProgram& flat);
 
 /// Compile and load a global-coop kernel.
-/// peak_rank 11–19.  Kernel function name: "compiled_sample_kernel_global".
+/// peak_rank 11–26.  Kernel function name: "compiled_sample_kernel_global".
 HsaLoadedKernel compile_or_load_kernel_global(const FlattenedProgram& flat);
 
 /// Free resources associated with a loaded kernel.

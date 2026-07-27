@@ -306,7 +306,7 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
     // Tier selection by peak_rank (all three share the SAME execute_shot body):
     //   register (<=4): 1 shot/thread, statevector in registers, no LDS/barriers.
     //   coop (5-10): 256 threads/shot, amplitudes in LDS.
-    //   global (11-19): amplitudes in HBM + work-stealing.
+    //   global (11-26): amplitudes in HBM + work-stealing.
     // P0: the register tier fixes the 15-28x low-rank catastrophe (256 threads
     // were cooperating on a 1-16 amplitude statevector).
     constexpr uint32_t kRegMaxRank = 4;
