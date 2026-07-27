@@ -1,8 +1,8 @@
-S1_frame_cnot    isa  347->254  (1.37x)  vgpr   8->3    v_alu   44->8    (5.50x)  branch  6->4 
-S2_meas_dormant  isa  428->269  (1.59x)  vgpr  25->14   v_alu   86->19   (4.53x)  branch 18->0 
-S3_expand_rank   isa  381->294  (1.30x)  vgpr  18->8    v_alu   67->27   (2.48x)  branch  9->6 
-S4_meas_active   isa  560->456  (1.23x)  vgpr  24->14   v_alu  139->96   (1.45x)  branch 15->7 
-S5_array_cnot    isa  424->294  (1.44x)  vgpr  16->8    v_alu   84->33   (2.55x)  branch 10->8 
-S6_array_u2      isa  364->289  (1.26x)  vgpr  24->18   v_alu   54->42   (1.29x)  branch 10->2 
-S7_noise_block   isa  763->716  (1.07x)  vgpr   0->0    v_alu  214->210  (1.02x)  branch 23->20
-S8_apply_pauli   isa  390->342  (1.14x)  vgpr  22->21   v_alu   71->63   (1.13x)  branch  3->3 
+S1_frame_cnot    instrs  136->47   (2.89x)  vgpr   8->3    v_alu   44->8    (5.50x)  branch   6->4
+S2_meas_dormant  instrs  206->70   (2.94x)  vgpr  25->14   v_alu   86->19   (4.53x)  branch  18->0
+S3_expand_rank   instrs  164->83   (1.98x)  vgpr  18->8    v_alu   67->27   (2.48x)  branch   9->6
+S4_meas_active   instrs  331->240  (1.38x)  vgpr  24->14   v_alu  139->96   (1.45x)  branch  15->7
+S5_array_cnot    instrs  207->81   (2.56x)  vgpr  16->8    v_alu   84->33   (2.55x)  branch  10->8
+S6_array_u2      instrs  147->86   (1.71x)  vgpr  24->18   v_alu   54->42   (1.29x)  branch  10->2
+S7_noise_block   instrs  447->407  (1.10x)  vgpr  56->56   v_alu  214->210  (1.02x)  branch  23->20
+S8_apply_pauli   instrs  185->137  (1.35x)  vgpr  22->21   v_alu   71->63   (1.13x)  branch   3->3
