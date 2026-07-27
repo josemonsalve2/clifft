@@ -809,6 +809,11 @@ per circuit. Any performance claim about "V2" must state which V2 it means.**
 | the noise fence took `surface_d7_t15` 1.427 → 0.503 | report §9.5 | **1.793 → 0.503**; the 1.427 cell is gate-polluted and already partly specialized | VALU 4.71e9 / 3.49e9 / 1.15e9 across the three runs |
 | `qv10`'s 0.252 → 0.310 unexplained | report §9.1 | the noise fence: VGPR 24 → 36 while **VALU falls** 5.10e8 → 5.02e8 | five runs, all `d13-21`, SVM side flat at 4317–4388 µs |
 | P0 preceded P1 | report §9 ordering | **P1 shipped 25 min before P0** (04:46/04:50 vs 05:11) | `git log --reverse` |
+| pre-fix specialized kernel had 1439/1509 (95.4 %) unfenced barriers | `150d09f` message, `d5_fence.sh:7-8`, report §11.2 | **1400 / 1509 (92.8 %)** | `llvm-objdump -d` on the archived pre-fix `.hsaco`; converges at scan windows 24/32/48/64/unbounded, and loosening `lgkmcnt(0)`→any `lgkmcnt` does not move it |
+| pre-fix interpreter had 52/81 unfenced barriers | same | **50 / 80** | A/B rebuild of `coop_interpreter.c`, `-O2 -ffp-contract=off -mcpu=gfx950`; the archived 52/81 counted an `ocml`/`ockl`-linked binary, so one barrier is device-library code, not V2 |
+| barrier fence costs +3.88 % static instructions | `150d09f` message | **+3.89 %** (5,629 → 5,848), and **0 %** on the register tier (byte-identical, 4,457) | same A/B rebuild |
+| the dust fix landed 07-26 13:34 | report §11.4 | **13:31** (`2a015fd`) | `git log` |
+| all 36 stale cached kernels are dated 07-25 | report §11.4 | **32 on 07-25, 4 on 07-26 00:00–01:48** — still all before the 06:33 barrier fix | `ls --time-style` on the archived cache |
 
 **Method note that generalizes.** Every archived run kept its `rocprofv3`
 kernel trace, and the kernel *name* plus *dispatch count* in that trace is a
@@ -818,3 +823,20 @@ circuit dispatched two different kernels — interpreter ×1 plus spec ×2 — w
 identifies the gate-pollution artifact from the artifacts alone, without needing
 the commit message that explains it. **Check `raw/<circ>/<engine>/kt/` before
 attributing any step in a progression table.**
+
+**Second method note: static ISA facts are cheap to re-derive, so re-derive
+them.** The barrier counts above needed no GPU — amdgcn codegen runs on the
+login node, and the whole A/B is `clang -emit-llvm` + `llc -filetype=asm` on the
+same source with one header line changed. That makes every static claim in this
+report (instruction counts, barrier counts, register pressure, LDS bytes)
+independently checkable in seconds, with no queue wait. Note that the *linked*
+`.hsaco` and the *unlinked* asm differ slightly — `ocml`/`ockl` contribute their
+own instructions and, in this case, one extra barrier — so state which one a
+count refers to. When only a ratio matters, the unlinked build is the cleaner
+measurement because it contains only V2's own code.
+
+**Third: a number quoted three times is still one measurement.** The 95.4 %
+figure appeared in the commit message, in the script header comment, and in the
+report, which reads like corroboration but is a single unreproducible source
+copied forward. The counting code that produced it was never committed. Prefer
+committing the *measurement script* over the *measured number*.
