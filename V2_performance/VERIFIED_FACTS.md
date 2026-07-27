@@ -1689,9 +1689,13 @@ which the pre-fence baseline lost at ~1.44.
    0.786–0.856. The §1.3(d) *projection* of ~0.40 was wrong by roughly 2× in the
    flattering direction; the direct measurement is ~0.84.
 
-4. **The QV family remains the weak band, 0.732–0.990**, and is where the
+4. **The QV family remains the weak band, 0.732–0.990.** ~~And is where the
    `waves` ratio inverts: `qv22_L6` runs V2 at 0.340× the SVM wave count and
-   still only reaches 0.980. Fewer, longer waves. Worth §16 follow-up.
+   still only reaches 0.980. Fewer, longer waves.~~ **RETRACTED by §13.14** —
+   the wave-count claim rests on `SQ_WAVES`, which does not reconcile with
+   launch geometry on precisely the rank-≥20 circuits, and on a per-wave cost
+   computed across two different profiling passes. The band is real; the
+   explanation was not. See §13.14 finding 2 for what replaces it.
 
 ### Denominator discipline
 
@@ -1704,3 +1708,119 @@ and are both stated — the check §14.0 was written to force.
 This job ran on `d13-21`. Report §1–§10's absolute timings come from `f13-21`.
 V2/SVM *ratios* within this job are sound (both arms, same job, same node);
 absolute microsecond figures must not be compared across the two chapters.
+
+---
+
+## §13.14 — audit pass 16: report §14 (performance evaluation), 27 checks
+
+Written against job 50793 only. Every number in report §14 was recomputed from
+`summary.json` or read out of the raw `*_counter_collection.csv` files; every
+code quotation was diffed against the working tree at `79d4463`.
+
+### Two claims retracted before publication
+
+**1. The per-wave occupancy inversion (rejected on method, then on data).**
+
+The first draft explained the QV band as an occupancy effect: V2 running fewer,
+longer-lived waves, computed as `SQ_WAVE_CYCLES / SQ_WAVES`. Two independent
+reasons that quotient is inadmissible:
+
+- **It divides across profiling passes.** `SQ_WAVES` is collected in `pmcA`,
+  `SQ_WAVE_CYCLES` in `pmcC`. These are *separate executions of the kernel*
+  (`raw/<circuit>/<arm>/pmc{A,B,C}/`, distinct rocprofv3 invocations, distinct
+  output directories). Combining them requires an argument that both executions
+  did identical work; no such argument was made or is available.
+- **`SQ_WAVES` disagrees with launch geometry on exactly the affected
+  circuits.** On 20 of 26 circuits `SQ_WAVES == workgroups × 4` exactly (256
+  threads / 64-wide wave). On the six rank-≥20 QV circuits it does not, and the
+  discrepancy is not a constant factor:
+
+  | circuit | arm | wgs | geometry implies | `SQ_WAVES` |
+  |---|---|---:|---:|---:|
+  | `qv20_seed42` | svm | 512 | 2,048 | 8,832 |
+  | `qv21_L8` | svm | 512 | 2,048 | 10,240 |
+  | `qv22_L6` | svm | 512 | 2,048 | 8,000 |
+  | `qv20_seed42` | v2 | 2,048 | 8,192 | 15,808 |
+  | `qv23_L5` | v2 | 336 | 1,344 | 4,000 |
+  | `qv24_L4` | v2 | 168 | 672 | 2,016 |
+
+  Three identical SVM grids (512 wgs, 256 threads) report three different wave
+  counts. Whatever this counter measures on persistent global-tier kernels, it
+  is not "waves launched," and a ratio built on it is not a wave ratio.
+
+  Cross-checked in the raw CSVs: each pass records exactly one dispatch of the
+  kernel under test, so this is not multi-dispatch aggregation. `qv22_L6` v2
+  *does* reconcile (680 × 4 = 2,720), which rules out a blanket counter failure
+  and makes the non-reconciling cells harder, not easier, to explain.
+
+**2. The 64-VGPR occupancy cliff (demoted to an open lead).**
+
+The three weakest circuits are exactly the three where V2 is allocated 64 VGPRs
+(`qv22_L6` 0.980, `qv23_L5` 0.990, `qv24_L4` 0.882) against 52–56 on the ranks
+that win (`qv20` 52, `qv20_L8` 56, `qv21_L8` 52), with scratch jumping to
+448–576 B from 96–112 B. The correlation is perfect across six circuits. It is
+still not a finding: six points, VGPR count confounded with rank, and no counter
+in this set separates "allocated" from "spilling." Recorded in §16 as a lead.
+
+### What replaces them
+
+**Finding 2 (revised).** The QV band is explained structurally by the
+global-tier HBM budget. `v2_kernel.cc:436-445` sizes the resident pool at 12
+bytes per amplitude (`GpuComplex` is `{float re; float im;}`, confirmed at
+`emit_preamble.cc:90`) against a 32 GB budget, capped 2048, rounded down to a
+multiple of `kNumXCDs = 8` (`gpu_types.h:29`). Evaluating the arithmetic
+independently of the run and comparing to the recorded grids:
+
+| rank | bytes/wg | predicted | measured | |
+|---|---:|---:|---:|---|
+| 20 | 12 MB | 2,048 (cap) | 2,048 | ✓ |
+| 21 | 24 MB | 1,360 | 1,360 | ✓ |
+| 22 | 48 MB | 680 | 680 | ✓ |
+| 23 | 96 MB | 336 | 336 | ✓ |
+| 24 | 192 MB | 168 | 168 | ✓ |
+
+Five for five, from source constants, with no fitted parameter. At rank 24 the
+pool is 168 workgroups on a 256-CU device: the machine cannot be filled. This is
+a stronger claim than the one it replaces *and* it is checkable before launch.
+
+### Verified in this pass
+
+| # | claim | verdict |
+|---|---|---|
+| 1 | mean 0.626, median 0.670 | ✓ recomputed 0.6265 / 0.6700 |
+| 2 | wins 26/26 | ✓ all ratios < 1 |
+| 3 | all 26 dispatch `clifft_v2_spec` | ✓ |
+| 4–29 | all 26 rows of the §14.2 timing table | ✓ each to 3 dp |
+| 30 | SALU ratio < VALU ratio on 26/26 | ✓ zero violations |
+| 31 | SALU range 0.110–0.361 | ✓ `four_t` / `qv24_L4` |
+| 32 | `qv10` SALU 5.1× (draft said 5.0×) | ✗ **fixed**, 1/0.198 = 5.05 |
+| 33 | absolute ΔSALU/ΔVALU "≈3.8× on surface" | ✗ **fixed** — true for the t15/t19 circuits (3.78–3.87) but the t10 circuits are 6.04–6.06 and `circuit_d3` is 7.31; restated as a 3.8×–7.3× range |
+| 34 | absolute ΔSALU > ΔVALU **universally** | ✗ **fixed** — inverts on all six QV circuits (0.24–0.48). The draft's table showed only confirming rows. Now stated explicitly with `qv20_seed42` (−9,094 M SALU vs −37,752 M VALU) as the counterexample |
+| 35 | MFMA = 0 on all 52 cells | ✓ 26 × 2, none missing |
+| 36 | LDS coop 13312/23040, global 1024/8704, reg 0/0 | ✓ |
+| 37 | global-tier LDS is `lds_state` + `lds_shot` only | ✓ `v2_specializer.cc:204-205`; coop adds `lds_v[1024]` + `lds_red_scratch[512]` at `:185-186` |
+| 38 | `SQ_INSTS_LDS` = 0 on V2 register tier vs 25,280 SVM | ✓ all three register circuits |
+| 39 | `SQ_INSTS_LDS` "0.60–0.77× on coop" | ✓ for d5/qv10, but **surface coop is 1.13–1.25×** — both directions now stated |
+| 40 | scratch 656–1040 vs 4480, "4.4×" | ✗ **fixed** to 4.3× (4480/1040 = 4.31) |
+| 41 | busy-cycle r = 0.942, median 5.5 %, mean 9.0 % | ✓ recomputed |
+| 42 | busy-cycle residual is "worst on QV" | ✗ **fixed** — the six largest residuals are the entire d5 family (17.9–28.2 %), *not* QV. The draft asserted QV to make the residual support the occupancy story it was already telling |
+| 43 | d5 L2 91–92 % vs 97.6–98.4 % | ✓; `cultivation_d5` 90.9/98.9 |
+| 44 | pre-fence 71.5 % vs 98.0 % | ✓ `VERIFIED_FACTS.md:158` |
+| 45 | S1 5.50×, S2 4.53×, S2 18→0 branches, S7 1.02× | ✓ `p6_specialization.md:126-132` |
+| 46 | noise 19.1 % of calls, 447 vs 136 instructions | ✓ `:925`, `:932-933` |
+| 47 | §7.9 predicted d5 would be the weakest coop result | ✓ `:72-73` |
+| 48 | `pc * 40` needs a 64-bit multiply | ✓ `s_mul_i32` + `s_mul_hi_u32`, §7.3 |
+| 49 | `bench_all.sh` fixture guard quoted verbatim | ✓ `tools/bench_all.sh:131-138` (draft cited `:127-135`) |
+
+### Sixteenth method note
+
+*A residual is evidence about whichever circuits it actually falls on.* Check
+43 is the one worth remembering: the draft claimed the busy-cycle model's error
+was largest on the QV circuits, because the surrounding section was arguing that
+QV is occupancy-limited and a residual there would have corroborated it. The
+residual is in fact concentrated entirely on the d5 family and is essentially
+absent from QV. The number had been computed correctly and then attributed to
+the wrong circuits from memory of the argument rather than from the sorted list
+— and it pointed, once sorted, at a *different* real finding (§14.7 and §14.8
+are the same six circuits seen through two counters). Sorting the residual cost
+one line of Python and changed which section of the chapter it belonged to.
