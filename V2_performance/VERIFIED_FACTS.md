@@ -1236,3 +1236,76 @@ model of what a well-made claim looks like. The 41-opcode partition is the same
 shape: it does not merely assert a total, it asserts six family counts that sum
 to it, so the arithmetic is checkable and every family is falsifiable
 separately. That is how to write a number that can be audited.
+
+---
+
+## §13.10 — Audit pass 12: report §1 (`p1_intro.md`, front matter + executive summary)
+
+Twelfth chapter audit. 256 lines, 23 checks. Four corrections, one of them a
+tier misassignment that the chapter's own stated method already ruled against.
+
+| # | claim | source | verdict |
+|---|---|---|---|
+| 1 | node `smci350-rck-g03-f13-21`, gfx950 | `runs/…182433Z/node.json` | EXACT (SLURM 50469) |
+| 2 | cache-key fix commit `009df59` | git | EXACT ("key the specializer cache on device headers") |
+| 3 | reproducibility run at `89d541e`, pre-fence | git | EXACT |
+| 4 | 26 circuits, 20 wins | 26 × `gpu/*.json` | **EXACT — re-derived** |
+| 5 | corpus median 0.678 | ditto | EXACT |
+| 6 | global surface band 0.252–0.306, n=5 | ditto | EXACT |
+| 7 | coop band "0.317–0.595, n=6" | ditto | **WRONG → 0.317–0.530, n=5** |
+| 8 | register band "n=3" | ditto | **WRONG → n=4** (`surface_d7_t5`) |
+| 9 | QV band 0.729–0.992, n=6 | ditto | EXACT |
+| 10 | loss band 1.440–1.451, n=6 | ditto | EXACT |
+| 11 | bands sum to 26 | — | HOLDS after fix (5+5+4+6+6) |
+| 12 | SALU falls 2.8–9.1× on all 20 wins | counters | **EXACT** (0.110–0.361, no exceptions) |
+| 13 | VALU 1.2–2.3×, `circuit_d3` 0.818 | counters | EXACT (0.429–0.863) |
+| 14 | SALU inverts to 1.467–1.469 on the 6 | counters | EXACT |
+| 15 | VALU inverts to 2.23–2.30 on the 6 | counters | EXACT (2.232–2.301) |
+| 16 | 20 wins ran `clifft_v2_spec`, 6 ran `clifft_v2_coop` | `kernel_name` | **EXACT — perfect correlation** |
+| 17 | HBM budget code, 32 GB / 12 B per amp | `v2_kernel.cc:436-446` | VERBATIM |
+| 18 | 2,048 cap | `v2_kernel.cc:441` | EXACT |
+| 19 | predicted grids 2048/1360/680/336/168 | re-derived from formula | **EXACT, 5 for 5** incl. XCD rounding |
+| 20 | geometry table membership | 26 × `Grid_Size_X` | **INCOMPLETE → 3 circuits missing, 1 misfiled** |
+| 21 | fence-recovery table, 6 rows | `scratch/perf_50389.log` | **EXACT — medians recomputed from raw** |
+| 22 | recovery run "same node" | `perf_50389.log:NODE` | **MISLEADING → d13-21, corpus is f13-21** |
+| 23 | MFMA "0.0 on all 26 circuits both backends" | counters | **OVERSTATED → 51 of 52; 1 unmeasured** |
+
+### The `surface_d7_t5` misassignment
+
+§1.2 assigns circuits to tier bands and states the method explicitly: membership
+is *"assigned by measured launch geometry rather than by circuit name — the
+census of §10.5 is precisely the finding that names are unreliable here."*
+`surface_d7_t5` was nevertheless filed under **coop** on the strength of its
+name. Its measured grid is 20,224 = **79 workgroups** = ⌈20000/256⌉, which is
+register-tier geometry, and `classify_circuits_48989.log` independently reports
+it as rank 3 → REGISTER. Moving it drops the coop band's upper bound from 0.595
+to 0.530 and lifts the register band to n=4.
+
+The geometry table below it had the same defect from the other direction: it
+listed 23 of 26 circuits, omitting `surface_d7_t19` from the 2,048 row and
+`surface_d7_t15`/`surface_d11_t10` from the 10,000 row. Both tables now name
+every circuit.
+
+### The cross-node projection
+
+The fence-recovery A/B (job 50389) reproduces exactly — all six medians, all six
+gains. But it ran on `d13-21` while the corpus ran on `f13-21`, and the chapter
+chained the two to project "ratios near 0.40". Per the project's own
+benchmarking rule, ratios do not travel across nodes on a heterogeneous
+partition. The **1.65–1.76× interpreter→specializer gain is measured** (both
+arms, one job, one node); the 0.40 is now labelled a projection, with §15 named
+as the direct measurement.
+
+### Twelfth method note: a stated method is a checkable claim.
+
+The strongest thing in this chapter is the sentence declaring how band
+membership is assigned — and it is the sentence that made the error findable in
+one query. A document that says "assigned by measured launch geometry" can be
+audited by reading the geometry; one that just presents bands cannot. The
+lesson is not that the author should have been more careful, it is that
+**writing down the rule converts a judgment call into a testable assertion**,
+and every rule stated in this report should therefore be re-run against the data
+rather than read for plausibility. Note also which way the error ran: the
+misfiled circuit made the coop band look *better* (0.595 vs 0.530 upper bound is
+a worse ratio, so removing it tightened the band) — errors of convenience are
+not the only kind, and checking only the flattering numbers would have missed it.
