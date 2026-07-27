@@ -826,14 +826,53 @@ LDS 24664, occupancy 8. Whatever produced 115 KB/thread is not in the current
 `ir_reference` corpus. **Do not repeat this number.** v1's real problem is
 documented and large enough without it (§9: 221 s compile, 240 K lines of IR).
 
-**`hsa_persistent_dispatch.h` per-op costs are asserted, not measured.** The
-header claims `alloc_kernarg ~800 ns`, `allow_gpu_access ~1200 ns`,
+**~~`hsa_persistent_dispatch.h` per-op costs are asserted, not measured.~~
+RESOLVED (2026-07-27) — measured, and the header's numbers are wrong by ~58×.**
+The header claimed `alloc_kernarg ~800 ns`, `allow_gpu_access ~1200 ns`,
 `signal_create ~600 ns`, `signal_destroy ~400 ns`, `free_kernarg ~300 ns`,
-"~3.3 µs saved of ~4.5 µs". No measurement in this tree produces those numbers.
-`dispatch_bench/` exists to replace them with real gfx950 measurements
-(naive / persistent / batched16 HSA modes vs HIP sync / stream_sync /
-launch_only). **Until that job lands, these are [unverified] and the report must
-not present them as measured.**
+and **"~3.3 µs saved of ~4.5 µs"**. `dispatch_bench/` now measures the same
+five operations directly: `naive` performs exactly them per dispatch
+(`hsa_dispatch_bench.cc:206-229`), `persistent` hoists all five out of the loop,
+so `naive − persistent` **is** the header's quantity.
+
+Job **50507**, node `smci350-rck-g03-d13-21`, gfx950, ROCm 7.2.3, HIP runtime
+70253211. Both runtimes in one job on one node — the partition is heterogeneous,
+so split-node arms would have been worthless. 2,000 iterations × 5 reps;
+**median of the 5 reps**, ns per dispatch:
+
+| mode | median ns/dispatch | spread (min–max) |
+|---|---|---|
+| HSA `naive` | **198,920** | 191,615 – 203,587 (6.0 %) |
+| HSA `persistent` | **6,325** | 6,320 – 6,333 (0.21 %) |
+| HSA `batched16` | **2,318** | 2,318 – 2,326 (0.35 %) |
+| HIP `sync` | **10,739** | 10,731 – 13,668 (rep 0 first-touch) |
+| HIP `stream_sync` | **10,997** | 10,992 – 11,002 (0.09 %) |
+| HIP `launch_only` | **2,090** | 2,085 – 2,106 (0.98 %) |
+
+What this establishes, and what it corrects:
+
+* **The five per-dispatch operations cost 192,595 ns, not ~3,300 ns** — the
+  header understates them by **58×**. The total it called "~4.5 µs" is
+  **198,920 ns, 44× larger**. The *direction* of the header's advice was right
+  (hoist these five out of the loop); every *magnitude* in it was wrong. **Do
+  not quote the header's per-op breakdown** — the bench does not attribute cost
+  to individual ops, only to the group, so the individual figures remain
+  unmeasured and are now known to be wrong in aggregate.
+* **HSA `persistent` beats HIP `stream_sync` by 1.74×** (6,325 vs 10,997;
+  −4,672 ns per dispatch). This is the number supporting the no-HIP decision.
+* **HSA `batched16` beats HIP `stream_sync` by 4.74×** (2,318 vs 10,997;
+  −8,679 ns) and edges below HIP's `launch_only` floor of 2,090 ns — i.e. a
+  batched AQL dispatch costs less than HIP's launch path *without any
+  synchronization at all*.
+* **`naive` → `persistent` is 31.5×.** The `naive` arm's 6 % spread is the
+  widest of the six and is expected: it makes two KFD ioctls and a page-table
+  update per dispatch, inheriting kernel-side scheduling jitter. It does not
+  affect any conclusion, because the effect is 31×.
+
+Caveat on provenance: the artifacts in `dispatch_bench/` are from job **50507**,
+not 50501. Job 50501 (`dispbench`, same node, 13 s) ran 52 seconds earlier and
+left no CSVs; 50507 is the run that wrote `bench.log`, `hsa_results.csv` and
+`hip_results.csv`, and its log ends in `DONE`. Cite 50507.
 
 **`PERFORMANCE_OPTIONS.md` dispatch breakdown is v1-era.** HSA executable load
 170-206 ms one-time, `PersistentDispatcher::dispatch` ~0.15 ms, total loop
@@ -848,7 +887,7 @@ useful, **[unverified]** as stated.
 | item | status |
 |---|---|
 | **Re-measure the whole corpus on header-keyed cache** | **job 50505 running; §0. Every §1–§3/§6/§10 number is provisional until it lands** |
-| HIP-vs-HSA dispatch cost, measured on gfx950 | SLURM job 50501 pending; replaces §11's asserted numbers |
+| ~~HIP-vs-HSA dispatch cost, measured on gfx950~~ | **landed (2026-07-27)** — job **50507** (not 50501), `d13-21`, gfx950. HSA `persistent` 6,325 ns vs HIP `stream_sync` 10,997 ns = **1.74×**; `batched16` 2,318 ns = **4.74×**. §11's asserted per-op costs are **replaced and shown wrong by ~58×** |
 | ~~`coop_r10_n1720` specialization is incorrect~~ | **retracted (§0)** — the failing verdicts were computed on the pre-fence binary; `435213e` measured the post-fence gate passing |
 | `V2_SPEC_NOISE_INLINE=1` A/B on current HEAD | not run; now a *correctness* probe (does the gate pass?), not a performance one (§6.6) |
 | V2 coop **interpreter** vs SVM interpreter parity | V2's is ~1.44x slower on the one shape where it has to run; never an optimization target (§6.3) |
