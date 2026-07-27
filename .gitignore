@@ -74,3 +74,9 @@ build-gpu-*/
 docs/v2/ir_reference/
 build-v2-nohip/
 build-v2-deps/
+
+# Local agent/tooling caches — never part of the source tree
+.codex/
+.rocprofv3/
+.rocm_include_shim/
+stale/
