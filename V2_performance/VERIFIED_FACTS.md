@@ -201,29 +201,58 @@ specialized form, same harness, same flags, gfx950). Measured with
 `lowering/spec_examples/build_examples.sh`; results in `gains.txt`, per-case
 detail in `stats.csv`.
 
-| # | class | ISA lines | VGPR | VALU | branches |
-|---|---|---|---|---|---|
-| S1 | frame_cnot — frame operand folding | 347 -> 254 (1.37x) | 8 -> 3 | 44 -> 8 (**5.50x**) | 6 -> 4 |
-| S2 | meas_dormant — flag folding, dead-path deletion | 428 -> 269 (1.59x) | 25 -> 14 | 86 -> 19 (**4.53x**) | 18 -> **0** |
-| S3 | expand_rank — static rank tracking | 381 -> 294 (1.30x) | 18 -> 8 | 67 -> 27 (2.48x) | 9 -> 6 |
-| S4 | meas_active — rank-folded coop reduction | 560 -> 456 (1.23x) | 24 -> 14 | 139 -> 96 (1.45x) | 15 -> 7 |
-| S5 | array_cnot — `scatter_bits_2` index folding | 424 -> 294 (1.44x) | 16 -> 8 | 84 -> 33 (2.55x) | 10 -> 8 |
-| S6 | array_u2 — fused-matrix table lookup | 364 -> 289 (1.26x) | 24 -> 18 | 54 -> 42 (1.29x) | 10 -> 2 |
-| S7 | noise_block — runtime loop, stays a loop | 763 -> 716 (**1.07x**) | 0 -> 0 | 214 -> 210 (**1.02x**) | 23 -> 20 |
-| S8 | apply_pauli — mask index folds, contents don't | 390 -> 342 (1.14x) | 22 -> 21 | 71 -> 63 (1.13x) | 3 -> 3 |
+| # | class | instructions | VGPR | SGPR | VALU | branches |
+|---|---|---|---|---|---|---|
+| S1 | frame_cnot — frame operand folding | 136 -> 47 (**2.89x**) | 8 -> 3 | 14 -> 12 | 44 -> 8 (**5.50x**) | 6 -> 4 |
+| S2 | meas_dormant — flag folding, dead-path deletion | 206 -> 70 (**2.94x**) | 25 -> 14 | 13 -> **26** | 86 -> 19 (**4.53x**) | 18 -> **0** |
+| S3 | expand_rank — static rank tracking | 164 -> 83 (1.98x) | 18 -> 8 | 16 -> 10 | 67 -> 27 (2.48x) | 9 -> 6 |
+| S4 | meas_active — rank-folded coop reduction | 331 -> 240 (1.38x) | 24 -> 14 | 30 -> 26 | 139 -> 96 (1.45x) | 15 -> 7 |
+| S5 | array_cnot — `scatter_bits_2` index folding | 207 -> 81 (2.56x) | 16 -> 8 | 24 -> 10 | 84 -> 33 (2.55x) | 10 -> 8 |
+| S6 | array_u2 — fused-matrix table lookup | 147 -> 86 (1.71x) | 24 -> 18 | 23 -> 16 | 54 -> 42 (1.29x) | 10 -> 2 |
+| S7 | noise_block — runtime loop, stays a loop | 447 -> 407 (**1.10x**) | **56 -> 56** | 86 -> 85 | 214 -> 210 (**1.02x**) | 23 -> 20 |
+| S8 | apply_pauli — mask index folds, contents don't | 185 -> 137 (1.35x) | 22 -> 21 | 44 -> 42 | 71 -> 63 (1.13x) | 3 -> 3 |
+
+**Superseded numbers.** An earlier version of this table reported an *ISA line
+count* (`wc -l` of the `.s`) rather than an instruction count, and read the
+resource columns from the `; NumVgprs:` / `; NumSgprs:` comments. Three bugs,
+all fixed 2026-07-25, none of which touched the 16 `.s` artifacts (verified
+byte-identical before and after):
+1. Line count includes 205–316 lines of directives, comments, labels and
+   metadata per file — more than half of each — which diluted every ratio toward
+   1.0. S1 read 1.37x where the instruction ratio is 2.89x.
+2. LLVM prints `; NumVgprs:` as a symbolic expression
+   (`max(56, amdgpu.max_num_vgpr)`) for any kernel calling an external function.
+   S7 calls `__ocml_log_f64`, so a trailing-digit regex scraped **0** — hence the
+   old `0 -> 0` VGPR entry. It is 56 -> 56.
+3. `; NumSgprs:` is not emitted by this LLVM at all; that column was 0 for all
+   16 files and is now read from `.set case_kernel.numbered_sgpr`.
 
 **S2 is the cleanest demonstration**: 18 branches to zero. When the specializer
 knows a measurement's flags at codegen time, the `FLAG_IDENTITY` path is not
-predicated — it is *deleted*, and with it every branch that guarded it.
+predicated — it is *deleted*, and with it every branch that guarded it. S2 is
+also the one case whose **SGPR count rises** (13 -> 26): the deleted vector work
+and branches reappear as scalar selects and their literals. That is the
+scalar-substitution mechanism in its clearest form — work moved, not merely
+removed.
 
 **S7 is the honest negative result and belongs in the report.** `noise_block`
-gains 1.07x on code size and 1.02x on VALU, because its body is a
+gains 1.10x on instruction count and 1.02x on VALU — and, now that the column is
+read correctly, **no VGPR relief whatsoever** (56 in both forms), which matters
+because register pressure is exactly what straight-lining hundreds of these adds.
+Its body is a
 `while (st->next_noise >= start && st->next_noise < end)` loop whose trip count
 depends on the PRNG stream. The specializer folds `start` and `count` to
 immediates and can do nothing else. **This is the R5 principle working as
 designed** — specialize the operand body, straight-line the sequence, never
 unroll a data-dependent loop — and it is also precisely why the noise-heavy
 circuits do not benefit (§6).
+
+Quantified against the actual regressing circuit: `lowering/v2_src/coop_circuit_d5.c`
+emits 1,720 `v2_op_*` calls, of which **329 (19.1 %)** are `noise` / `noise_block`
+/ `readout_noise` — the one class measured at 1.02x — while 757 (44.0 %) are
+frame ops that fold well but are individually cheap (136 interpreter-form
+instructions each, against 447 for a noise block). The mix is weighted toward
+the ops specialization cannot help, in exactly the dimension that costs time.
 
 **Methodology note that materially changed the numbers.** The first version of
 the harness declared the interpreter's instruction stream
