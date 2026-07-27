@@ -1512,3 +1512,117 @@ narrative explanation as independent confirmation of the number it explains —
 "48 call sites plus 4 clones" *sounds* like corroboration, but it was
 constructed to land on 52, so it could only ever agree. When a number has both a
 measured column and a story, check the column.
+
+---
+
+## §13.13 — Audit pass 15: report §7 (`p6_specialization.md`, the eight classes)
+
+Longest chapter in the report (828 lines), 41 checks. One retraction of a
+central mechanism claim, one structural defect, six corrections.
+
+### The retraction: specialization deletes scalar work, it does not receive it
+
+The chapter asserted in four places — finding 1, finding 4, the §7.3 callout and
+the §7.4 discussion — that V2's gain is *"the same computation moved from the
+vector pipe to the scalar pipe, where it runs once per wavefront instead of once
+per lane."* It cited S2's SGPR 13→26 as the visible mechanism.
+
+Counting scalar instructions (`^\s+s_`) the same way the chapter counts vector
+ones (`^\s+v_`), over the same sixteen checked-in `.s` files:
+
+| Case | SALU interp→spec | ratio | VALU ratio |
+|---|---|---|---|
+| S1 | 74→35 | 2.11× | 5.50× |
+| S2 | 93→45 | 2.07× | 4.53× |
+| S3 | 84→48 | 1.75× | 2.48× |
+| S4 | 133→93 | 1.43× | 1.45× |
+| S5 | 102→33 | **3.09×** | 2.55× |
+| S6 | 83→36 | **2.31×** | 1.29× |
+| S7 | 177→141 | 1.26× | 1.02× |
+| S8 | 87→49 | **1.78×** | 1.13× |
+
+Scalar instructions fall in **all eight** cases, and in S5/S6/S8 they fall
+*faster* than vector instructions. Job 50793's 26-circuit corpus agrees at
+scale: SALU/VALU ratio comparison gives SALU falling faster on **26 of 26**
+circuits, and on the surface family the *absolute* number of scalar instructions
+removed exceeds the vector count removed by ~3.8× (e.g. `surface_d11_t19`:
+−8,691 M SALU vs −2,275 M VALU).
+
+What survives is narrower and still true: S2's scalar *register* count rises
+13→26 while its scalar *instruction* count falls 93→45. Register pressure from
+holding folded literals in straight-line code — a real cost, and the only one
+this chapter measures — not a destination for migrated work.
+
+Note that §3 of this document already recorded "SALU instruction count falls by
+3x-9x on every circuit where V2 wins… the interpreter's `switch` dispatch
+disappearing." The report chapter contradicted a fact this file had verified.
+
+### Structural: §7.2 did not exist
+
+§7.9 cited "the note in §7.2". The measurement note was an unnumbered blockquote
+inside §7.1, so the chapter's own headings ran 7.1, 7.3, 7.4 … Promoted to a
+real §7.2 and extended with the full line-ratio vs instruction-ratio comparison
+(all eight cases: 1.07×–1.59× wrong against 1.10×–2.94× right) and the ugrep
+`\t` bug from `build_examples.sh:38-42`.
+
+### Verified exact
+
+| # | claim | verdict |
+|---|---|---|
+| 1 | all 16 stats.csv rows (instrs/vgpr/sgpr/s_load/ds_op/v_alu/branch) | EXACT |
+| 2 | `harness.h` "NOT volatile" quote | VERBATIM |
+| 3 | `CASE_KERNEL_HEAD`, `IN(n)` macros | VERBATIM |
+| 4 | production flags match `v2_compile_cache.cc:157-158` | EXACT |
+| 5 | 8 cases / 8 interp `.s` / 8 spec `.s` | EXACT |
+| 6 | all 8 op bodies quoted from `v2_ops_body.inc` | VERBATIM |
+| 7 | body line cites 12-19, 53-65, 85-96, 135-165, 168-180, 406-413, 438-451 | EXACT |
+| 8 | `v2_ops_body.inc:284-304` (S6) | **WRONG → :284-305** |
+| 9 | all 8 `#if SPEC_FORM` blocks | VERBATIM |
+| 10 | `v2_specializer.cc:26-56` rank tracking | VERBATIM |
+| 11 | `coop_interpreter.c:50-53` `u32 k = st->active_k` | VERBATIM |
+| 12 | `v2_ops.h:235-236` reduce2 ABI comment | EXACT |
+| 13 | `; NumSgprs:` absent from all 16 files | EXACT (0/16; only `TotalNumSgprs`) |
+| 14 | S7 VGPR 56→56 from `.set`, symbolic in comment | EXACT |
+| 15 | S1 spec: masks 8/0x400/0x1000/64 | EXACT |
+| 16 | S1 spec: "8 VALU, just the v_movs" | EXACT and **understated** — all 8 are `v_mov` |
+| 17 | S1 quoted "specialized form, in full" | **INCOMPLETE** — dropped 3 lines |
+| 18 | S1 interp `:9-18`, `:34-46` | **NON-CONTIGUOUS** — presented as verbatim |
+| 19 | `s_mul_i32 s7, s6, 40` = `sizeof(CV2Instr)` | EXACT (40, pinned by `device_abi_checks.cc:58`) |
+| 20 | S2 "no `s_cbranch` in the measurement logic" | TRUE but **understated** — 0 branches in the whole file vs 18 |
+| 21 | S2 rng excerpt | **NON-CONTIGUOUS** — 4 lines elided mid-block |
+| 22 | S2 "largest instruction ratio of the eight" | EXACT (2.94×), but S1's 5.50× is the largest VALU ratio |
+| 23 | S3 `0x278` present in interp, absent in spec | EXACT |
+| 24 | S3 "the other removed load is the bytecode fetch" | **WRONG** — 6→4 is not deletion; 3 loads + 2 dynamic frame reads go, 3 static loads appear |
+| 25 | S4 `ds_op` 4→4 | EXACT, but counts `ds_(read\|write)` only |
+| 26 | S4 `ds_bpermute_b32` | **32 in both forms**, = 6×2×2 + 2×2×2 — far stronger ABI evidence |
+| 27 | S5 spec index collapse, `offset:288`/`offset:32` | EXACT |
+| 28 | S5 `s_load` 4→1, "only the third survives" | EXACT |
+| 29 | S5 "two `s_not_b64`" | EXACT per call site; 4 in file, 0 in spec |
+| 30 | S6 guard fold `axis=4 < active_k=8` | EXACT (call is `(st, v, 8u, 4u, fused_u2, 17u)`) |
+| 31 | S6 two survivors are `s_cbranch_execz` | EXACT (`:22`, `:73`) |
+| 32 | S7 diff `interp:11-38` vs `spec:15-25` | VERBATIM |
+| 33 | S7 `(x-lo) > (hi-lo)`: `0xffffff7d` = −131, `56` = 57−1 | EXACT |
+| 34 | S8 "branch count does not move at all" | TRUE but **hides the finding** — interp 1×scc1+2×vccnz, spec 3×scc1 |
+| 35 | S8 `s_load` 17→11 | EXACT |
+| 36 | S8 mask displacement stride | 0x0/0x58/0xb0, and 0x58 = 88 = `sizeof(CV2Mask)` at `PAULI_WORDS=5` |
+| 37 | `coop_circuit_d5.c` = 1,720 `v2_op_*` calls | EXACT |
+| 38 | opcode-mix table, all 7 rows | EXACT, and sums to 1,720 |
+| 39 | noise share 329 = 19.1 % | EXACT (156 `noise` + 80 `noise_block` + 93 `readout_noise`) |
+| 40 | frame share 757 = 44.0 % | EXACT (430+284+24+19) |
+| 41 | S7 447 instrs vs S1 136 in interp form | EXACT |
+
+### Fifteenth method note: measure the pipe you are making claims about.
+
+The chapter measured VALU carefully across eight cases and built its central
+mechanism claim on the *scalar* pipe — which it never counted. The `stats.csv`
+schema has a `v_alu` column and no `s_alu` column, so the number that would have
+falsified the claim was one grep away and structurally invisible. Worse, the
+claim was *plausible*: SGPRs really do rise in S2, scalar instructions really are
+cheaper per-lane, and "work moved rather than vanished" is the sort of statement
+that sounds like hard-won mechanistic insight rather than an untested inference.
+
+Two guards, both cheap. First: if a claim names two things (vector and scalar),
+measure both, even when only one is what you set out to study. Second: a claim
+about *instructions* cannot be evidenced by a count of *registers* — they are
+different quantities, and here they moved in opposite directions in the very
+case offered as proof.
