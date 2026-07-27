@@ -919,3 +919,47 @@ clears the conservative floor by 2 decades and the simulated one by ~4), but
 "the margin is 2 decades" and "the margin is 4 decades" are different claims.
 **State the estimator alongside the number, or commit the script that encodes
 it.**
+
+### 13.4 Audit-pass-6 (2026-07-27) — report §9 (optimizations, tier by tier)
+
+**§9 audits clean on all data.** One loose count, no incorrect numbers. This is
+the longest chapter (537 lines) and the most historically layered — it narrates
+twelve commits across two nodes over a day — yet every quantitative claim in it
+recomputes from the archived runs.
+
+| check | result |
+|---|---|
+| all 56 progression-table cells, recomputed from raw `total_kernel_ns` in `runs/*/raw/<circ>/<engine>/kt/` | exact, zero mismatches |
+| kernel-name table (per circuit, per stage) | exact, cell for cell — confirms the chapter's thesis that every step is a *kernel change*, not tuning |
+| gate-pollution artifact, `frame_h` | verbatim in the traces: `register` ×1 @ 19.1 µs + `spec` ×2 @ 28.8 µs, then `spec` ×1 @ 10.5 µs the next run |
+| gate-pollution artifact, `qv10` | verbatim: 1270.2 µs + 1667.2 µs → 1340.0 µs |
+| all 12 commit timestamps | match to the minute, including P1 landing 25 min *before* P0 |
+| node split (runs 1–8 on `d13-21`, runs 9–12 on `f13-21`) | confirmed from the trace-CSV path names, no `sacct` needed |
+| omitted `specializer-verify` column (0.085 ratio) | confirmed to originate in a 128.2 µs SVM outlier — the omission is correct |
+| gfx950 LDS = 163,840 B vs gfx90a/gfx942 = 65,536 B | reproduced by direct `extern __attribute__((address_space(3))))` probe at three targets |
+| verbatim clang error `local memory (163844) exceeds limit (163840) in 'k'` | exact |
+| gfx942/gfx950 occupancy table, incl. the `20992 → 7` boundary | every cell reproduces under `min(8, LDS_total/LDS_per_wg)` |
+| P1 LDS progression 25,088 → 16,896 → 13,312 → 13,064 B | exact |
+| P0 macro quotes and the `715f8d0` source quotes | verbatim |
+| qv10 five-row counter progression (VGPR 24→36, VALU falling as time rises) | exact |
+| interpreter-vs-specialized gains table | exact — *after correcting my own baseline error* (see note) |
+| noise-fence step, incl. the VALU triple | exact |
+| kernarg ABI 152 / 112 / 116 | exact |
+| the four quoted `static_assert`s and the header comment at `device_abi_checks.cc:16` | verbatim, at lines 16/17/21/58/59 |
+| "60-odd `static_assert`s" | **loose — the file has exactly 55.** Corrected to `55` in the chapter. |
+
+**My own error, recorded because it is the more instructive one.** My first pass
+flagged three `global`-tier rows of the interpreter-vs-specialized table as
+wrong. They were not: I had used `after-specializer` as *the* interpreter
+baseline for all circuits, while the chapter says "last interpreter run" — which
+for the global tier is `noise-specialized`, and for `qv10` is `after-P0-P1`.
+Re-checking per circuit across all twelve runs confirmed every published value.
+
+**Sixth method note: a baseline is a per-row property, not a per-table one.**
+The progression table has twelve columns because the *kernel* changed twelve
+times, but not every circuit's interpreter era ends at the same column. A
+derived table that says "vs the last interpreter run" is therefore only
+checkable if the reader can recover *which* run that was for each row. It was
+recoverable here only because `runs/` keeps all twelve and encodes the node in
+the trace path. **When a derived number's baseline varies by row, name the
+baseline in the row.**
