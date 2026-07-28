@@ -1,0 +1,72 @@
+{
+ "circuit": "surface_d9_t19",
+ "v2": {
+  "kernel_name": "clifft_v2_spec",
+  "LDS_Block_Size": "1024",
+  "Scratch_Size": "336",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "524288",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 11894437,
+  "total_kernel_ns": 11894437,
+  "domain_total_ns": 11894437,
+  "domain_calls": 1,
+  "hsa_total_ns": 23813150,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 202466582.0,
+   "SQ_BUSY_CYCLES": 794890513.0,
+   "SQ_INSTS_LDS": 124309083.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 787074337.0,
+   "SQ_INSTS_VALU": 1224524092.0,
+   "SQ_WAIT_INST_LDS": 46102371.0,
+   "SQ_WAVES": 8192.0,
+   "SQ_WAVE_CYCLES": 23427807222.0,
+   "TCC_HIT_sum": 1749453102.0,
+   "TCC_MISS_sum": 47090916.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=97.4",
+   "wave_cycles/wave=2859840"
+  ]
+ },
+ "svm": {
+  "kernel_name": "clifft::gpu::(anonymous namespace)::sample_kernel_global_coop(clifft::gpu::GpuProgram, unsigned long, unsigned long, unsigned long, clifft::gpu::GpuComplex*, clifft::gpu::GpuComplex*, unsigned long*, clifft::gpu::BlockCounts*)",
+  "LDS_Block_Size": "8704",
+  "Scratch_Size": "56",
+  "VGPR_Count": "64",
+  "Accum_VGPR_Count": "0",
+  "SGPR_Count": "112",
+  "Workgroup_Size_X": "256",
+  "Grid_Size_X": "131072",
+  "n_dispatches": 1,
+  "per_dispatch_ns_median": 45415028,
+  "total_kernel_ns": 45415028,
+  "domain_total_ns": 45450948,
+  "domain_calls": 10,
+  "hsa_total_ns": 56932822,
+  "counters": {
+   "GRBM_GUI_ACTIVE": 799599497.0,
+   "SQ_BUSY_CYCLES": 3130054155.0,
+   "SQ_INSTS_LDS": 105306694.0,
+   "SQ_INSTS_MFMA": 0.0,
+   "SQ_INSTS_SALU": 5750833696.0,
+   "SQ_INSTS_VALU": 2538422668.0,
+   "SQ_WAIT_INST_LDS": 15661248.0,
+   "SQ_WAVES": 2048.0,
+   "SQ_WAVE_CYCLES": 48809215195.0,
+   "TCC_HIT_sum": 52382566.0,
+   "TCC_MISS_sum": 5933124.0
+  },
+  "bottleneck_notes": [
+   "MFMA=0 (butterfly, no GEMM)",
+   "L2_hit%=89.8",
+   "wave_cycles/wave=23832625"
+  ]
+ },
+ "v2_vs_svm_kernel_ratio": 0.262
+}
