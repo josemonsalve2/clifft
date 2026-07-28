@@ -1,0 +1,47 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 51166
+--------------------------------------------
+=== node ===
+host=smci350-rck-g03-d13-21  job=51166  partition=mi350x-es
+  Name:                    gfx950                             
+--- CU count (SS14.5 assumes 256; wgsweep_50152 logged 128) ---
+  Compute Unit:            128                                
+  Compute Unit:            128                                
+  Marketing Name:          AMD EPYC 9575F 64-Core Processor   
+--- HBM pool size (the 32 GB budget is a fraction of this) ---
+    Pool 1                   
+      Segment:                 GLOBAL; FLAGS: FINE GRAINED        
+      Size:                    1584915708(0x5e77e4fc) KB          
+
+==========================================================
+Q1. V2_GLOBAL_WGS sweep on the five rank>=20 circuits
+    3 runs per arm, kernel time in seconds, lower is better.
+    'dflt' = the 32 GB budget's own choice (3rd column above).
+==========================================================
+--- qv20_seed42 (shots=2000, default wgs=2048) ---
+  wgs=dflt  1.80793 1.80585 1.80461 
+  wgs=168   4.41861 4.42239 4.41663 
+  wgs=336   2.90598 2.90767 2.90762 
+  wgs=680   2.05108 2.04699 2.07322 
+  wgs=1360  1.80484 1.80599 1.80602 
+  wgs=2048  1.8098 1.80691 1.80739 
+  wgs=4096  1.79606 1.80317 1.80358 
+  wgs=8192  1.79501 1.80014 1.8085 
+--- qv21_L8_seed42 (shots=2000, default wgs=1360) ---
+  wgs=dflt  2.98006 2.98163 2.97977 
+  wgs=168   7.53815 7.5516 7.53249 
+  wgs=336   4.95754 4.95619 4.97007 
+  wgs=680   3.49625 3.49942 3.49485 
+  wgs=1360  2.97766 2.97854 2.97975 
+  wgs=2048  2.71946 2.71888 2.72214 
+  wgs=4096  2.9644 2.96769 2.97448 
+  wgs=8192  3.03291 3.01547 3.02501 
+--- qv22_L6_seed42 (shots=1000, default wgs=680) ---
+  wgs=dflt  3.18005 3.17679 3.17661 
+  wgs=168   6.06191 6.06079 6.06992 
+  wgs=336   4.19018 4.14028 4.25762 
+  wgs=680   3.17662 3.17895 3.17663 
+  wgs=1360  2.213 2.21147 2.21576 
+  wgs=2048  2.19406 2.37337 2.38121 
+  wgs=4096  [2026-07-28T04:38:39.559] error: *** JOB 51166 ON smci350-rck-g03-d13-21 CANCELLED AT 2026-07-28T04:38:39 DUE to SIGNAL Terminated ***

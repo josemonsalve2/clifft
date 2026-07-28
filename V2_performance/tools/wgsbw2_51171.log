@@ -1,0 +1,55 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 51171
+--------------------------------------------
+=== node ===
+host=smci350-rck-g03-d13-21  job=51171
+  (SS14.5 of the report reasons against 256 CUs -- this is the check)
+  Marketing Name:          AMD Instinct MI350X                
+
+==========================================================
+Q1 (cont). V2_GLOBAL_WGS sweep, ranks 22-24
+    3 runs per arm, v2_kernel_seconds, lower is better.
+==========================================================
+--- qv22_L6 (dflt 680) TAIL (shots=1000) ---
+  wgs=4096  2.36022 2.36058 2.36205 
+  wgs=8192  FAIL FAIL FAIL 
+--- qv23_L5 (dflt 336) (shots=1000) ---
+  wgs=dflt  6.16541 6.15495 6.16639 
+  wgs=336   6.16624 6.16482 6.0633 
+  wgs=680   4.5623 4.56718 4.56219 
+  wgs=1360  3.09784 3.36009 3.12035 
+  wgs=2048  3.3598 3.37158 3.35881 
+  wgs=4096  FAIL FAIL FAIL 
+--- qv24_L4 (dflt 168) (shots=500) ---
+  wgs=dflt  7.24227 7.23907 7.24373 
+  wgs=168   7.24086 7.23657 7.24282 
+  wgs=336   5.25178 5.24713 5.24127 
+  wgs=680   3.4683 3.4587 3.46981 
+  wgs=1360  FAIL FAIL FAIL 
+  wgs=2048  FAIL FAIL FAIL 
+
+==========================================================
+Q2. HBM bandwidth counters -- collectable at all?
+    Gates the placement question: if the tier is far from
+    saturation it is latency-bound and placement is moot.
+==========================================================
+--- pmc set 1: FETCH_SIZE,WRITE_SIZE ---
+  UNAVAILABLE: W20260728 04:48:32.769126 127406023728832 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.092726 sec W20260728 04:48:32.769344 127406023
+--- pmc set 2: FETCH_SIZE ---
+  COLLECTED
+    clifft_v2_spec                           FETCH_SIZE             2,375,156,452
+--- pmc set 3: TCC_EA_RDREQ_sum,TCC_EA_WRREQ_sum ---
+  COLLECTED
+--- pmc set 4: TCC_EA_RDREQ_sum ---
+  COLLECTED
+--- pmc set 5: TCC_REQ_sum,TCC_MISS_sum ---
+  COLLECTED
+    clifft_v2_spec                           TCC_MISS_sum           39,048,149,329
+    clifft_v2_spec                           TCC_REQ_sum            125,637,003,143
+
+--- kernel duration, same circuit (turns bytes into GB/s) ---
+"Name","Calls","TotalDurationNs","AverageNs","Percentage","MinNs","MaxNs","StdDev"
+"clifft_v2_spec",1,3173389086,3173389086.000000,100.00,3173389086,3173389086,0.00000000e+00
+
+DONE. raw pmc under /shared/jmonsalv/quantum/clifft_rl/clifft/V2_performance/scratch/wgsbw_pmc

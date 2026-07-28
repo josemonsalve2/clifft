@@ -39,6 +39,12 @@ struct HsaRuntime {
     int device_count() const;
     std::string info() const;
 
+    // Total size of the device-local (coarse-grained VRAM) pool, in bytes.
+    // Queried from HSA rather than hardcoded so the global-tier resident pool
+    // scales with the device instead of a constant that silently undersizes
+    // itself on larger parts (see v2_kernel.cc's budget derivation).
+    uint64_t device_pool_bytes(int device_idx = 0) const;
+
     // Memory management using HSA memory pools
     void* device_malloc(size_t bytes, int device_idx = 0);
     void  device_free(void* ptr);

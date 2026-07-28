@@ -235,6 +235,15 @@ std::string HsaRuntime::info() const {
 // Memory management
 // -----------------------------------------------------------------------
 
+uint64_t HsaRuntime::device_pool_bytes(int device_idx) const {
+    if (device_idx < 0 || device_idx >= static_cast<int>(devices.size())) return 0;
+    size_t sz = 0;
+    if (hsa_amd_memory_pool_get_info(devices[device_idx].device_pool,
+                                     HSA_AMD_MEMORY_POOL_INFO_SIZE, &sz) != HSA_STATUS_SUCCESS)
+        return 0;
+    return static_cast<uint64_t>(sz);
+}
+
 void* HsaRuntime::device_malloc(size_t bytes, int device_idx) {
     void* ptr = nullptr;
     auto& dev = devices.at(device_idx);
