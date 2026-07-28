@@ -454,9 +454,15 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
         //
         // Deriving the fraction from the device rather than hardcoding a larger
         // constant is the actual fix: a constant reintroduces the same bug on
-        // the next part. kBudgetNumer/Denom = 4/9 of VRAM reproduces all five
-        // measured optima on a 288 GB part (128 GB), and the same code yields a
+        // the next part. kBudgetNumer/Denom = 4/9 reproduces all five measured
+        // optima on a 288 GB part (128 GB), and the same code yields a
         // proportionally smaller pool on a 192 GB MI300X without re-tuning.
+        //
+        // The fraction is taken of memory currently AVAILABLE, not of the
+        // device total: these GPUs are shared, and a pool sized against memory
+        // another process already holds is one that fits on paper and fails in
+        // practice. Peak residency works out to ~44% of whatever is reported,
+        // leaving the statevector, scratch and fragmentation headroom the rest.
         //
         // The curve PEAKS rather than plateauing -- rank 21 degrades from
         // 2.719s at 2048 to 3.025s at 8192, rank 22 from 2.213s at 1360 to
@@ -464,10 +470,10 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
         const uint64_t amp = 1ull << flat.peak_rank;
         const uint64_t bytes_per_wg = amp * sizeof(GpuComplex) + (amp / 2) * sizeof(GpuComplex);
         constexpr uint64_t kBudgetNumer = 4, kBudgetDenom = 9;
-        const uint64_t vram = rt.device_pool_bytes();
+        const uint64_t avail = rt.device_pool_bytes();
         // Fall back to the historical constant if HSA cannot report pool size,
         // so a query failure degrades to the old behaviour rather than to 0.
-        const uint64_t budget = vram ? (vram / kBudgetDenom) * kBudgetNumer : (32ull << 30);
+        const uint64_t budget = avail ? (avail / kBudgetDenom) * kBudgetNumer : (32ull << 30);
         uint64_t wgs = budget / bytes_per_wg;
         if (wgs < 1) wgs = 1;               // rank 26+: at least one resident wg
         if (wgs > 2048) wgs = 2048;
@@ -480,9 +486,9 @@ clifft::SurvivorResult v2_sample(const clifft::CompiledModule& program,
         // source alone. Make it auditable at runtime rather than inferable.
         if (getenv("V2_DUMP_WGS")) {
             std::fprintf(stderr,
-                "[v2-global] rank=%u bytes/wg=%.1fMB vram=%.1fGB budget=%.1fGB(%llu/%llu) "
+                "[v2-global] rank=%u bytes/wg=%.1fMB avail=%.1fGB budget=%.1fGB(%llu/%llu) "
                 "-> wgs=%u (%.1fGB resident)\n",
-                flat.peak_rank, bytes_per_wg / 1048576.0, vram / 1073741824.0,
+                flat.peak_rank, bytes_per_wg / 1048576.0, avail / 1073741824.0,
                 budget / 1073741824.0, (unsigned long long)kBudgetNumer,
                 (unsigned long long)kBudgetDenom, global_grid_wgs,
                 (double)global_grid_wgs * bytes_per_wg / 1073741824.0);

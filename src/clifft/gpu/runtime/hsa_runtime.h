@@ -39,10 +39,15 @@ struct HsaRuntime {
     int device_count() const;
     std::string info() const;
 
-    // Total size of the device-local (coarse-grained VRAM) pool, in bytes.
-    // Queried from HSA rather than hardcoded so the global-tier resident pool
-    // scales with the device instead of a constant that silently undersizes
-    // itself on larger parts (see v2_kernel.cc's budget derivation).
+    // Device-local (coarse-grained VRAM) memory the global tier may budget
+    // against, in bytes: HSA_AMD_AGENT_INFO_MEMORY_AVAIL where supported,
+    // falling back to the pool's total size, and 0 only if both queries fail.
+    //
+    // Queried rather than hardcoded so the global-tier resident pool scales
+    // with the device instead of a constant that silently undersizes itself on
+    // larger parts (see v2_kernel.cc's budget derivation). AVAILABLE rather
+    // than total because these GPUs are shared -- budgeting a fraction of
+    // memory another process already holds is how a pool that "fits" fails.
     uint64_t device_pool_bytes(int device_idx = 0) const;
 
     // Memory management using HSA memory pools

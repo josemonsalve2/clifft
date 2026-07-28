@@ -237,6 +237,19 @@ std::string HsaRuntime::info() const {
 
 uint64_t HsaRuntime::device_pool_bytes(int device_idx) const {
     if (device_idx < 0 || device_idx >= static_cast<int>(devices.size())) return 0;
+    // Prefer what is ACTUALLY AVAILABLE over the pool's total size. The two
+    // differ whenever the GPU is shared -- another process, or another job on
+    // the same node, already holding memory -- and the global tier sizes a
+    // multi-GB resident pool from this number. Budgeting a fraction of a total
+    // that someone else is partly using is how an allocation that "fits" fails.
+    uint64_t avail = 0;
+    if (hsa_agent_get_info(devices[device_idx].agent,
+                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL),
+                           &avail) == HSA_STATUS_SUCCESS && avail)
+        return avail;
+    // Older runtimes may not implement MEMORY_AVAIL; total pool size is a
+    // strictly better fallback than giving up and reporting 0 (which would send
+    // the caller to its own hardcoded default).
     size_t sz = 0;
     if (hsa_amd_memory_pool_get_info(devices[device_idx].device_pool,
                                      HSA_AMD_MEMORY_POOL_INFO_SIZE, &sz) != HSA_STATUS_SUCCESS)
