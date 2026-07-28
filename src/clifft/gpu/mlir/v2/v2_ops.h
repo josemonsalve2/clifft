@@ -118,6 +118,15 @@ typedef struct {
     u8  branch;
 } V2State;
 
+// Software-pipelined U4 butterfly. Off by default: it trades VGPRs (a scratch
+// quad held live across the compute) for fewer s_waitcnt stalls, and the
+// rank>=22 global kernels already sit at the 128 VGPR / 64 AGPR occupancy cap,
+// where spilling would cost more than the overlap buys. Opt in per build so the
+// trade is measured rather than assumed.
+#ifndef V2_U4_PREFETCH
+#  define V2_U4_PREFETCH 0
+#endif
+
 // ----- cooperation primitives (tier-parameterized) ---------------------------
 // coop reduction scratch lives in LDS (coop/global only).
 #ifndef V2_REGISTER

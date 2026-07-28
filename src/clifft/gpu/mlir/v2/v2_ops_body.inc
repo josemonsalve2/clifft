@@ -312,6 +312,52 @@ static inline __attribute__((always_inline)) void v2_op_array_u4(V2State* st, CV
     if (hi < active_k) {
         u64 lo_bit = 1ull << lo, hi_bit = 1ull << hi;
         u64 iters = 1ull << (active_k - 2u);
+#if V2_U4_PREFETCH
+        // Software-pipelined butterfly: issue iteration i+STRIDE's four loads
+        // BEFORE computing iteration i, so the memory latency of the next quad
+        // overlaps the arithmetic of the current one. The baseline loop issues
+        // four global_loads and immediately s_waitcnts on them, leaving the
+        // vector pipe idle for the whole HBM round trip -- and the global tier
+        // measures ~750 GB/s against ~8 TB/s peak, i.e. it is latency-bound,
+        // not bandwidth-bound, which is exactly the regime this helps.
+        //
+        // Safe because scatter_bits_2 is injective and the quads it generates
+        // partition the amplitude array: quad(i+STRIDE) is disjoint from
+        // quad(i), so reading ahead can never observe a store this same thread
+        // is about to make. Across threads the strided partition is disjoint
+        // too, and this op's stores are already unsynchronized within the loop
+        // (the barrier is after it), so no ordering guarantee is being weakened.
+        //
+        // Byte-exact by construction: the per-iteration expressions and their
+        // evaluation order are character-for-character the ones below. Only the
+        // point at which the operands were fetched moves.
+        u64 i = t;
+        if (i < iters) {
+            u64 base = scatter_bits_2(i, lo, hi);
+            CV2Complex v0 = v[base], v1 = v[base | lo_bit];
+            CV2Complex v2 = v[base | hi_bit], v3 = v[base | lo_bit | hi_bit];
+            while (i < iters) {
+                u64 next = i + V2_STRIDE;
+                u64 nbase = base;
+                CV2Complex n0 = v0, n1 = v1, n2 = v2, n3 = v3;
+                if (next < iters) {
+                    nbase = scatter_bits_2(next, lo, hi);
+                    n0 = v[nbase];          n1 = v[nbase | lo_bit];
+                    n2 = v[nbase | hi_bit]; n3 = v[nbase | lo_bit | hi_bit];
+                }
+                v[base] = cadd(cadd(cmul(v0, mat[0][0]), cmul(v1, mat[0][1])),
+                                   cadd(cmul(v2, mat[0][2]), cmul(v3, mat[0][3])));
+                v[base | lo_bit] = cadd(cadd(cmul(v0, mat[1][0]), cmul(v1, mat[1][1])),
+                                   cadd(cmul(v2, mat[1][2]), cmul(v3, mat[1][3])));
+                v[base | hi_bit] = cadd(cadd(cmul(v0, mat[2][0]), cmul(v1, mat[2][1])),
+                                   cadd(cmul(v2, mat[2][2]), cmul(v3, mat[2][3])));
+                v[base | lo_bit | hi_bit] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
+                                   cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
+                i = next; base = nbase;
+                v0 = n0; v1 = n1; v2 = n2; v3 = n3;
+            }
+        }
+#else
         for (u64 i = t; i < iters; i += V2_STRIDE) {
             u64 base = scatter_bits_2(i, lo, hi);
             CV2Complex v0 = v[base], v1 = v[base | lo_bit];
@@ -325,6 +371,7 @@ static inline __attribute__((always_inline)) void v2_op_array_u4(V2State* st, CV
             v[base | lo_bit | hi_bit] = cadd(cadd(cmul(v0, mat[3][0]), cmul(v1, mat[3][1])),
                                cadd(cmul(v2, mat[3][2]), cmul(v3, mat[3][3])));
         }
+#endif
     }
     v2_barrier();
     if (IS_OWNER) {

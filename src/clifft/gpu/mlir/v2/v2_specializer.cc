@@ -124,6 +124,11 @@ std::string emit_specialized_kernel(const FlattenedProgram& flat,
         o << "#define V2_NOISE_ATTR __attribute__((always_inline))\n";
     else
         o << "#define V2_NOISE_ATTR __attribute__((noinline))\n";
+    // V2_U4_PREFETCH=1 software-pipelines the U4 butterfly (see v2_ops.h). It
+    // is byte-exact by construction -- only the fetch point moves, not the
+    // arithmetic -- so it is a pure latency/occupancy trade to be A/B measured.
+    if (getenv("V2_U4_PREFETCH"))
+        o << "#define V2_U4_PREFETCH 1\n";
     o << "#include \"clifft/gpu/mlir/v2/v2_ops.h\"\n\n";
 
     // --- specialized straight-line body (shared by the tier wrapper) ---------
