@@ -1,0 +1,31 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 51188
+--------------------------------------------
+=== node ===
+host=smci350-rck-g03-d13-21 job=51188
+=== co-tenants (context for hypothesis B) ===
+GPU[0]		: GPU Memory Allocated (VRAM%): 0
+
+==========================================================
+A/C. Compiled peak_rank and the grid actually chosen.
+==========================================================
+  qv20_seed42      peak_rank=20  [v2-global] rank=20 bytes/wg=12.0MB avail=251.2GB budget=111.7GB(4/9) -> wgs=2048 (24.0GB resident)
+  qv21_L8_seed42   peak_rank=21  [v2-global] rank=21 bytes/wg=24.0MB avail=251.2GB budget=111.7GB(4/9) -> wgs=2048 (48.0GB resident)
+  qv22_L6_seed42   peak_rank=22  [v2-global] rank=22 bytes/wg=48.0MB avail=251.2GB budget=111.7GB(4/9) -> wgs=2048 (96.0GB resident)
+  qv23_L5_seed42   peak_rank=23  [v2-global] rank=23 bytes/wg=96.0MB avail=251.2GB budget=111.7GB(4/9) -> wgs=1184 (111.0GB resident)
+  qv24_L4_seed42   peak_rank=24  [v2-global] rank=24 bytes/wg=192.0MB avail=251.2GB budget=111.7GB(4/9) -> wgs=592 (111.0GB resident)
+
+==========================================================
+B. Is 2048 still better than 1360 at rank 21 TODAY?
+   Same node, same shots as sweep 51166, 3 runs. If these
+   are now equal, the optimum moved under contention and
+   the heuristic is exonerated.
+==========================================================
+  wgs=dflt  2.95774 2.95694 2.70086 
+  wgs=1360  2.9664 2.96899 2.97105 
+  wgs=2048  2.95375 2.70964 2.95441 
+  wgs=4096  2.95743 2.96177 2.96351 
+
+  (sweep 51166, uncontended: dflt/1360 = 2.980, 2048 = 2.719)
+=== done ===

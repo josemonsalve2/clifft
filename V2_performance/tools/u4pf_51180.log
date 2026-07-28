@@ -1,0 +1,71 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 51180
+--------------------------------------------
+=== node ===
+host=smci350-rck-g03-d13-21  job=51180
+
+==========================================================
+Q1. Kernel time, prefetch OFF vs ON (3 runs, lower better)
+    Default (device-derived) pool in both arms.
+==========================================================
+*** MISSING: tests/fixtures/large/qv20_seed42.stim ***
+--- qv21_L8_seed42 shots=1000 ---
+  pf=off 1.49923 1.48747 1.49153 
+  pf=on  1.64828 1.64311 1.64617 
+--- qv22_L6_seed42 shots=1000 ---
+  pf=off 2.37263 2.38047 2.37195 
+  pf=on  2.57185 2.57833 2.5724 
+--- qv23_L5_seed42 shots=1000 ---
+  pf=off 3.35172 3.10394 3.35215 
+  pf=on  3.16141 3.4051 3.16588 
+--- qv24_L4_seed42 shots=500 ---
+  pf=off 3.46278 3.46472 3.46438 
+  pf=on  3.71941 3.71428 3.71386 
+
+==========================================================
+Q2. Correctness -- prefetch must be byte-exact.
+    Only the fetch point moves; the arithmetic and its
+    order are unchanged, so results must be IDENTICAL.
+    Any difference here falsifies the aliasing argument.
+==========================================================
+--- qv21_L8_seed42 ---
+  pf=off "v2_passed": 1000 "v2_observable_ones": [] "match": true 
+  pf=on  "v2_passed": 1000 "v2_observable_ones": [] "match": true 
+--- qv22_L6_seed42 ---
+  pf=off "v2_passed": 1000 "v2_observable_ones": [] "match": true 
+  pf=on  "v2_passed": 1000 "v2_observable_ones": [] "match": true 
+--- qv23_L5_seed42 ---
+  pf=off "v2_passed": 1000 "v2_observable_ones": [] "match": true 
+  pf=on  "v2_passed": 1000 "v2_observable_ones": [] "match": true 
+--- qv24_L4_seed42 ---
+  pf=off "v2_passed": 500 "v2_observable_ones": [] "match": true 
+  pf=on  "v2_passed": 500 "v2_observable_ones": [] "match": true 
+
+==========================================================
+Q3. Occupancy -- did the +12 VGPRs actually cost waves?
+    This is the mechanism check behind whatever Q1 shows.
+==========================================================
+--- pf=off ---
+    .sgpr_count:     108
+    .sgpr_spill_count: 594
+    .vgpr_count:     128
+    .vgpr_spill_count: 152
+--- pf=on ---
+    .sgpr_count:     108
+    .sgpr_spill_count: 598
+    .vgpr_count:     128
+    .vgpr_spill_count: 375
+
+==========================================================
+Q4. Bandwidth + L2 at rank 22, both arms.
+    If prefetch works, FETCH_SIZE/second should RISE
+    (same bytes, less time) -- that is the direct
+    evidence the stalls were the limiter.
+==========================================================
+--- pf=off : FETCH_SIZE ---
+    FETCH_SIZE             2,375,292,491
+--- pf=on : FETCH_SIZE ---
+    FETCH_SIZE             2,375,404,660
+
+=== done ===

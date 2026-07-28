@@ -1,0 +1,44 @@
+Welcome to SLURM
+--------------------------------------------
+current Job id 51179
+--------------------------------------------
+=== node ===
+host=smci350-rck-g03-d13-21 job=51179
+=== build ===
+/shared/jmonsalv/quantum/clifft_rl/clifft/src/clifft/gpu/runtime/hsa_runtime.cc:291:75: warning: unused parameter ‘device_idx’ [-Wunused-parameter]
+/shared/jmonsalv/quantum/clifft_rl/clifft/src/clifft/gpu/runtime/hsa_runtime.cc:297:75: warning: unused parameter ‘device_idx’ [-Wunused-parameter]
+/shared/jmonsalv/quantum/clifft_rl/clifft/src/clifft/gpu/runtime/hsa_persistent_dispatch.cc:110:11: warning: unused variable ‘dev’ [-Wunused-variable]
+[100%] Built target run_v2
+
+=== device pool as HSA reports it (the heuristic's input) ===
+[clifft-hsa] initialized: 1 GPU(s), device[0]=gfx950 CUs=256 wavefront=64
+[v2-global] rank=22 bytes/wg=48.0MB avail=251.0GB budget=111.6GB(4/9) -> wgs=2048 (96.0GB resident)
+
+==========================================================
+1+2. New default vs the hand-swept optimum and old default
+     3 runs each, v2_kernel_seconds. 'new' = no env var.
+==========================================================
+circuit        rank   old(32G)  opt(swept) | new (heuristic)
+qv20_seed42    20     1.805     1.797     | 1.80721 1.80215 1.80849
+qv21_L8_seed42 21     2.980     2.719     | 2.97586 2.96747 2.97841
+qv22_L6_seed42 22     3.177     2.213     | 2.20415 2.37799 2.20287
+qv23_L5_seed42 23     6.165     3.098     | 3.10048 3.34545 3.10138
+qv24_L4_seed42 24     7.242     3.468     | 3.46078 3.46396 3.46795
+
+==========================================================
+3. Correctness: the pool changes concurrency, not arithmetic.
+   Shot results must be IDENTICAL across pool sizes, and the
+   f64 CPU reference must still match. A mismatch here means
+   the work-stealing loop is order-dependent -- a real bug.
+==========================================================
+  wgs=dflt   "v2_passed":500,"v2_observable_ones":[],
+  wgs=336    "v2_passed":500,"v2_observable_ones":[],
+  wgs=680    "v2_passed":500,"v2_observable_ones":[],
+  wgs=1360   "v2_passed":500,"v2_observable_ones":[],
+
+  --- vs f64 CPU reference (match must be true) ---
+  "cpu_passed": 200,
+  "v2_passed": 200,
+  "match": true
+
+DONE
