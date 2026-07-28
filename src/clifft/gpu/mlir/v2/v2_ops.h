@@ -118,11 +118,35 @@ typedef struct {
     u8  branch;
 } V2State;
 
-// Software-pipelined U4 butterfly. Off by default: it trades VGPRs (a scratch
-// quad held live across the compute) for fewer s_waitcnt stalls, and the
-// rank>=22 global kernels already sit at the 128 VGPR / 64 AGPR occupancy cap,
-// where spilling would cost more than the overlap buys. Opt in per build so the
-// trade is measured rather than assumed.
+// Software-pipelined U4 butterfly. MEASURED AND REJECTED -- kept because the
+// negative result is worth more than a deleted branch, not because it is a
+// pending idea.
+//
+// The premise was sound: the global tier moves 766 GB/s against ~8 TB/s peak,
+// so it is latency-bound, and the baseline loop issues four global_loads then
+// immediately s_waitcnts on them with nothing else in flight. Pipelining the
+// next quad's loads ahead of the current quad's arithmetic cuts the loop body
+// from 12 loads / 12 vmwait to 8 / 8 (V2_performance/tools/u4_isa_diff.sh).
+//
+// On hardware it is 7-10% SLOWER at every rank (job 51180). The reason is
+// register pressure, and it is visible in the .hsaco metadata at rank 22:
+//
+//     pf=off  .vgpr_count 128  .vgpr_spill_count 152
+//     pf=on   .vgpr_count 128  .vgpr_spill_count 375
+//
+// Both arms are pinned at the 128 VGPR cap, so the extra registers the pipeline
+// needs are funded by spilling 223 more values to scratch: it prefetches four
+// amplitudes from HBM by pushing 223 values back to HBM. FETCH_SIZE differs
+// between the arms by 0.005% -- identical bytes moved, more time taken.
+//
+// Note the trap for anyone re-deriving this: isolated compilation of the op
+// (as u4_isa_diff.sh does) shows 42 VGPRs, where +12 looks free. In the real
+// specialized kernel it is not. Static register counts from an isolated TU do
+// not transfer to a kernel at the occupancy cap.
+//
+// Byte-exactness DID hold, on CPU (455 cases,
+// V2_performance/tools/u4_exact/) and on GPU ("match": true in every arm), so
+// if spill pressure is ever relieved this is safe to re-measure.
 #ifndef V2_U4_PREFETCH
 #  define V2_U4_PREFETCH 0
 #endif
