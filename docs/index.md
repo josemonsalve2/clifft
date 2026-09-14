@@ -96,6 +96,15 @@ For QEC workflows, Clifft also supports detector-based post-selection, survivor 
 [Quick Start](getting-started/quickstart.md){ .md-button .md-button--primary }
 [Try the Playground]({{ playground_url }}){ .md-button }
 
+## What's New in 0.10.1
+
+Clifft 0.10.1 fixes biased noise sampling in multi-shot
+[leakage and loss](guide/leakage-and-loss.md) simulations after a shot resumes
+through a continuation. It also adds a
+[Logical Shor Noise Sweep on Neutral Atoms](guide/neutral-atom-leakage.md)
+tutorial with four example circuits and a runnable script comparing approximate
+and exact treatment of state-dependent leakage and loss.
+
 ## What's New in 0.10.0
 
 Clifft 0.10.0 adds automatic packed batch sampling for eligible
