@@ -60,7 +60,12 @@ inline constexpr uint32_t kMaxSupportedActiveWidth = 30;
     if (peak_active_width <= kThreadPerShotMaxActiveWidth) {
         return ExecutionTier::ThreadPerShot;
     }
-    if (coefficient_bytes_per_shot(peak_active_width, element_bytes) <= lds_bytes_per_workgroup) {
+    // The reduction scratch is static LDS the cooperative kernel always occupies, so the
+    // coefficient state only gets what is left of the workgroup budget.
+    const uint64_t usable = lds_bytes_per_workgroup > detail::kCooperativeReductionBytes
+                                ? lds_bytes_per_workgroup - detail::kCooperativeReductionBytes
+                                : 0;
+    if (coefficient_bytes_per_shot(peak_active_width, element_bytes) <= usable) {
         return ExecutionTier::CooperativeLds;
     }
     return ExecutionTier::CooperativeGlobal;

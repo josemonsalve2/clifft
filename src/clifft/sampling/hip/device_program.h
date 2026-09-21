@@ -43,6 +43,17 @@ inline constexpr uint64_t coefficient_elements_per_shot(uint32_t peak_active_wid
            2 * coefficient_scratch_capacity(peak_active_width);
 }
 
+// Cooperative tiers give one shot to one workgroup. The block size is fixed so the
+// reduction scratch below is a compile-time size, and must stay a power of two: the
+// workgroup reduction halves the active lane count each step.
+inline constexpr uint32_t kCooperativeBlockSize = 256;
+
+// Static LDS the cooperative kernel always needs, independent of the coefficient state:
+// two FP64 accumulators per lane for the measurement probability reduction. Reductions
+// stay FP64 at every coefficient precision, so this does not shrink in FP32.
+inline constexpr uint64_t kCooperativeReductionBytes =
+    2ULL * kCooperativeBlockSize * sizeof(double);
+
 struct Expression {
     // Detector and observable actions interpret terms as record slots when
     // kRecordParity is set; every other action interprets them as symbol ids.

@@ -22,16 +22,40 @@ launch controls stay outside the stable API.
 | Post-selected survivor sampling | Supported for eligible programs |
 | Measurements, detectors, observables, and `EXP_VAL` | Supported |
 | Pauli and readout noise | Supported |
-| Peak active width | `k <= 4` |
+| Peak active width | Any width the device can hold (see execution tiers below) |
 | Coefficient precision | FP64 default; FP32 experimental |
 | Fixed-fault importance sampling | Not supported |
 | Leakage, loss, and transition instruments | Not supported |
 | Exact-probability and state-vector queries | Not supported |
 | Asynchronous or multi-GPU execution | Not supported |
 
-The current tier uses one GPU thread per shot and targets circuits with small
-active states. Unsupported programs are rejected during lowering; there is no
-automatic CPU fallback.
+Unsupported programs are rejected during lowering; there is no automatic CPU fallback.
+
+### Execution tiers
+
+The backend picks one of three tiers from the plan's peak active width `k`, the selected
+coefficient precision, and the device's per-workgroup shared-memory budget. Per-shot
+coefficient storage is `3 * 2^k` elements, so `24 * 2^k` bytes in FP64 and `12 * 2^k` in FP32.
+
+| Tier | Execution | State lives in | Typical reach |
+|---|---|---|---|
+| `thread-per-shot` | one shot per thread | thread-private | `k <= 4` |
+| `cooperative-lds` | one shot per workgroup | on-chip shared memory | `k <= 11` on a 64 KB device, `k <= 12` on a 160 KB device (one more width in FP32) |
+| `cooperative-global` | one shot per workgroup | a per-shot global slab | bounded only by device memory |
+
+Tier selection is automatic and needs no API. The thread-per-shot tier remains the
+small-width reference implementation.
+
+On the cooperative tiers a batch larger than the retained workspace is split into several
+synchronous launches, as on the thread-per-shot tier. Because the RNG keys off the global
+shot index, splitting never changes seeded rows. On `cooperative-global` the workspace is
+also clamped to what the device can hold, so a wide plan silently runs as more batches
+rather than failing to allocate.
+
+Rows are not promised to match bit-for-bit **between** tiers: a workgroup sums measurement
+probabilities in a different order than a single thread, so a near-tie can resolve the other
+way. Within one tier a fixed seed reproduces exactly. This matches the existing contract
+between the CPU's scalar and packed modes.
 
 ## Hardware and source build
 
