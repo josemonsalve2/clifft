@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -24,6 +25,7 @@ using clifft::sampling::SamplingPlan;
 using clifft::sampling::SamplingResult;
 using clifft::sampling::SamplingSurvivorResult;
 using clifft::sampling::hip::CoefficientPrecision;
+using clifft::sampling::hip::kThreadPerShotMaxActiveWidth;
 using clifft::sampling::hip::Sampler;
 using clifft::sampling::hip::SamplingOptions;
 using CpuExecutablePlan = clifft::sampling::ExecutablePlan;
@@ -50,6 +52,42 @@ void require_same_rows(const SamplingResult& left, const SamplingResult& right) 
 
 double standard_error(double probability, double samples) {
     return std::sqrt(probability * (1.0 - probability) / samples);
+}
+
+// A width-n active state: n independent T gates with nothing measured in between, so every
+// non-Clifford coordinate stays live until the observable is read. Each test that uses
+// these asserts the width it actually got, because an optimizer that later squeezes the
+// active state would otherwise silently stop exercising the tier under test.
+std::string parallel_t_observable(uint32_t width) {
+    std::string text;
+    for (uint32_t qubit = 0; qubit < width; ++qubit) {
+        text += "H " + std::to_string(qubit) + "\n";
+    }
+    for (uint32_t qubit = 0; qubit < width; ++qubit) {
+        text += "T " + std::to_string(qubit) + "\n";
+    }
+    text += "EXP_VAL X0";
+    for (uint32_t qubit = 1; qubit < width; ++qubit) {
+        text += "*X" + std::to_string(qubit);
+    }
+    return text + "\n";
+}
+
+// The same width reached through a real measurement and detector instead of an expectation
+// value, so the collapse path is covered at cooperative widths as well.
+std::string parallel_t_detector(uint32_t width) {
+    const uint32_t ancilla = width + 1;
+    std::string text;
+    for (uint32_t qubit = 0; qubit <= width; ++qubit) {
+        text += "H " + std::to_string(qubit) + "\n";
+    }
+    for (uint32_t qubit = 0; qubit <= width; ++qubit) {
+        text += "T " + std::to_string(qubit) + "\n";
+    }
+    for (uint32_t qubit = 0; qubit <= width; ++qubit) {
+        text += "CX " + std::to_string(qubit) + " " + std::to_string(ancilla) + "\n";
+    }
+    return text + "M " + std::to_string(ancilla) + "\nDETECTOR rec[-1]\n";
 }
 
 }  // namespace
@@ -570,5 +608,93 @@ TEST_CASE("HIP replay agrees with the CPU on impossible branches at both precisi
                 clifft::sampling::hip::replay_shot(hip_executable, forced, precision);
             REQUIRE(actual.reachable == expected.reachable);
         }
+    }
+}
+// Widths above kThreadPerShotMaxActiveWidth were rejected outright before the cooperative
+// tiers existed, so these cover the two tiers that now accept them. The CPU executable is
+// the semantic oracle in both cases.
+TEST_CASE("HIP sampler matches CPU expectation values on the cooperative LDS tier") {
+    constexpr uint32_t kWidth = 8;
+    const SamplingPlan plan = plan_from(parallel_t_observable(kWidth));
+    REQUIRE(plan.peak_active_width == kWidth);
+    const HipExecutablePlan executable(plan);
+    const CpuExecutablePlan cpu_executable(plan);
+    require_hip_device();
+
+    const SamplingResult expected = clifft::sampling::sample(cpu_executable, 4, uint64_t{29});
+    REQUIRE(expected.exp_vals.size() == 4);
+
+    for (const auto& [precision, tolerance] : {std::pair{CoefficientPrecision::FP64, 1e-12},
+                                               std::pair{CoefficientPrecision::FP32, 1e-5}}) {
+        const SamplingResult actual = clifft::sampling::hip::sample(
+            executable, 4, {.seed = uint64_t{29}, .coefficient_precision = precision});
+        REQUIRE(actual.exp_vals.size() == expected.exp_vals.size());
+        for (size_t index = 0; index < actual.exp_vals.size(); ++index) {
+            CAPTURE(precision, index);
+            REQUIRE_THAT(actual.exp_vals[index],
+                         Catch::Matchers::WithinAbs(expected.exp_vals[index], tolerance));
+        }
+    }
+}
+
+TEST_CASE("HIP sampler matches CPU expectation values when the state exceeds workgroup memory") {
+    constexpr uint32_t kWidth = 14;
+    const SamplingPlan plan = plan_from(parallel_t_observable(kWidth));
+    REQUIRE(plan.peak_active_width == kWidth);
+    const HipExecutablePlan executable(plan);
+    const CpuExecutablePlan cpu_executable(plan);
+    require_hip_device();
+
+    const SamplingResult expected = clifft::sampling::sample(cpu_executable, 2, uint64_t{31});
+
+    for (const auto& [precision, tolerance] : {std::pair{CoefficientPrecision::FP64, 1e-12},
+                                               std::pair{CoefficientPrecision::FP32, 1e-4}}) {
+        const SamplingResult actual = clifft::sampling::hip::sample(
+            executable, 2, {.seed = uint64_t{31}, .coefficient_precision = precision});
+        REQUIRE(actual.exp_vals.size() == expected.exp_vals.size());
+        for (size_t index = 0; index < actual.exp_vals.size(); ++index) {
+            CAPTURE(precision, index);
+            REQUIRE_THAT(actual.exp_vals[index],
+                         Catch::Matchers::WithinAbs(expected.exp_vals[index], tolerance));
+        }
+    }
+}
+
+TEST_CASE("HIP sampler matches CPU detector statistics at cooperative widths") {
+    constexpr uint32_t kWidth = 8;
+    const SamplingPlan plan = plan_from(parallel_t_detector(kWidth));
+    REQUIRE(plan.peak_active_width > kThreadPerShotMaxActiveWidth);
+    const HipExecutablePlan executable(plan);
+    const CpuExecutablePlan cpu_executable(plan);
+    require_hip_device();
+    constexpr uint32_t kShots = 20000;
+
+    const SamplingResult cpu = clifft::sampling::sample(cpu_executable, kShots, uint64_t{47});
+    const SamplingResult gpu = clifft::sampling::hip::sample(executable, kShots,
+                                                             {.seed = uint64_t{47}});
+    REQUIRE(cpu.detectors.size() == gpu.detectors.size());
+
+    const auto rate = [](const std::vector<uint8_t>& values) {
+        return static_cast<double>(std::count(values.begin(), values.end(), uint8_t{1})) /
+               static_cast<double>(values.size());
+    };
+    const double cpu_rate = rate(cpu.detectors);
+    const double gpu_rate = rate(gpu.detectors);
+    const double tolerance = 6.0 * standard_error(cpu_rate, static_cast<double>(kShots)) + 1e-3;
+    REQUIRE_THAT(gpu_rate, Catch::Matchers::WithinAbs(cpu_rate, tolerance));
+}
+
+TEST_CASE("HIP sampler is repeatable at cooperative widths") {
+    const SamplingPlan plan = plan_from(parallel_t_detector(8));
+    REQUIRE(plan.peak_active_width > kThreadPerShotMaxActiveWidth);
+    const HipExecutablePlan executable(plan);
+    require_hip_device();
+
+    for (const CoefficientPrecision precision :
+         {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
+        const SamplingOptions options{.seed = uint64_t{53}, .coefficient_precision = precision};
+        const SamplingResult first = clifft::sampling::hip::sample(executable, 2048, options);
+        const SamplingResult second = clifft::sampling::hip::sample(executable, 2048, options);
+        require_same_rows(first, second);
     }
 }

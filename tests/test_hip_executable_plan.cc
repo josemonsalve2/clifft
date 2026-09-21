@@ -246,7 +246,7 @@ TEST_CASE("HIP tier selection follows the coefficient storage budget") {
     REQUIRE(select_execution_tier(12, sizeof(float), kLds64) == ExecutionTier::CooperativeLds);
     REQUIRE(select_execution_tier(13, sizeof(float), kLds160) == ExecutionTier::CooperativeLds);
 
-    // The widths that dominate the triorthogonal corpus land on the global tier.
+    // Widths whose coefficient state cannot fit any workgroup budget land on the global tier.
     REQUIRE(select_execution_tier(20, sizeof(double), kLds160) == ExecutionTier::CooperativeGlobal);
     REQUIRE(select_execution_tier(23, sizeof(double), kLds160) == ExecutionTier::CooperativeGlobal);
 }
