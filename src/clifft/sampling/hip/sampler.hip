@@ -767,7 +767,32 @@ class Sampler::Impl {
           host_observables(
               checked_elements(max_batch, source.num_observables(), "host observable")),
           host_exp_vals(checked_elements(max_batch, source.num_exp_vals(), "host expectation")),
-          host_survived(max_batch) {}
+          host_survived(max_batch) {
+        tier = resolve_tier(source.peak_active_width(), selected_precision);
+        if (tier != ExecutionTier::ThreadPerShot) {
+            throw std::invalid_argument(
+                std::string("HIP ") + tier_name(tier) +
+                " execution is not implemented yet (peak active width " +
+                std::to_string(source.peak_active_width()) + " > " +
+                std::to_string(kThreadPerShotMaxActiveWidth) + ")");
+        }
+    }
+
+    // Tier depends on the coefficient element size and the device's per-workgroup LDS
+    // budget, neither of which is known while lowering, so it is resolved here.
+    static ExecutionTier resolve_tier(uint32_t peak_active_width,
+                                      CoefficientPrecision precision) {
+        const uint64_t element_bytes =
+            precision == CoefficientPrecision::FP32 ? sizeof(float) : sizeof(double);
+        size_t lds = 0;
+        int device = 0;
+        hipDeviceProp_t properties{};
+        if (hipGetDevice(&device) == hipSuccess &&
+            hipGetDeviceProperties(&properties, device) == hipSuccess) {
+            lds = properties.sharedMemPerBlock;
+        }
+        return select_execution_tier(peak_active_width, element_bytes, lds);
+    }
 
     void run_batch(detail::SeedRoot root, uint64_t shot_offset, uint32_t shots,
                    uint32_t block_size, DownloadMode download_mode) {
@@ -808,6 +833,7 @@ class Sampler::Impl {
 
     UploadedProgram program;
     CoefficientPrecision precision;
+    ExecutionTier tier = ExecutionTier::ThreadPerShot;
     uint32_t max_batch;
     uint64_t coefficient_stride;
     DeviceBuffer<float> fp32_coefficients;

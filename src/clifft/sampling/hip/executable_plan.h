@@ -11,10 +11,60 @@
 
 namespace clifft::sampling::hip {
 
-// The first device tier assigns a complete shot to one thread. Wider plans
-// will be accepted when cooperative thread blocks keep their state in on-chip
-// shared memory.
+// Execution tiers, selected by peak active width.
+//
+// The first tier assigns a complete shot to one thread, so the whole 2^k coefficient
+// state is private and k is bounded by what one thread can afford. The cooperative
+// tiers give a shot to a whole workgroup instead, which removes that bound: the state
+// lives either in on-chip shared memory (fast, capacity-limited) or in a global slab
+// (slower, effectively unbounded).
+//
+// Per-shot coefficient storage is coefficient_elements_per_shot(k) = 3 * 2^k elements,
+// i.e. 24 * 2^k bytes in FP64 and 12 * 2^k bytes in FP32.
+enum class ExecutionTier : uint8_t {
+    ThreadPerShot,      // one shot per thread, state private to the thread
+    CooperativeLds,     // one shot per workgroup, state in LDS
+    CooperativeGlobal,  // one shot per workgroup, state in a global slab
+};
+
+[[nodiscard]] constexpr const char* tier_name(ExecutionTier tier) {
+    switch (tier) {
+        case ExecutionTier::ThreadPerShot:
+            return "thread-per-shot";
+        case ExecutionTier::CooperativeLds:
+            return "cooperative-lds";
+        case ExecutionTier::CooperativeGlobal:
+            return "cooperative-global";
+    }
+    return "unknown";
+}
+
 inline constexpr uint32_t kThreadPerShotMaxActiveWidth = 4;
+
+// Widest plan any tier can hold. 2^30 coefficients already exceeds device memory at
+// every precision; the real limit is checked against the device at Sampler construction.
+inline constexpr uint32_t kMaxSupportedActiveWidth = 30;
+
+// Bytes of coefficient storage one shot needs at a given width and element size.
+[[nodiscard]] constexpr uint64_t coefficient_bytes_per_shot(uint32_t peak_active_width,
+                                                            uint64_t element_bytes) {
+    return detail::coefficient_elements_per_shot(peak_active_width) * element_bytes;
+}
+
+// Tier for one shot, given the element size and the device's per-workgroup LDS budget.
+// Precision is a property of the Sampler, not of the plan, so this is deliberately not
+// decided during lowering.
+[[nodiscard]] constexpr ExecutionTier select_execution_tier(uint32_t peak_active_width,
+                                                            uint64_t element_bytes,
+                                                            uint64_t lds_bytes_per_workgroup) {
+    if (peak_active_width <= kThreadPerShotMaxActiveWidth) {
+        return ExecutionTier::ThreadPerShot;
+    }
+    if (coefficient_bytes_per_shot(peak_active_width, element_bytes) <= lds_bytes_per_workgroup) {
+        return ExecutionTier::CooperativeLds;
+    }
+    return ExecutionTier::CooperativeGlobal;
+}
 
 class ExecutablePlan {
   public:
