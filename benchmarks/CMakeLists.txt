@@ -27,3 +27,9 @@ get_filename_component(
 target_compile_definitions(clifft_benchmarks PRIVATE
     CLIFFT_BENCHMARK_FIXTURES_DIR="${_CLIFFT_BENCHMARK_FIXTURES_DIR}"
 )
+
+if(CLIFFT_ENABLE_CUDA)
+    add_executable(clifft_cuda_bench cuda_sampling_bench.cc)
+    target_link_libraries(clifft_cuda_bench PRIVATE clifft_core clifft_cuda_backend benchmark::benchmark)
+    target_compile_features(clifft_cuda_bench PRIVATE cxx_std_20)
+endif()
