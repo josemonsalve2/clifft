@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-from utils_qiskit import qiskit_statevector, stim_to_qiskit_noiseless
 
 import clifft
 
@@ -32,9 +31,25 @@ class CpuSamplingMode:
     name: str
     batch_size: int | str
 
-    def sample(self, program: Any, shots: int, seed: int) -> Any:
+    @staticmethod
+    def compile(source: str, **kwargs: Any) -> Any:
+        return clifft.compile(source, **kwargs)
+
+    def sample(self, program: Any, shots: int, seed: int | None = None) -> Any:
         # Host-dependent worker counts can change automatic batch selection.
         return clifft.sample(program, shots, seed=seed, threads=1, batch_size=self.batch_size)
+
+    def sample_survivors(
+        self, program: Any, shots: int, *, seed: int | None = None, keep_records: bool = False
+    ) -> Any:
+        return clifft.sample_survivors(
+            program,
+            shots,
+            seed=seed,
+            keep_records=keep_records,
+            threads=1,
+            batch_size=self.batch_size,
+        )
 
 
 CPU_SAMPLING_MODES = (
@@ -47,6 +62,10 @@ CPU_SAMPLING_MODES = (
 @lru_cache(maxsize=256)
 def unitary_reference(source: str) -> npt.NDArray[np.complex128]:
     """Calculate once per source per worker, independently of compiler profiles."""
+    # Loading Aer before Clifft can change OpenMP initialization on macOS.
+    # CPU sampling fixtures need no reference simulator at import time.
+    from utils_qiskit import qiskit_statevector, stim_to_qiskit_noiseless
+
     state = qiskit_statevector(stim_to_qiskit_noiseless(source))
     state.setflags(write=False)
     return state

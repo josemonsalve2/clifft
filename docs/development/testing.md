@@ -128,6 +128,12 @@ Separate jobs cover Linux arm64, macOS, Windows, and WebAssembly. Nightly
 sanitizer jobs check for memory errors, undefined behavior, and data races,
 while a weekly job records combined C++ and Python coverage.
 
+## Shared Sampling Behavior
+
+Shared sampling tests run the same behavioral assertions across supported
+execution modes. This helps new features receive coverage across modes and
+makes new modes inherit existing behavioral and regression tests.
+
 ## Running the Tests
 
 We use `pytest` for the Python oracles and `CTest` for the C++ units. You can run the test suites locally using the provided `just` shortcuts.
