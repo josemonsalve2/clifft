@@ -329,7 +329,7 @@ __device__ bool measure_active(const ProgramView& program, const Action& action,
     lane.reduce_pair(probability_zero, probability_one);
 
     const double total = probability_zero + probability_one;
-    const double epsilon = clifft::kMeasurementDustEpsilon * total;
+    const double epsilon = clifft::measurement_dust_epsilon<Coefficient>() * total;
     bool branch;
     if constexpr (Replay) {
         // The lowered outcome is the sign correction XOR this action's branch

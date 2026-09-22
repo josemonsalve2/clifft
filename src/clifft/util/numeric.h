@@ -18,7 +18,31 @@ inline constexpr uint32_t kDenseActiveWidthLimit = 60;
 // Relative epsilon shared by measurement-branch handling and instrument
 // sampling when analytically-zero probabilities contain floating-point dust.
 // This is part of Clifft's record-reachability semantics.
+//
+// The floor is set by squaring the coefficient's relative error: a branch whose
+// probability is analytically zero retains the squared amplitude residue, so it
+// scales with the square of the coefficient epsilon rather than with circuit
+// depth. One constant therefore cannot serve both coefficient precisions, and a
+// threshold chosen for FP64 leaves FP32 reporting impossible branches as
+// reachable.
 inline constexpr double kMeasurementDustEpsilon = 1e-18;
+
+// FP32 coefficients carry a relative error of 2^-23, so the same residue lands
+// near (2^-23)^2 = 1.4e-14 instead of near the FP64 floor. Measured on an
+// analytically impossible branch over active widths 4 to 20, the dust fraction
+// ran from 2.6e-16 to 5.0e-15, i.e. 0.02x to 0.35x of that square, and did not
+// move with circuit depth. This threshold is 256 times the square, leaving room
+// for wider states while staying far below any branch FP32 can resolve at all:
+// a genuine half-probability branch sits eleven orders above it.
+inline constexpr double kMeasurementDustEpsilonFp32 = 256.0 * 1.1920929e-7 * 1.1920929e-7;
+
+// Dust threshold for the coefficient type a kernel was instantiated with.
+// Executors that are FP64 by construction can keep using the constant directly.
+template <typename Coefficient>
+[[nodiscard]] constexpr double measurement_dust_epsilon() {
+    return sizeof(Coefficient) == sizeof(float) ? kMeasurementDustEpsilonFp32
+                                                : kMeasurementDustEpsilon;
+}
 
 // Absolute tolerance in half-turn units for replacing a rotation with its
 // canonical Clifford representative. This intentionally absorbs numerical
