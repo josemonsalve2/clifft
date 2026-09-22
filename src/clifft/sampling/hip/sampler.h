@@ -17,7 +17,14 @@ enum class CoefficientPrecision : uint8_t {
     FP32,
 };
 
-inline constexpr uint32_t kDefaultBlockSize = 256;
+// Asks the backend to size the launch itself. Thread-per-shot packs independent shots
+// into a block and uses 256; the block tiers derive a size from the peak active width,
+// because a block wider than the state has pairs adds idle lanes and extra reduction
+// levels rather than parallelism -- measured 2.2x slower at k = 5..8 on gfx950 when a
+// flat 256 was used instead. Any other value is validated and used exactly as given.
+inline constexpr uint32_t kAutoBlockSize = 0;
+inline constexpr uint32_t kThreadPerShotBlockSize = 256;
+inline constexpr uint32_t kDefaultBlockSize = kAutoBlockSize;
 inline constexpr uint32_t kDefaultMaxBatchShots = 65536;
 
 struct SamplingOptions {
@@ -36,6 +43,13 @@ struct ReplayResult {
 
 [[nodiscard]] bool is_available() noexcept;
 [[nodiscard]] std::string backend_info();
+
+// Reports the tier this executable would run on for the current device and precision,
+// without uploading anything. Tier choice depends on the device's shared-memory budget,
+// so a test that means to exercise a particular kernel has to ask rather than assume.
+[[nodiscard]] ExecutionTier selected_tier(
+    const ExecutablePlan& executable,
+    CoefficientPrecision coefficient_precision = CoefficientPrecision::FP64);
 
 // Owns one uploaded executable and a precision-specific reusable workspace.
 // The object is synchronous and bound to the device current at construction.
@@ -60,6 +74,7 @@ class Sampler {
     [[nodiscard]] ReplayResult replay_shot(std::span<const uint8_t> forced_records);
 
     [[nodiscard]] CoefficientPrecision coefficient_precision() const;
+    [[nodiscard]] ExecutionTier execution_tier() const;
     [[nodiscard]] uint32_t max_batch_shots() const;
     [[nodiscard]] size_t allocated_device_bytes() const;
     [[nodiscard]] uint32_t num_visible_records() const;

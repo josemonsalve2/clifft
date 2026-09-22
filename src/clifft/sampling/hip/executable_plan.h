@@ -13,28 +13,32 @@ namespace clifft::sampling::hip {
 
 // Execution tiers, selected by peak active width.
 //
-// The first tier assigns a complete shot to one thread, so the whole 2^k coefficient
-// state is private and k is bounded by what one thread can afford. The cooperative
-// tiers give a shot to a whole workgroup instead, which removes that bound: the state
-// lives either in on-chip shared memory (fast, capacity-limited) or in a global slab
-// (slower, effectively unbounded).
+// These are the same three categories the CUDA backend uses, under the same names, so a
+// plan reasons about placement identically on either device. Capacity thresholds and lane
+// counts differ with the hardware; the categories do not.
+//
+// ThreadPerShot assigns a complete shot to one thread. Its coefficients still live in a
+// global slab owned by that shot, so the bound is what one thread can address and stream,
+// not a private-memory budget. The block tiers give a shot to a whole block instead: the
+// coefficients live either in on-chip shared memory, which is fast and capacity-limited,
+// or in a global slab, which is slower and bounded only by device memory.
 //
 // Per-shot coefficient storage is coefficient_elements_per_shot(k) = 3 * 2^k elements,
 // i.e. 24 * 2^k bytes in FP64 and 12 * 2^k bytes in FP32.
 enum class ExecutionTier : uint8_t {
-    ThreadPerShot,      // one shot per thread, state private to the thread
-    CooperativeLds,     // one shot per workgroup, state in LDS
-    CooperativeGlobal,  // one shot per workgroup, state in a global slab
+    ThreadPerShot,  // one shot per thread, coefficients in a global slab owned by the shot
+    BlockShared,    // one shot per block, coefficients in shared memory (LDS on AMD)
+    BlockGlobal,    // one shot per block, coefficients in a global slab
 };
 
 [[nodiscard]] constexpr const char* tier_name(ExecutionTier tier) {
     switch (tier) {
         case ExecutionTier::ThreadPerShot:
-            return "thread-per-shot";
-        case ExecutionTier::CooperativeLds:
-            return "cooperative-lds";
-        case ExecutionTier::CooperativeGlobal:
-            return "cooperative-global";
+            return "thread_per_shot";
+        case ExecutionTier::BlockShared:
+            return "block_shared";
+        case ExecutionTier::BlockGlobal:
+            return "block_global";
     }
     return "unknown";
 }
@@ -66,9 +70,9 @@ inline constexpr uint32_t kMaxSupportedActiveWidth = 30;
                                 ? lds_bytes_per_workgroup - detail::kCooperativeReductionBytes
                                 : 0;
     if (coefficient_bytes_per_shot(peak_active_width, element_bytes) <= usable) {
-        return ExecutionTier::CooperativeLds;
+        return ExecutionTier::BlockShared;
     }
-    return ExecutionTier::CooperativeGlobal;
+    return ExecutionTier::BlockGlobal;
 }
 
 class ExecutablePlan {

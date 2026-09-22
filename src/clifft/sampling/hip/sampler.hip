@@ -322,8 +322,10 @@ __device__ double expectation_value(const Action& action, const Coefficient* rea
     return result;
 }
 
+// is_writer lets the cooperative kernel keep the RNG advancing identically in every lane
+// while a single lane performs the stores. The thread-per-shot kernel passes true.
 __device__ __forceinline__ void sample_noise(const ProgramView& program, Xoshiro256PlusPlus& rng,
-                                             uint8_t* symbols) {
+                                             uint8_t* symbols, bool is_writer) {
     for (uint32_t site_index = 0; site_index < program.noise_site_count; ++site_index) {
         const NoiseSite site = program.noise_sites[site_index];
         if (site.outcome_count == 0 || site.execution_probability <= 0.0) {
@@ -339,7 +341,9 @@ __device__ __forceinline__ void sample_noise(const ProgramView& program, Xoshiro
                draw >= program.noise_outcomes[outcome].cumulative_probability) {
             ++outcome;
         }
-        symbols[program.noise_outcomes[outcome].symbol] = 1;
+        if (is_writer) {
+            symbols[program.noise_outcomes[outcome].symbol] = 1;
+        }
     }
 }
 
@@ -412,7 +416,7 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
 
     Xoshiro256PlusPlus rng = shot_rng(seed_root, shot_offset + shot);
     if constexpr (!Replay) {
-        sample_noise(program, rng, symbols);
+        sample_noise(program, rng, symbols, true);
     }
     double log_probability = 0.0;
     bool reachable = true;
@@ -432,6 +436,9 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
                     imag, scratch_real, scratch_imag);
                 break;
             case ActionTag::MeasureDormantRandom: {
+                // Same hazard as the active measurement: the correction reads this
+                // action's own branch symbol, so every lane must read it before any lane
+                // publishes.
                 const bool correction = evaluate(program, symbols, action.expression);
                 const bool branch = Replay ? (forced_records[action.index1] != 0) != correction
                                            : rng.next_double() >= 0.5;
@@ -464,6 +471,9 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
                     const double probability = source ? action.value1 : action.value0;
                     const bool flip = probability >= 1.0 ||
                                       (probability > 0.0 && rng.next_double() < probability);
+                    // Every lane draws the flip so the RNG advances identically, but the
+                    // record update is a read-modify-write: applied once per wavefront it
+                    // cancels, and an even lane count silently loses the flip entirely.
                     symbols[action.index0] = static_cast<uint8_t>(flip);
                     records[action.index1] ^= static_cast<uint8_t>(flip);
                 }
@@ -508,8 +518,8 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
 //
 // interpret_shots above bounds the active width by what a single thread can hold,
 // because it gives one shot to one thread. Here a whole workgroup owns one shot, so
-// the 2^k coefficient state lives either in LDS (CooperativeLds) or in a
-// per-workgroup global slab (CooperativeGlobal), and every dense traversal is split
+// the 2^k coefficient state lives either in LDS (BlockShared) or in a
+// per-workgroup global slab (BlockGlobal), and every dense traversal is split
 // across blockDim.x lanes. Three rules make that correct:
 //
 //  1. Scalar bookkeeping -- symbols, records, detectors, observables and the RNG --
@@ -533,6 +543,24 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
 
 // Sum two FP64 accumulators across the workgroup, leaving the totals in every lane.
 // Requires blockDim.x to be a power of two, which the host launcher guarantees.
+// One shot per block means every lane runs the same action stream against ONE copy of
+// that shot's symbols, records and outputs. Two rules follow, and both are easy to
+// violate by writing what looks like ordinary scalar code:
+//
+//   1. A write to shared per-shot state needs a single writer. Lanes agree on the value,
+//      but a read-modify-write such as the readout-noise XOR is applied once per
+//      wavefront otherwise, and an even number of flips cancels.
+//   2. If an action reads a location it also writes, every lane must finish reading
+//      before any lane publishes. A barrier after the action is not enough; the hazard is
+//      inside the action.
+//
+// The CUDA backend carries the same discipline in its Lane type. The names match so the
+// two backends read alike.
+struct CooperativeLane {
+    [[nodiscard]] __device__ __forceinline__ bool is_writer() const { return threadIdx.x == 0; }
+    __device__ __forceinline__ void sync() const { __syncthreads(); }
+};
+
 __device__ __forceinline__ void reduce_two_sums(double* shared, double& first, double& second) {
     const uint32_t lane = threadIdx.x;
     const uint32_t width = blockDim.x;
@@ -701,10 +729,18 @@ __device__ bool measure_active_coop(const ProgramView& program, const Action& ac
 
     const double total = probability_zero + probability_one;
     const double epsilon = clifft::kMeasurementDustEpsilon * total;
+    const CooperativeLane lane;
     bool branch;
     if constexpr (Replay) {
+        // The lowered outcome is the sign correction XOR this action's own branch symbol,
+        // so every lane must read that symbol while it still holds the pre-action value.
+        // Lane 0 publishes it below; without this barrier a lagging lane reads the
+        // published value, cancels it out of the correction and selects the opposite
+        // branch, then disagrees about reachability and strands lanes at different
+        // barriers. Restricting the write to lane 0 alone does not fix this.
         const bool correction = evaluate(program, symbols, action.expression);
         branch = (forced_records[action.index1] != 0) != correction;
+        lane.sync();
         if ((probability_one <= epsilon && branch) || (probability_zero <= epsilon && !branch)) {
             return false;
         }
@@ -723,8 +759,13 @@ __device__ bool measure_active_coop(const ProgramView& program, const Action& ac
     }
     const double selected_probability = branch ? probability_one : probability_zero;
     const double inverse_norm = 1.0 / sqrt(selected_probability);
-    symbols[action.index0] = static_cast<uint8_t>(branch);
-    records[action.index1] = static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+    // Single writer, and the record is derived from the symbol this same statement
+    // publishes, so both must come from one lane to stay self-consistent.
+    if (lane.is_writer()) {
+        symbols[action.index0] = static_cast<uint8_t>(branch);
+        records[action.index1] =
+            static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+    }
 
     // Collapse into scratch first -- see rule 3 at the top of this section.
     if (action.x == 0) {
@@ -824,9 +865,10 @@ __global__ void interpret_shots_cooperative(ProgramView program, SeedRoot seed_r
     }
     __syncthreads();
 
+    const CooperativeLane lane;
     Xoshiro256PlusPlus rng = shot_rng(seed_root, shot_offset + shot);
     if constexpr (!Replay) {
-        sample_noise(program, rng, symbols);
+        sample_noise(program, rng, symbols, lane.is_writer());
     }
     __syncthreads();
 
@@ -856,21 +898,29 @@ __global__ void interpret_shots_cooperative(ProgramView program, SeedRoot seed_r
                 if constexpr (Replay) {
                     log_probability += kLogHalf;
                 }
-                symbols[action.index0] = static_cast<uint8_t>(branch);
-                records[action.index1] =
-                    static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+                lane.sync();
+                if (lane.is_writer()) {
+                    symbols[action.index0] = static_cast<uint8_t>(branch);
+                    records[action.index1] =
+                        static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+                }
                 break;
             }
             case ActionTag::RecordClassical:
-                records[action.index0] =
-                    static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+                if (lane.is_writer()) {
+                    records[action.index0] =
+                        static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+                }
+                lane.sync();
                 if constexpr (Replay) {
                     reachable = records[action.index0] == forced_records[action.index0];
                 }
                 break;
             case ActionTag::DefineSymbol:
-                symbols[action.index0] =
-                    static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+                if (lane.is_writer()) {
+                    symbols[action.index0] =
+                        static_cast<uint8_t>(evaluate(program, symbols, action.expression));
+                }
                 break;
             case ActionTag::ApplyReadoutNoise: {
                 if constexpr (Replay) {
@@ -880,31 +930,41 @@ __global__ void interpret_shots_cooperative(ProgramView program, SeedRoot seed_r
                     const double probability = source ? action.value1 : action.value0;
                     const bool flip = probability >= 1.0 ||
                                       (probability > 0.0 && rng.next_double() < probability);
-                    symbols[action.index0] = static_cast<uint8_t>(flip);
-                    records[action.index1] ^= static_cast<uint8_t>(flip);
+                    if (lane.is_writer()) {
+                        symbols[action.index0] = static_cast<uint8_t>(flip);
+                        records[action.index1] ^= static_cast<uint8_t>(flip);
+                    }
                 }
                 break;
             }
             case ActionTag::WriteDetector: {
                 const bool outcome = evaluate_output_value(program, symbols, records, action);
-                detectors[action.index0] = static_cast<uint8_t>(outcome);
+                if (lane.is_writer()) {
+                    detectors[action.index0] = static_cast<uint8_t>(outcome);
+                }
                 if ((action.flags & kPostselected) != 0 && outcome) {
                     discarded = true;
                 }
                 break;
             }
             case ActionTag::WriteObservable:
-                observables[action.index0] = static_cast<uint8_t>(
-                    evaluate_output_value(program, symbols, records, action));
+                if (lane.is_writer()) {
+                    observables[action.index0] = static_cast<uint8_t>(
+                        evaluate_output_value(program, symbols, records, action));
+                }
                 break;
             case ActionTag::WriteExpectationValue: {
                 if ((action.flags & kAbsentActiveProjection) != 0) {
-                    exp_vals[action.index0] = 0.0;
+                    if (lane.is_writer()) {
+                        exp_vals[action.index0] = 0.0;
+                    }
                     break;
                 }
                 const double value = expectation_value_coop(action, real, imag, reduction);
-                exp_vals[action.index0] =
-                    evaluate(program, symbols, action.expression) ? -value : value;
+                if (lane.is_writer()) {
+                    exp_vals[action.index0] =
+                        evaluate(program, symbols, action.expression) ? -value : value;
+                }
                 break;
             }
         }
@@ -1133,8 +1193,46 @@ struct UploadedProgram {
     }
 };
 
+// The block tiers reduce measurement probabilities across the block, and that tree
+// reduction halves the active lane count, so the block size must be a power of two no
+// larger than the static reduction scratch. A request outside that is rejected rather
+// than quietly replaced, so a caller tuning launch geometry is never lied to.
+// Tier depends on the coefficient element size and the device's per-block shared-memory
+// budget, neither of which is known while lowering. Sampler::Impl and the public
+// selected_tier both route here, so a caller's query can never disagree with the tier the
+// Sampler actually runs.
+ExecutionTier resolve_execution_tier(uint32_t peak_active_width, CoefficientPrecision precision) {
+    const uint64_t element_bytes =
+        precision == CoefficientPrecision::FP32 ? sizeof(float) : sizeof(double);
+    size_t lds = 0;
+    int device = 0;
+    hipDeviceProp_t properties{};
+    if (hipGetDevice(&device) == hipSuccess &&
+        hipGetDeviceProperties(&properties, device) == hipSuccess) {
+        lds = properties.sharedMemPerBlock;
+    }
+    return select_execution_tier(peak_active_width, element_bytes, lds);
+}
+
+void validate_launch_block_size(uint32_t block_size, ExecutionTier tier) {
+    if (tier == ExecutionTier::ThreadPerShot || block_size == kAutoBlockSize) {
+        return;
+    }
+    const bool power_of_two = (block_size & (block_size - 1)) == 0;
+    if (!power_of_two || block_size < detail::kWavefrontSize ||
+        block_size > detail::kCooperativeBlockSize) {
+        throw std::invalid_argument(
+            "HIP block size on the " + std::string(tier_name(tier)) +
+            " tier must be a power of two between " + std::to_string(detail::kWavefrontSize) + " and " +
+            std::to_string(detail::kCooperativeBlockSize) + "; got " + std::to_string(block_size));
+    }
+}
+
 void validate_block_size(uint32_t block_size) {
-    if (block_size == 0 || block_size > 1024) {
+    if (block_size == kAutoBlockSize) {
+        return;
+    }
+    if (block_size > 1024) {
         throw std::invalid_argument("HIP block size must be between 1 and 1024");
     }
 }
@@ -1180,7 +1278,7 @@ class Sampler::Impl {
          uint32_t selected_max_batch_shots)
         : program(source),
           precision(selected_precision),
-          tier(resolve_tier(source.peak_active_width(), selected_precision)),
+          tier(resolve_execution_tier(source.peak_active_width(), selected_precision)),
           max_batch(effective_max_batch(source, selected_precision, tier, selected_max_batch_shots)),
           coefficient_stride(detail::coefficient_elements_per_shot(source.peak_active_width())),
           fp32_coefficients(selected_precision == CoefficientPrecision::FP32 &&
@@ -1209,8 +1307,8 @@ class Sampler::Impl {
 
     // The LDS tier holds the coefficient state on chip for the lifetime of a workgroup,
     // so it needs no global slab -- which is otherwise the dominant allocation.
-    static bool needs_global_coefficients(ExecutionTier selected_tier) {
-        return selected_tier != ExecutionTier::CooperativeLds;
+    static bool needs_global_coefficients(ExecutionTier resolved) {
+        return resolved != ExecutionTier::BlockShared;
     }
 
     // On the global tier the retained workspace is max_batch * 24 * 2^k bytes, which at
@@ -1219,8 +1317,8 @@ class Sampler::Impl {
     // does not change seeded rows because the RNG keys off the global shot index.
     static uint32_t effective_max_batch(const ExecutablePlan& source,
                                         CoefficientPrecision selected_precision,
-                                        ExecutionTier selected_tier, uint32_t requested) {
-        if (!needs_global_coefficients(selected_tier) || requested == 0) {
+                                        ExecutionTier resolved, uint32_t requested) {
+        if (!needs_global_coefficients(resolved) || requested == 0) {
             return requested;
         }
         const uint64_t element_bytes =
@@ -1244,22 +1342,6 @@ class Sampler::Impl {
             affordable = 1;
         }
         return static_cast<uint32_t>(std::min<uint64_t>(requested, affordable));
-    }
-
-    // Tier depends on the coefficient element size and the device's per-workgroup LDS
-    // budget, neither of which is known while lowering, so it is resolved here.
-    static ExecutionTier resolve_tier(uint32_t peak_active_width,
-                                      CoefficientPrecision precision) {
-        const uint64_t element_bytes =
-            precision == CoefficientPrecision::FP32 ? sizeof(float) : sizeof(double);
-        size_t lds = 0;
-        int device = 0;
-        hipDeviceProp_t properties{};
-        if (hipGetDevice(&device) == hipSuccess &&
-            hipGetDeviceProperties(&properties, device) == hipSuccess) {
-            lds = properties.sharedMemPerBlock;
-        }
-        return select_execution_tier(peak_active_width, element_bytes, lds);
     }
 
     void run_batch(detail::SeedRoot root, uint64_t shot_offset, uint32_t shots,
@@ -1329,21 +1411,23 @@ class Sampler::Impl {
     void launch(detail::SeedRoot root, uint64_t shot_offset, uint32_t shots, uint32_t block_size,
                 Coefficient* coefficient_storage) {
         if (tier == ExecutionTier::ThreadPerShot) {
+            const uint32_t threads =
+                block_size == kAutoBlockSize ? kThreadPerShotBlockSize : block_size;
             const uint32_t blocks =
-                static_cast<uint32_t>((static_cast<uint64_t>(shots) + block_size - 1) / block_size);
+                static_cast<uint32_t>((static_cast<uint64_t>(shots) + threads - 1) / threads);
             hipLaunchKernelGGL(HIP_KERNEL_NAME(detail::interpret_shots<Coefficient, Replay>),
-                               dim3(blocks), dim3(block_size), 0, 0, program.view, root,
+                               dim3(blocks), dim3(threads), 0, 0, program.view, root,
                                shot_offset, shots, coefficient_storage, symbols.data(),
                                records.data(), forced_records.data(), detectors.data(),
                                observables.data(), exp_vals.data(), log_probabilities.data(),
                                reachable.data(), survived.data());
         } else {
-            // One workgroup per shot. block_size is the caller's launch hint for the
-            // thread-per-shot tier and does not apply here: the cooperative block size is
-            // fixed by the reduction's power-of-two requirement and capped by the pair
-            // count so narrow plans do not launch mostly-idle workgroups.
-            const uint32_t lanes = cooperative_block_size(program.view.peak_active_width);
-            const bool in_lds = tier == ExecutionTier::CooperativeLds;
+            // One block per shot. The block is also the reduction width, so the caller's
+            // request is honoured within the domain the reduction can support rather than
+            // being silently overridden; validate_launch_block_size rejects the rest.
+            const uint32_t lanes =
+                cooperative_block_size(block_size, program.view.peak_active_width);
+            const bool in_lds = tier == ExecutionTier::BlockShared;
             const size_t dynamic_lds =
                 in_lds ? static_cast<size_t>(detail::coefficient_elements_per_shot(
                              program.view.peak_active_width)) *
@@ -1362,10 +1446,17 @@ class Sampler::Impl {
 
     // Power of two (the workgroup reduction halves lanes each step), at least one
     // wavefront, never more than the pair count a rotation can actually keep busy.
-    static uint32_t cooperative_block_size(uint32_t peak_active_width) {
+    // On the block tiers the block size IS the reduction width, so it must be a power of
+    // two the static reduction scratch can hold; validate_launch_block_size has already
+    // rejected anything else. kAutoBlockSize derives a size instead: a block wider than
+    // the state has pairs only adds idle lanes and reduction levels.
+    static uint32_t cooperative_block_size(uint32_t requested, uint32_t peak_active_width) {
+        if (requested != kAutoBlockSize) {
+            return requested;
+        }
         const uint64_t pairs =
             peak_active_width == 0 ? 1 : (uint64_t{1} << (peak_active_width - 1));
-        uint32_t lanes = 64;
+        uint32_t lanes = detail::kWavefrontSize;
         while (lanes < detail::kCooperativeBlockSize && lanes < pairs) {
             lanes <<= 1;
         }
@@ -1394,6 +1485,11 @@ class Sampler::Impl {
         }
     }
 };
+
+ExecutionTier selected_tier(const ExecutablePlan& executable,
+                            CoefficientPrecision coefficient_precision) {
+    return resolve_execution_tier(executable.peak_active_width(), coefficient_precision);
+}
 
 bool is_available() noexcept {
     int device_count = 0;
@@ -1430,6 +1526,7 @@ Sampler& Sampler::operator=(Sampler&&) noexcept = default;
 SamplingResult Sampler::sample(uint32_t shots, std::optional<uint64_t> seed, uint32_t block_size) {
     BusyGuard guard(impl_->busy);
     validate_block_size(block_size);
+    validate_launch_block_size(block_size, impl_->tier);
     if (impl_->program.has_postselection) {
         throw std::invalid_argument(
             "HIP fixed-row sampling does not support postselection; use sample_survivors");
@@ -1494,6 +1591,7 @@ SamplingSurvivorResult Sampler::sample_survivors(uint32_t shots, bool keep_recor
                                                  uint32_t block_size) {
     BusyGuard guard(impl_->busy);
     validate_block_size(block_size);
+    validate_launch_block_size(block_size, impl_->tier);
     SamplingSurvivorResult result;
     result.total_shots = shots;
     if (shots == 0) {
@@ -1609,6 +1707,10 @@ ReplayResult Sampler::replay_shot(std::span<const uint8_t> forced_records) {
 
 CoefficientPrecision Sampler::coefficient_precision() const {
     return impl_->precision;
+}
+
+ExecutionTier Sampler::execution_tier() const {
+    return impl_->tier;
 }
 
 uint32_t Sampler::max_batch_shots() const {

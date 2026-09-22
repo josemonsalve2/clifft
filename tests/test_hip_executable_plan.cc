@@ -219,8 +219,7 @@ TEST_CASE("HIP executable identifies cultivation cooperative width") {
     // belongs to the LDS tier on any supported device.
     const ExecutablePlan lowered(plan);
     REQUIRE(lowered.peak_active_width() == 10);
-    REQUIRE(select_execution_tier(10, sizeof(double), 64u * 1024u) ==
-            ExecutionTier::CooperativeLds);
+    REQUIRE(select_execution_tier(10, sizeof(double), 64u * 1024u) == ExecutionTier::BlockShared);
 }
 
 TEST_CASE("HIP tier selection follows the coefficient storage budget") {
@@ -237,18 +236,18 @@ TEST_CASE("HIP tier selection follows the coefficient storage budget") {
     REQUIRE(select_execution_tier(4, sizeof(float), 0) == ExecutionTier::ThreadPerShot);
 
     // FP64 fits LDS through k = 11 on a 64 KB device, k = 12 on a 160 KB device.
-    REQUIRE(select_execution_tier(11, sizeof(double), kLds64) == ExecutionTier::CooperativeLds);
-    REQUIRE(select_execution_tier(12, sizeof(double), kLds64) == ExecutionTier::CooperativeGlobal);
-    REQUIRE(select_execution_tier(12, sizeof(double), kLds160) == ExecutionTier::CooperativeLds);
-    REQUIRE(select_execution_tier(13, sizeof(double), kLds160) == ExecutionTier::CooperativeGlobal);
+    REQUIRE(select_execution_tier(11, sizeof(double), kLds64) == ExecutionTier::BlockShared);
+    REQUIRE(select_execution_tier(12, sizeof(double), kLds64) == ExecutionTier::BlockGlobal);
+    REQUIRE(select_execution_tier(12, sizeof(double), kLds160) == ExecutionTier::BlockShared);
+    REQUIRE(select_execution_tier(13, sizeof(double), kLds160) == ExecutionTier::BlockGlobal);
 
     // FP32 halves the state, buying exactly one more width at each budget.
-    REQUIRE(select_execution_tier(12, sizeof(float), kLds64) == ExecutionTier::CooperativeLds);
-    REQUIRE(select_execution_tier(13, sizeof(float), kLds160) == ExecutionTier::CooperativeLds);
+    REQUIRE(select_execution_tier(12, sizeof(float), kLds64) == ExecutionTier::BlockShared);
+    REQUIRE(select_execution_tier(13, sizeof(float), kLds160) == ExecutionTier::BlockShared);
 
     // Widths whose coefficient state cannot fit any workgroup budget land on the global tier.
-    REQUIRE(select_execution_tier(20, sizeof(double), kLds160) == ExecutionTier::CooperativeGlobal);
-    REQUIRE(select_execution_tier(23, sizeof(double), kLds160) == ExecutionTier::CooperativeGlobal);
+    REQUIRE(select_execution_tier(20, sizeof(double), kLds160) == ExecutionTier::BlockGlobal);
+    REQUIRE(select_execution_tier(23, sizeof(double), kLds160) == ExecutionTier::BlockGlobal);
 }
 
 TEST_CASE("HIP replay circuits preserve visible and hidden record layout") {

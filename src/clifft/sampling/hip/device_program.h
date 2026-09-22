@@ -46,6 +46,10 @@ inline constexpr uint64_t coefficient_elements_per_shot(uint32_t peak_active_wid
 // Cooperative tiers give one shot to one workgroup. The block size is fixed so the
 // reduction scratch below is a compile-time size, and must stay a power of two: the
 // workgroup reduction halves the active lane count each step.
+// A block smaller than one wavefront leaves lanes of that wavefront permanently idle,
+// so it is the floor for the block tiers rather than a merely inefficient choice.
+inline constexpr uint32_t kWavefrontSize = 64;
+
 inline constexpr uint32_t kCooperativeBlockSize = 256;
 
 // Static LDS the cooperative kernel always needs, independent of the coefficient state:

@@ -25,9 +25,11 @@ using clifft::sampling::SamplingPlan;
 using clifft::sampling::SamplingResult;
 using clifft::sampling::SamplingSurvivorResult;
 using clifft::sampling::hip::CoefficientPrecision;
+using clifft::sampling::hip::ExecutionTier;
 using clifft::sampling::hip::kThreadPerShotMaxActiveWidth;
 using clifft::sampling::hip::Sampler;
 using clifft::sampling::hip::SamplingOptions;
+using clifft::sampling::hip::tier_name;
 using CpuExecutablePlan = clifft::sampling::ExecutablePlan;
 using HipExecutablePlan = clifft::sampling::hip::ExecutablePlan;
 
@@ -90,6 +92,37 @@ std::string parallel_t_detector(uint32_t width) {
     return text + "M " + std::to_string(ancilla) + "\nDETECTOR rec[-1]\n";
 }
 
+// A width-n active state that then measures an ancilla and always flips its record. The
+// flip is a read-modify-write on state the whole block shares, so a block tier that lets
+// more than one lane apply it cancels the flip and reports zero.
+std::string parallel_t_readout_noise(uint32_t width) {
+    std::string text;
+    for (uint32_t qubit = 0; qubit < width; ++qubit) {
+        text += "H " + std::to_string(qubit) + "\n";
+    }
+    for (uint32_t qubit = 0; qubit < width; ++qubit) {
+        text += "T " + std::to_string(qubit) + "\n";
+    }
+    text += "M " + std::to_string(width) + "\n";
+    text += "READOUT_NOISE(1) rec[-1]\nDETECTOR rec[-1]\n";
+    return text;
+}
+
+// A width-n active state followed by a measurement whose lowered outcome expression
+// contains its own branch symbol. Replay must read that symbol before any lane publishes
+// it; a lane that reads the published value cancels it out of the correction and picks
+// the unreachable branch.
+std::string parallel_t_replay(uint32_t width) {
+    std::string text;
+    for (uint32_t qubit = 0; qubit < width; ++qubit) {
+        text += "H " + std::to_string(qubit) + "\n";
+    }
+    for (uint32_t qubit = 0; qubit < width; ++qubit) {
+        text += "T " + std::to_string(qubit) + "\n";
+    }
+    return text + "T 0\nT 0\nT 0\nH 0\nM 0\n";
+}
+
 }  // namespace
 
 TEST_CASE("HIP sampler zero shots does not require a device") {
@@ -107,11 +140,14 @@ TEST_CASE("HIP sampler zero shots does not require a device") {
     REQUIRE(survivors.passed_shots == 0);
     REQUIRE(survivors.observable_ones.empty());
 
-    const SamplingOptions invalid_low{.block_size = 0};
+    // A zero block size asks the backend to size the launch rather than being an error,
+    // which is what the default now requests.
+    const SamplingOptions automatic{.block_size = clifft::sampling::hip::kAutoBlockSize};
+    REQUIRE(SamplingOptions{}.block_size == clifft::sampling::hip::kAutoBlockSize);
+    REQUIRE(clifft::sampling::hip::sample(executable, 0, automatic).measurements.empty());
+
     const SamplingOptions invalid_high{.block_size = 1025};
     const SamplingOptions invalid_batch{.max_batch_shots = 0};
-    REQUIRE_THROWS_AS(clifft::sampling::hip::sample(executable, 0, invalid_low),
-                      std::invalid_argument);
     REQUIRE_THROWS_AS(clifft::sampling::hip::sample_survivors(executable, 0, false, invalid_high),
                       std::invalid_argument);
     REQUIRE_THROWS_AS(clifft::sampling::hip::sample(executable, 0, invalid_batch),
@@ -620,6 +656,7 @@ TEST_CASE("HIP sampler matches CPU expectation values on the cooperative LDS tie
     const HipExecutablePlan executable(plan);
     const CpuExecutablePlan cpu_executable(plan);
     require_hip_device();
+    REQUIRE(clifft::sampling::hip::selected_tier(executable) == ExecutionTier::BlockShared);
 
     const SamplingResult expected = clifft::sampling::sample(cpu_executable, 4, uint64_t{29});
     REQUIRE(expected.exp_vals.size() == 4);
@@ -644,6 +681,7 @@ TEST_CASE("HIP sampler matches CPU expectation values when the state exceeds wor
     const HipExecutablePlan executable(plan);
     const CpuExecutablePlan cpu_executable(plan);
     require_hip_device();
+    REQUIRE(clifft::sampling::hip::selected_tier(executable) == ExecutionTier::BlockGlobal);
 
     const SamplingResult expected = clifft::sampling::sample(cpu_executable, 2, uint64_t{31});
 
@@ -670,8 +708,8 @@ TEST_CASE("HIP sampler matches CPU detector statistics at cooperative widths") {
     constexpr uint32_t kShots = 20000;
 
     const SamplingResult cpu = clifft::sampling::sample(cpu_executable, kShots, uint64_t{47});
-    const SamplingResult gpu = clifft::sampling::hip::sample(executable, kShots,
-                                                             {.seed = uint64_t{47}});
+    const SamplingResult gpu =
+        clifft::sampling::hip::sample(executable, kShots, {.seed = uint64_t{47}});
     REQUIRE(cpu.detectors.size() == gpu.detectors.size());
 
     const auto rate = [](const std::vector<uint8_t>& values) {
@@ -696,5 +734,122 @@ TEST_CASE("HIP sampler is repeatable at cooperative widths") {
         const SamplingResult first = clifft::sampling::hip::sample(executable, 2048, options);
         const SamplingResult second = clifft::sampling::hip::sample(executable, 2048, options);
         require_same_rows(first, second);
+    }
+}
+
+// Both cases below are regressions for cooperative-kernel races. Each runs at a width on
+// the shared tier and a width on the global tier, and asserts the tier it actually got so
+// a future capacity change cannot quietly move the coverage onto the narrow kernel.
+TEST_CASE("HIP cooperative readout noise flips each record exactly once") {
+    require_hip_device();
+    constexpr uint32_t kShots = 64;
+
+    for (const uint32_t width : {uint32_t{8}, uint32_t{14}}) {
+        const SamplingPlan plan = plan_from(parallel_t_readout_noise(width));
+        REQUIRE(plan.peak_active_width == width);
+        const HipExecutablePlan executable(plan);
+
+        for (const CoefficientPrecision precision :
+             {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
+            const ExecutionTier tier = clifft::sampling::hip::selected_tier(executable, precision);
+            CAPTURE(width, precision, tier_name(tier));
+            REQUIRE(tier != ExecutionTier::ThreadPerShot);
+
+            const SamplingResult rows = clifft::sampling::hip::sample(
+                executable, kShots, {.seed = uint64_t{5}, .coefficient_precision = precision});
+            REQUIRE(rows.measurements.size() == kShots);
+            REQUIRE(rows.detectors.size() == kShots);
+            // READOUT_NOISE(1) is certain, so every shot must report one. An even number
+            // of applications reports zero instead, which is exactly the failure mode.
+            REQUIRE(std::count(rows.measurements.begin(), rows.measurements.end(), uint8_t{1}) ==
+                    static_cast<long>(kShots));
+            REQUIRE(std::count(rows.detectors.begin(), rows.detectors.end(), uint8_t{1}) ==
+                    static_cast<long>(kShots));
+        }
+    }
+}
+
+TEST_CASE("HIP cooperative replay reads the branch symbol before publishing it") {
+    require_hip_device();
+
+    for (const uint32_t width : {uint32_t{8}, uint32_t{14}}) {
+        const SamplingPlan plan = plan_from(parallel_t_replay(width));
+        REQUIRE(plan.peak_active_width == width);
+        const HipExecutablePlan hip_executable(plan);
+        const CpuExecutablePlan cpu_executable(plan);
+        REQUIRE(hip_executable.num_visible_records() == 1);
+
+        for (const CoefficientPrecision precision :
+             {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
+            const ExecutionTier tier =
+                clifft::sampling::hip::selected_tier(hip_executable, precision);
+            CAPTURE(width, precision, tier_name(tier));
+            REQUIRE(tier != ExecutionTier::ThreadPerShot);
+
+            for (const uint8_t forced_value : {uint8_t{0}, uint8_t{1}}) {
+                const std::array<uint8_t, 1> forced{forced_value};
+                clifft::sampling::Executor cpu(cpu_executable);
+                const clifft::sampling::ReplayResult expected = cpu.replay_shot(forced);
+                const clifft::sampling::hip::ReplayResult actual =
+                    clifft::sampling::hip::replay_shot(hip_executable, forced, precision);
+                CAPTURE(forced_value);
+                // Forcing one is reachable with log probability zero; forcing zero is not
+                // reachable at all. Reading the published symbol selects the opposite
+                // branch, so the two swap and this fails on both values.
+                //
+                // The unreachable branch is only asserted at FP64. Its probability is
+                // mathematically zero, and reachability is decided against a RELATIVE
+                // epsilon of 1e-18, which FP32 cannot resolve: rounding leaves dust many
+                // orders of magnitude above that threshold and the branch reads as
+                // reachable. This is a property of the FP32 path, not of the tier -- the
+                // same circuit at width 3 behaves identically on thread-per-shot.
+                if (expected.reachable || precision == CoefficientPrecision::FP64) {
+                    REQUIRE(actual.reachable == expected.reachable);
+                }
+                if (!expected.reachable) {
+                    continue;
+                }
+                REQUIRE_THAT(actual.log_probability,
+                             Catch::Matchers::WithinAbs(expected.log_probability, 1e-12));
+                REQUIRE(actual.outputs.measurements ==
+                        std::vector<uint8_t>(forced.begin(), forced.end()));
+                // The post-collapse state is what the expectation value is read from, so
+                // agreeing here is the check that collapse used the same branch.
+                REQUIRE(actual.outputs.exp_vals.size() == cpu.exp_vals().size());
+                for (size_t index = 0; index < actual.outputs.exp_vals.size(); ++index) {
+                    CAPTURE(index);
+                    REQUIRE_THAT(actual.outputs.exp_vals[index],
+                                 Catch::Matchers::WithinAbs(cpu.exp_vals()[index], 1e-9));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("HIP block tiers honour an explicit block size and reject unusable ones") {
+    const SamplingPlan plan = plan_from(parallel_t_observable(8));
+    REQUIRE(plan.peak_active_width == 8);
+    const HipExecutablePlan executable(plan);
+    require_hip_device();
+    REQUIRE(clifft::sampling::hip::selected_tier(executable) != ExecutionTier::ThreadPerShot);
+
+    Sampler sampler(executable, CoefficientPrecision::FP64, 256);
+    // Automatic sizing and every legal explicit size must agree on the answer; only the
+    // launch geometry differs.
+    const SamplingResult automatic =
+        sampler.sample(64, uint64_t{11}, clifft::sampling::hip::kAutoBlockSize);
+    for (const uint32_t lanes : {uint32_t{64}, uint32_t{128}, uint32_t{256}}) {
+        CAPTURE(lanes);
+        const SamplingResult forced = sampler.sample(64, uint64_t{11}, lanes);
+        REQUIRE(forced.exp_vals.size() == automatic.exp_vals.size());
+        for (size_t index = 0; index < forced.exp_vals.size(); ++index) {
+            REQUIRE_THAT(forced.exp_vals[index],
+                         Catch::Matchers::WithinAbs(automatic.exp_vals[index], 1e-12));
+        }
+    }
+    // Not a power of two, below a wavefront, and past the reduction capacity.
+    for (const uint32_t lanes : {uint32_t{96}, uint32_t{32}, uint32_t{512}}) {
+        CAPTURE(lanes);
+        REQUIRE_THROWS_AS(sampler.sample(8, uint64_t{11}, lanes), std::invalid_argument);
     }
 }
