@@ -64,7 +64,14 @@ than isolated implementation details.
   ([`test_qiskit_aer.py`](https://github.com/unitaryfoundation/clifft/blob/main/tests/python/test_qiskit_aer.py)).
   This checks that Clifft's non-Clifford phase handling and coordinate
   reconstruction agree with an independent dense-state simulator up to global
-  phase.
+  phase. The same circuits are checked with and without compiler optimization.
+
+* **Compiler and sampling conformance:** Small unitary circuits are checked
+  against Qiskit Aer across compiler optimizations and CPU sampling modes
+  ([`test_compiler_conformance.py`](https://github.com/unitaryfoundation/clifft/blob/main/tests/python/test_compiler_conformance.py)).
+  Comparing complete measurement outcomes checks correlations that individual
+  measurement averages can miss. Exact checks also catch missing or incorrect
+  output rows.
 
 * **Clifford statevector equivalence with Stim:** Every named Clifford accepted
   by the frontend, plus representative arbitrary Pauli-product Cliffords, is
