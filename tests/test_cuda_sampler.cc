@@ -728,6 +728,56 @@ TEST_CASE("CUDA reset sampling preserves visible rows across batch boundaries") 
     }
 }
 
+TEST_CASE("CUDA replay rejects coefficient dust at both precisions in every tier") {
+    // Four T gates make the measurement deterministic, but their FP32 evolution
+    // leaves a residual on the impossible branch that exceeds the FP64 tolerance.
+    const SamplingPlan plan = plan_from(R"(
+        H 0
+        H 1
+        H 2
+        H 3
+        T 0
+        T 1
+        T 2
+        T 3
+        EXP_VAL X0
+        T 0
+        T 0
+        T 0
+        H 0
+        M 0
+    )");
+    const CudaExecutablePlan cuda_executable(plan);
+    const CpuExecutablePlan cpu_executable(plan);
+    REQUIRE(cuda_executable.peak_active_width() == 4);
+    REQUIRE(cuda_executable.num_visible_records() == 1);
+
+    std::array<clifft::sampling::ReplayResult, 2> expected;
+    for (const uint8_t forced_value : {uint8_t{0}, uint8_t{1}}) {
+        clifft::sampling::Executor cpu(cpu_executable);
+        expected[forced_value] = cpu.replay_shot(std::array<uint8_t, 1>{forced_value});
+        REQUIRE(expected[forced_value].reachable == (forced_value != 0));
+    }
+    require_cuda_device();
+
+    for (const ExecutionTier tier : kExplicitTiers) {
+        for (const CoefficientPrecision precision :
+             {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
+            Sampler sampler(cuda_executable, precision, 1, tier);
+            for (const uint8_t forced_value : {uint8_t{0}, uint8_t{1}}) {
+                CAPTURE(tier, precision, forced_value);
+                const clifft::sampling::cuda::ReplayResult actual =
+                    sampler.replay_shot(std::array<uint8_t, 1>{forced_value});
+                REQUIRE(actual.reachable == expected[forced_value].reachable);
+                if (actual.reachable) {
+                    REQUIRE(actual.log_probability == expected[forced_value].log_probability);
+                    REQUIRE(actual.outputs.measurements == std::vector<uint8_t>{forced_value});
+                }
+            }
+        }
+    }
+}
+
 // Regression coverage for the two cooperative publication hazards fixed
 // alongside these cases. Both are races between lanes of one block, so no test
 // can force the interleaving that exposes them; these circuits instead put the
