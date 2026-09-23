@@ -166,7 +166,7 @@ ctest --test-dir build-hip --output-on-failure -R HIP
 The Python suite provides quick developer probes:
 
 ```bash
-uv run pytest tests/python/test_experimental_hip.py -v
+uv run pytest tests/python/test_gpu_replay_reference.py tests/python/test_experimental_hip.py -v
 ```
 
 `tests/python/utils_hip.py` provides exact repeatability, full-row

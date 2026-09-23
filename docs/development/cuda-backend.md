@@ -288,7 +288,7 @@ ctest --test-dir build-cuda --output-on-failure -R CUDA
 The Python suite provides quick developer probes with the same helpers:
 
 ```bash
-uv run pytest tests/python/test_experimental_cuda.py -v
+uv run pytest tests/python/test_gpu_replay_reference.py tests/python/test_experimental_cuda.py -v
 ```
 
 Kernel-launch tests are skipped without a visible NVIDIA GPU, so this coverage
