@@ -20,11 +20,10 @@ inline constexpr uint32_t kDenseActiveWidthLimit = 60;
 // This is part of Clifft's record-reachability semantics.
 inline constexpr double kMeasurementDustEpsilon = 1e-18;
 
-// Under FP32, rounding can give impossible measurement outcomes tiny positive
-// probabilities above the FP64 dust threshold. Use a larger threshold to
-// suppress this residue, accepting that smaller genuine probabilities are
-// also treated as zero.
-inline constexpr double kMeasurementDustEpsilonFp32 = 3.63797883450985e-12;
+// FP32 rounding can give impossible outcomes probabilities above the FP64
+// threshold. Observed residuals were around 1e-15; this empirical cutoff leaves
+// a conservative margin. Smaller genuine probabilities are also treated as zero.
+inline constexpr double kMeasurementDustEpsilonFp32 = 3.6e-12;
 
 // A variable template lets host and GPU code share the policy without requiring
 // an execution-space annotation on a helper function.
