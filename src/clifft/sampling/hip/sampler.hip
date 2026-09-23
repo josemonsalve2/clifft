@@ -242,7 +242,7 @@ __device__ bool measure_active(const ProgramView& program, const Action& action,
     }
 
     const double total = probability_zero + probability_one;
-    const double epsilon = clifft::kMeasurementDustEpsilon * total;
+    const double epsilon = clifft::kMeasurementDustEpsilonFor<Coefficient> * total;
     bool branch;
     if constexpr (Replay) {
         const bool correction = evaluate(program, symbols, action.expression);

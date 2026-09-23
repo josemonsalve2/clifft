@@ -532,3 +532,43 @@ TEST_CASE("HIP sampler matches CPU survivor statistics with noise") {
         REQUIRE_THAT(value, Catch::Matchers::WithinAbs(cpu.exp_vals[0], 1e-12));
     }
 }
+
+TEST_CASE("HIP replay agrees with the CPU on impossible branches at both precisions") {
+    // The measurement is deterministic, so forcing zero is analytically impossible. An
+    // FP32 coefficient still retains a squared-amplitude residue on that branch, and the
+    // residue sits many orders above an FP64-derived dust threshold, so one shared
+    // constant makes FP32 report the branch reachable while FP64 and the CPU reject it.
+    const SamplingPlan plan = plan_from(R"(
+        H 0
+        H 1
+        H 2
+        H 3
+        T 0
+        T 1
+        T 2
+        T 3
+        EXP_VAL X0
+        T 0
+        T 0
+        T 0
+        H 0
+        M 0
+    )");
+    const HipExecutablePlan hip_executable(plan);
+    const CpuExecutablePlan cpu_executable(plan);
+    REQUIRE(hip_executable.num_visible_records() == 1);
+    require_hip_device();
+
+    for (const uint8_t forced_value : {uint8_t{0}, uint8_t{1}}) {
+        const std::array<uint8_t, 1> forced{forced_value};
+        clifft::sampling::Executor cpu(cpu_executable);
+        const clifft::sampling::ReplayResult expected = cpu.replay_shot(forced);
+        for (const CoefficientPrecision precision :
+             {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
+            CAPTURE(forced_value, precision);
+            const clifft::sampling::hip::ReplayResult actual =
+                clifft::sampling::hip::replay_shot(hip_executable, forced, precision);
+            REQUIRE(actual.reachable == expected.reachable);
+        }
+    }
+}
