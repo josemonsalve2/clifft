@@ -7,6 +7,8 @@ return_log behavior, cross-checks against basis_probabilities() and qiskit,
 sampling consistency, and rejection paths.
 """
 
+import itertools
+import math
 from typing import Any
 
 import numpy as np
@@ -282,3 +284,56 @@ def test_rejects_invalid_input_type(sampling_api: Any) -> None:
     bad: Any = 42
     with pytest.raises(TypeError, match="strings or a 2D"):
         sampling_api.record_probabilities(prog, bad)
+
+
+def test_replay_record_forces_hidden_records_too() -> None:
+    """replay_record forces the whole record vector, unlike record_probabilities."""
+    program = clifft.compile("H 0\nR 0\nH 0\nT 0\nM 0\nOBSERVABLE_INCLUDE(0) rec[-1]")
+    visible = program.num_measurements
+    hidden = program.num_hidden_measurements
+    assert hidden > 0, "circuit must have a hidden record for this to test anything"
+
+    # record_probabilities() declines programs with hidden slots outright, which is
+    # exactly why a replay over the full vector needs its own reference.
+    with pytest.raises(ValueError):
+        clifft.record_probabilities(program, "0" * visible)
+
+    # Supplying only the visible records is rejected rather than reinterpreted.
+    with pytest.raises(ValueError):
+        clifft.replay_record(program, [0] * visible)
+
+    reachable = [
+        record
+        for record in itertools.product((0, 1), repeat=visible + hidden)
+        if clifft.replay_record(program, list(record)).reachable
+    ]
+    assert reachable, "at least one full record must be reachable"
+
+
+def test_replay_record_matches_record_probabilities_without_hidden_slots() -> None:
+    """With no hidden records the two agree, which anchors replay_record's scale."""
+    program = clifft.compile("H 0\nT 0\nH 1\nCX 0 1\nM 0\nM 1")
+    assert program.num_hidden_measurements == 0
+    visible = program.num_measurements
+
+    for record in itertools.product((0, 1), repeat=visible):
+        text = "".join(str(bit) for bit in record)
+        expected = float(clifft.record_probabilities(program, text)[0])
+        replay = clifft.replay_record(program, list(record))
+        if expected == 0.0:
+            assert not replay.reachable
+        else:
+            assert replay.reachable
+            assert math.exp(replay.log_probability) == pytest.approx(expected, abs=1e-12)
+
+
+def test_replay_record_accepts_a_string_and_rejects_bad_values() -> None:
+    program = clifft.compile("H 0\nT 0\nH 0\nM 0")
+    width = program.num_measurements + program.num_hidden_measurements
+    as_string = clifft.replay_record(program, "0" * width)
+    as_list = clifft.replay_record(program, [0] * width)
+    assert as_string.reachable == as_list.reachable
+    assert as_string.log_probability == pytest.approx(as_list.log_probability)
+
+    with pytest.raises(ValueError):
+        clifft.replay_record(program, [0] * (width + 1))

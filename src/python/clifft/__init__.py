@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib
 from collections.abc import Sequence
 from types import ModuleType
-from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol, TypeAlias, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -47,6 +47,7 @@ from clifft._clifft_core import (
     Target,
     _basis_probabilities_from_bitmasks,
     _record_probabilities_from_records,
+    _replay_record,
     compute_reference_syndrome,
     default_hir_pass_manager,
     get_statevector,
@@ -241,6 +242,44 @@ def _records_from_outcomes(
     if bit_array.dtype == np.dtype("uint8") and np.any((bit_array != 0) & (bit_array != 1)):
         raise ValueError("uint8 records array must contain only 0 and 1")
     return np.ascontiguousarray(bit_array.astype(np.uint8, copy=False))
+
+
+class ReplayOutcome(NamedTuple):
+    """Whether a full record can occur, and its joint log probability if so."""
+
+    reachable: bool
+    log_probability: float
+
+
+def replay_record(
+    program: Program,
+    forced_records: Sequence[int] | str,
+) -> ReplayOutcome:
+    """Replay one shot with every record forced, and report its log probability.
+
+    Unlike :func:`record_probabilities`, which takes the **visible** measurements
+    that ``sample()`` emits and marginalises the rest, this forces the complete
+    record vector -- visible followed by hidden -- and reports the joint
+    probability of that one branch. That is the quantity a backend's
+    ``replay_shot`` returns, so this is the reference to compare one against.
+
+    ``log_probability`` is meaningful only when ``reachable`` is true.
+    """
+    expected = program.num_measurements + program.num_hidden_measurements
+    if isinstance(forced_records, str):
+        values = [int(char) for char in forced_records]
+    else:
+        values = [int(value) for value in forced_records]
+    if len(values) != expected:
+        raise ValueError(
+            f"forced_records must supply one value per record, visible followed by "
+            f"hidden; expected {expected}, got {len(values)}"
+        )
+    result = _replay_record(program, values)
+    return ReplayOutcome(
+        reachable=bool(result["reachable"]),
+        log_probability=float(result["log_probability"]),
+    )
 
 
 def record_probabilities(

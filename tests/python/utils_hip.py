@@ -72,10 +72,19 @@ def assert_forced_record_probabilities(
     num_records = hip_sampler.program.num_records
     assert num_records == cpu_program.num_measurements + cpu_program.num_hidden_measurements
     records = np.asarray(list(itertools.product((0, 1), repeat=num_records)), dtype=np.uint8)
-    cpu_log_probabilities = clifft.record_probabilities(cpu_program, records, return_log=True)
+    # record_probabilities() takes the visible measurements sample() emits and
+    # marginalises the hidden ones, so it cannot reference a replay that forces the
+    # complete record vector. replay_record() forces the same vector on the CPU.
+    cpu_replays = [clifft.replay_record(cpu_program, record.tolist()) for record in records]
+    cpu_log_probabilities = [
+        replay.log_probability if replay.reachable else -np.inf for replay in cpu_replays
+    ]
     for record, log_probability in zip(records, cpu_log_probabilities, strict=True):
         replay = hip_sampler.replay_shot(record.tolist())
         assert replay.reachable == np.isfinite(log_probability)
         if replay.reachable:
             assert replay.log_probability == pytest.approx(log_probability, abs=absolute_tolerance)
-            np.testing.assert_array_equal(replay.outputs.measurements, record[np.newaxis, :])
+            # outputs.measurements carries the visible measurements sample() emits, so it
+            # matches the visible prefix of the forced record, not the whole vector.
+            visible = cpu_program.num_measurements
+            np.testing.assert_array_equal(replay.outputs.measurements, record[np.newaxis, :visible])
