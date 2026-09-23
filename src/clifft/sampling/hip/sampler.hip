@@ -728,7 +728,7 @@ __device__ bool measure_active_coop(const ProgramView& program, const Action& ac
     reduce_two_sums(reduction, probability_zero, probability_one);
 
     const double total = probability_zero + probability_one;
-    const double epsilon = clifft::kMeasurementDustEpsilon * total;
+    const double epsilon = clifft::kMeasurementDustEpsilonFor<Coefficient> * total;
     const CooperativeLane lane;
     bool branch;
     if constexpr (Replay) {
