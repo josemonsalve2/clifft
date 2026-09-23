@@ -152,9 +152,8 @@ or a scalar capacity when memory is more constrained than CPU availability.
 ### OpenMP and process runtimes
 
 Intra-shot execution requires an OpenMP-enabled build. Apple Clang users may
-need Homebrew `libomp`. Loading different OpenMP runtimes from Clifft and
-another scientific package in one process can conflict, especially on macOS;
-process isolation is the robust choice.
+need Homebrew `libomp` when building from source. If OpenMP runtimes from
+different scientific packages conflict, use separate processes.
 
 On POSIX systems, create process workers before threaded Clifft sampling, or
 use the `spawn` or `forkserver` start method. Forking after a threaded sample
