@@ -25,7 +25,11 @@ namespace clifft::sampling::hip {
 //
 // Per-shot coefficient storage is coefficient_elements_per_shot(k) = 3 * 2^k elements,
 // i.e. 24 * 2^k bytes in FP64 and 12 * 2^k bytes in FP32.
+// Auto resolves per plan and device. The explicit values force one tier and are rejected
+// when the plan cannot run on it, which lets a test exercise a specific kernel rather
+// than whichever one the device's capacity happens to select.
 enum class ExecutionTier : uint8_t {
+    Auto,
     ThreadPerShot,  // one shot per thread, coefficients in a global slab owned by the shot
     BlockShared,    // one shot per block, coefficients in shared memory (LDS on AMD)
     BlockGlobal,    // one shot per block, coefficients in a global slab
@@ -33,6 +37,8 @@ enum class ExecutionTier : uint8_t {
 
 [[nodiscard]] constexpr const char* tier_name(ExecutionTier tier) {
     switch (tier) {
+        case ExecutionTier::Auto:
+            return "auto";
         case ExecutionTier::ThreadPerShot:
             return "thread_per_shot";
         case ExecutionTier::BlockShared:
@@ -73,6 +79,22 @@ inline constexpr uint32_t kMaxSupportedActiveWidth = 30;
         return ExecutionTier::BlockShared;
     }
     return ExecutionTier::BlockGlobal;
+}
+
+// Whether a plan can run on a tier that was asked for rather than chosen. Thread-per-shot
+// has no width ceiling of its own -- its coefficients live in a global slab like
+// BlockGlobal's, and the automatic cutoff at kThreadPerShotMaxActiveWidth is a
+// performance choice -- so only BlockShared can fail, and only on capacity.
+[[nodiscard]] constexpr bool tier_supports(ExecutionTier tier, uint32_t peak_active_width,
+                                           uint64_t element_bytes,
+                                           uint64_t lds_bytes_per_workgroup) {
+    if (tier != ExecutionTier::BlockShared) {
+        return true;
+    }
+    const uint64_t usable = lds_bytes_per_workgroup > detail::kCooperativeReductionBytes
+                                ? lds_bytes_per_workgroup - detail::kCooperativeReductionBytes
+                                : 0;
+    return coefficient_bytes_per_shot(peak_active_width, element_bytes) <= usable;
 }
 
 class ExecutablePlan {

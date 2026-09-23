@@ -30,6 +30,9 @@ inline constexpr uint32_t kDefaultMaxBatchShots = 65536;
 struct SamplingOptions {
     std::optional<uint64_t> seed = std::nullopt;
     CoefficientPrecision coefficient_precision = CoefficientPrecision::FP64;
+    // Auto resolves from the plan and device; an explicit tier is rejected when the plan
+    // does not fit it.
+    ExecutionTier tier = ExecutionTier::Auto;
     uint32_t block_size = kDefaultBlockSize;
     uint32_t max_batch_shots = kDefaultMaxBatchShots;
 };
@@ -58,7 +61,8 @@ class Sampler {
   public:
     explicit Sampler(const ExecutablePlan& executable,
                      CoefficientPrecision coefficient_precision = CoefficientPrecision::FP64,
-                     uint32_t max_batch_shots = kDefaultMaxBatchShots);
+                     uint32_t max_batch_shots = kDefaultMaxBatchShots,
+                     ExecutionTier tier = ExecutionTier::Auto);
     ~Sampler();
 
     Sampler(const Sampler&) = delete;
@@ -95,6 +99,7 @@ class Sampler {
                                                       const SamplingOptions& options = {});
 [[nodiscard]] ReplayResult replay_shot(
     const ExecutablePlan& executable, std::span<const uint8_t> forced_records,
-    CoefficientPrecision coefficient_precision = CoefficientPrecision::FP64);
+    CoefficientPrecision coefficient_precision = CoefficientPrecision::FP64,
+    ExecutionTier tier = ExecutionTier::Auto);
 
 }  // namespace clifft::sampling::hip

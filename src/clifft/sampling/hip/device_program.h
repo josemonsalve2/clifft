@@ -43,9 +43,10 @@ inline constexpr uint64_t coefficient_elements_per_shot(uint32_t peak_active_wid
            2 * coefficient_scratch_capacity(peak_active_width);
 }
 
-// Cooperative tiers give one shot to one workgroup. The block size is fixed so the
-// reduction scratch below is a compile-time size, and must stay a power of two: the
-// workgroup reduction halves the active lane count each step.
+// The block tiers give one shot to one block. The block size is chosen per launch and
+// may be any power of two from one wavefront up to kCooperativeBlockSize, which bounds
+// it because the reduction scratch below is sized at compile time. The power-of-two
+// requirement comes from the reduction itself: it halves the active lane count each step.
 // A block smaller than one wavefront leaves lanes of that wavefront permanently idle,
 // so it is the floor for the block tiers rather than a merely inefficient choice.
 inline constexpr uint32_t kWavefrontSize = 64;

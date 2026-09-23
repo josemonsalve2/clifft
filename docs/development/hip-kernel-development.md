@@ -97,7 +97,10 @@ device pass.
 2. Put only execution-ready fields in `detail::Action`. Pauli geometry,
    coordinate changes, and symbolic dependencies belong in planning or
    lowering, not in the kernel.
-3. Implement the tag in the interpreter switch for both coefficient types.
+3. Implement the tag in **both** interpreter switches, thread-per-shot and block,
+   for both coefficient types. The two switches are separate today, so an action
+   added to one and not the other silently changes behaviour with the width. Any
+   store to shared per-shot state in the block switch needs a single writer.
 4. Add host-only packing assertions to `test_hip_executable_plan.cc`.
 5. Add forced-replay or deterministic hardware coverage before relying on a
    statistical comparison.
@@ -115,12 +118,19 @@ row count and global shot offset. Aggregate-only survivor requests skip unused
 record, detector, and expectation-value downloads; device-side survivor
 aggregation remains a separate execution-path extension.
 
-A cooperative path should add a separate kernel and typed launcher, then
-dispatch by peak active width. It should not add topology work to the device:
-the packed executable already carries pairings, Pauli phases, expressions, and
-active-width transitions. Keep the current thread-per-shot path as the small
-width reference while the cooperative path uses on-chip shared memory through
-approximately `k = 10`.
+The block tiers are implemented as a separate kernel and typed launcher, chosen
+by `select_execution_tier` from the peak active width, the coefficient element
+size, and the device's per-block shared-memory budget. Neither kernel does
+topology work: the packed executable already carries pairings, Pauli phases,
+expressions, and active-width transitions. Thread-per-shot remains the
+small-width reference; the block tiers hold the coefficients in shared memory
+while they fit that budget and in a per-shot global slab beyond it.
+
+One shot belongs to a whole block there, so that shot's symbols, records and
+outputs are shared state. Every store to them goes through
+`CooperativeLane::is_writer`, and any action that reads a location it also
+writes synchronises before publishing. Lanes agreeing on a value is not
+sufficient: a read-modify-write applied once per wavefront cancels.
 
 When changing batching or launch geometry, preserve these invariants:
 

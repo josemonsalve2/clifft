@@ -528,8 +528,10 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
 //     from a workgroup-wide reduction and is therefore uniform. That keeps the
 //     documented "RNG uses the global shot index" invariant with no broadcast, and
 //     keeps the loop's break conditions uniform so __syncthreads is never reached by
-//     a subset of the workgroup. Lanes write identical values to the same per-shot
-//     bytes, which is benign.
+//     a subset of the workgroup. Lanes agree on the values, but they do not write them:
+//     every store to shared per-shot state goes through CooperativeLane::is_writer, and
+//     an action that reads a location it also writes synchronises first. See the type's
+//     comment for why agreement alone is not enough.
 //
 //  2. Probability and expectation reductions accumulate in FP64 whatever the
 //     coefficient precision, matching the backend's stated invariant.
@@ -1201,17 +1203,28 @@ struct UploadedProgram {
 // budget, neither of which is known while lowering. Sampler::Impl and the public
 // selected_tier both route here, so a caller's query can never disagree with the tier the
 // Sampler actually runs.
-ExecutionTier resolve_execution_tier(uint32_t peak_active_width, CoefficientPrecision precision) {
+ExecutionTier resolve_execution_tier(uint32_t peak_active_width, CoefficientPrecision precision,
+                                     ExecutionTier requested = ExecutionTier::Auto) {
     const uint64_t element_bytes =
         precision == CoefficientPrecision::FP32 ? sizeof(float) : sizeof(double);
-    size_t lds = 0;
+    // A failed query used to fall through as a zero shared-memory budget, which silently
+    // reports block_global for every wide plan on a host with no device. Report the
+    // failure instead: an unanswerable question is not the same as an answer.
     int device = 0;
     hipDeviceProp_t properties{};
-    if (hipGetDevice(&device) == hipSuccess &&
-        hipGetDeviceProperties(&properties, device) == hipSuccess) {
-        lds = properties.sharedMemPerBlock;
+    check_hip(hipGetDevice(&device), "device query");
+    check_hip(hipGetDeviceProperties(&properties, device), "device property query");
+    if (requested == ExecutionTier::Auto) {
+        return select_execution_tier(peak_active_width, element_bytes,
+                                     properties.sharedMemPerBlock);
     }
-    return select_execution_tier(peak_active_width, element_bytes, lds);
+    if (!tier_supports(requested, peak_active_width, element_bytes,
+                       properties.sharedMemPerBlock)) {
+        throw std::invalid_argument(
+            std::string("HIP tier ") + tier_name(requested) + " cannot hold a plan of width " +
+            std::to_string(peak_active_width) + " at this precision on this device");
+    }
+    return requested;
 }
 
 void validate_launch_block_size(uint32_t block_size, ExecutionTier tier) {
@@ -1275,10 +1288,11 @@ class Sampler::Impl {
     };
 
     Impl(const ExecutablePlan& source, CoefficientPrecision selected_precision,
-         uint32_t selected_max_batch_shots)
+         uint32_t selected_max_batch_shots, ExecutionTier requested_tier)
         : program(source),
           precision(selected_precision),
-          tier(resolve_execution_tier(source.peak_active_width(), selected_precision)),
+          tier(resolve_execution_tier(source.peak_active_width(), selected_precision,
+                                      requested_tier)),
           max_batch(effective_max_batch(source, selected_precision, tier, selected_max_batch_shots)),
           coefficient_stride(detail::coefficient_elements_per_shot(source.peak_active_width())),
           fp32_coefficients(selected_precision == CoefficientPrecision::FP32 &&
@@ -1323,20 +1337,23 @@ class Sampler::Impl {
         }
         const uint64_t element_bytes =
             selected_precision == CoefficientPrecision::FP32 ? sizeof(float) : sizeof(double);
+        // Every retained buffer scales with the batch, not just the coefficients. Counting
+        // only the coefficients and leaving a fixed allowance for the rest fails whenever
+        // the rest exceed that allowance, which rejects a batch that would have fit.
         const uint64_t per_shot =
-            detail::coefficient_elements_per_shot(source.peak_active_width()) * element_bytes;
+            detail::coefficient_elements_per_shot(source.peak_active_width()) * element_bytes +
+            source.num_symbols() + source.num_records() + source.num_records() +
+            source.num_detectors() + source.num_observables() +
+            uint64_t{source.num_exp_vals()} * sizeof(double) + sizeof(uint8_t);
         if (per_shot == 0) {
             return requested;
         }
         size_t free_bytes = 0;
         size_t total_bytes = 0;
-        if (hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess) {
-            free_bytes = 0;
-        }
-        // Headroom for the per-shot record/detector/observable arrays and driver overhead.
-        const uint64_t budget =
-            free_bytes != 0 ? static_cast<uint64_t>(static_cast<double>(free_bytes) * 0.6)
-                            : (uint64_t{1} << 30);
+        check_hip(hipMemGetInfo(&free_bytes, &total_bytes), "device memory query");
+        // Remaining headroom covers driver allocations and fragmentation, not per-shot
+        // storage, which is now accounted for above.
+        const uint64_t budget = static_cast<uint64_t>(static_cast<double>(free_bytes) * 0.6);
         uint64_t affordable = budget / per_shot;
         if (affordable == 0) {
             affordable = 1;
@@ -1360,10 +1377,16 @@ class Sampler::Impl {
     void run_replay(std::span<const uint8_t> input) {
         forced_records.upload(input);
         const detail::SeedRoot empty_root{};
+        // Replay is one shot, so thread-per-shot wants a single thread. The block tiers
+        // split that shot across the block instead, and passing the same literal there
+        // launches one lane: correct, but serialized, and it means a cooperative kernel is
+        // never actually exercised across lanes by replay.
+        const uint32_t replay_block =
+            tier == ExecutionTier::ThreadPerShot ? 1U : kAutoBlockSize;
         if (precision == CoefficientPrecision::FP32) {
-            launch<float, true>(empty_root, 0, 1, 1, fp32_coefficients.data());
+            launch<float, true>(empty_root, 0, 1, replay_block, fp32_coefficients.data());
         } else {
-            launch<double, true>(empty_root, 0, 1, 1, fp64_coefficients.data());
+            launch<double, true>(empty_root, 0, 1, replay_block, fp64_coefficients.data());
         }
         download_rows(1, DownloadMode::Replay);
     }
@@ -1514,9 +1537,9 @@ std::string backend_info() {
 }
 
 Sampler::Sampler(const ExecutablePlan& executable, CoefficientPrecision coefficient_precision,
-                 uint32_t max_batch_shots) {
+                 uint32_t max_batch_shots, ExecutionTier tier) {
     validate_max_batch_shots(max_batch_shots);
-    impl_ = std::make_unique<Impl>(executable, coefficient_precision, max_batch_shots);
+    impl_ = std::make_unique<Impl>(executable, coefficient_precision, max_batch_shots, tier);
 }
 
 Sampler::~Sampler() = default;
@@ -1753,7 +1776,7 @@ SamplingResult sample(const ExecutablePlan& executable, uint32_t shots,
         return {};
     }
     Sampler sampler(executable, options.coefficient_precision,
-                    std::min(shots, options.max_batch_shots));
+                    std::min(shots, options.max_batch_shots), options.tier);
     return sampler.sample(shots, options.seed, options.block_size);
 }
 
@@ -1765,15 +1788,15 @@ SamplingSurvivorResult sample_survivors(const ExecutablePlan& executable, uint32
         return {.total_shots = 0};
     }
     Sampler sampler(executable, options.coefficient_precision,
-                    std::min(shots, options.max_batch_shots));
+                    std::min(shots, options.max_batch_shots), options.tier);
     return sampler.sample_survivors(shots, keep_records, options.seed, options.block_size);
 }
 
 ReplayResult replay_shot(const ExecutablePlan& executable,
                          std::span<const uint8_t> forced_records,
-                         CoefficientPrecision coefficient_precision) {
+                         CoefficientPrecision coefficient_precision, ExecutionTier tier) {
     validate_replay_input(executable, forced_records);
-    Sampler sampler(executable, coefficient_precision, 1);
+    Sampler sampler(executable, coefficient_precision, 1, tier);
     return sampler.replay_shot(forced_records);
 }
 

@@ -200,7 +200,9 @@ log-probabilities, and `EXP_VAL` outputs remain FP64 in both modes.
 
 - `max_batch_shots` bounds retained device workspace. Larger requests are
   split into synchronous launches that reuse it.
-- `block_size` controls launch geometry and must be between 1 and 1024.
+- `block_size` controls launch geometry. The default `kAutoBlockSize` (0) lets the
+  backend size the launch; see the block-size section under execution tiers for the
+  values each tier accepts when set explicitly.
 - `allocated_device_bytes` exposes retained workspace size for experiments.
 
 These controls are not equivalents of CPU `batch_size`, `threads`, or

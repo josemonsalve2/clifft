@@ -123,6 +123,36 @@ std::string parallel_t_replay(uint32_t width) {
     return text + "T 0\nT 0\nT 0\nH 0\nM 0\n";
 }
 
+// The biased scenario from the shared replay corpus, widened. Branch probabilities are
+// 3/8, 3/8, 1/8, 1/8 and both measurements are followed by an expectation value, so an
+// incorrect branch selection or collapse shows up in the state rather than only in the
+// record. The dormant measurement stays on a qubit outside the widened prefix so it
+// remains dormant however wide the prefix grows.
+std::string biased_active_and_dormant(uint32_t width) {
+    std::string prefix_h = "H";
+    std::string prefix_t = "T";
+    for (uint32_t qubit = 0; qubit < width; ++qubit) {
+        prefix_h += " " + std::to_string(qubit);
+        prefix_t += " " + std::to_string(qubit);
+    }
+    return prefix_h + "\n" + prefix_t +
+           "\nCX 0 1\nH 0\nM 0\nEXP_VAL X1*X2\nH 40\nM 40\nEXP_VAL Z40\n";
+}
+
+// The shared/global transition depends on the device's shared-memory budget and on the
+// coefficient size, so tests discover it instead of hard-coding a width that would stop
+// meaning anything on other hardware.
+uint32_t first_block_global_width(CoefficientPrecision precision) {
+    for (uint32_t width = kThreadPerShotMaxActiveWidth + 1; width <= 24; ++width) {
+        const HipExecutablePlan executable(plan_from(parallel_t_observable(width)));
+        if (clifft::sampling::hip::selected_tier(executable, precision) ==
+            ExecutionTier::BlockGlobal) {
+            return width;
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 TEST_CASE("HIP sampler zero shots does not require a device") {
@@ -783,8 +813,10 @@ TEST_CASE("HIP cooperative replay reads the branch symbol before publishing it")
              {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
             const ExecutionTier tier =
                 clifft::sampling::hip::selected_tier(hip_executable, precision);
-            CAPTURE(width, precision, tier_name(tier));
-            REQUIRE(tier != ExecutionTier::ThreadPerShot);
+            const uint32_t boundary = first_block_global_width(precision);
+            CAPTURE(width, precision, tier_name(tier), boundary);
+            REQUIRE(tier ==
+                    (width < boundary ? ExecutionTier::BlockShared : ExecutionTier::BlockGlobal));
 
             for (const uint8_t forced_value : {uint8_t{0}, uint8_t{1}}) {
                 const std::array<uint8_t, 1> forced{forced_value};
@@ -851,5 +883,129 @@ TEST_CASE("HIP block tiers honour an explicit block size and reject unusable one
     for (const uint32_t lanes : {uint32_t{96}, uint32_t{32}, uint32_t{512}}) {
         CAPTURE(lanes);
         REQUIRE_THROWS_AS(sampler.sample(8, uint64_t{11}, lanes), std::invalid_argument);
+    }
+}
+
+TEST_CASE("HIP tier selection changes at the shared memory boundary") {
+    require_hip_device();
+    for (const CoefficientPrecision precision :
+         {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
+        const uint32_t boundary = first_block_global_width(precision);
+        CAPTURE(precision, boundary);
+        REQUIRE(boundary > kThreadPerShotMaxActiveWidth + 1);
+
+        // Immediately below the boundary the state still fits shared memory; at the
+        // boundary it does not. Asserting both sides is what proves a test suite covers
+        // each storage class rather than whichever one this device happens to pick.
+        const HipExecutablePlan below(plan_from(parallel_t_observable(boundary - 1)));
+        const HipExecutablePlan at(plan_from(parallel_t_observable(boundary)));
+        REQUIRE(clifft::sampling::hip::selected_tier(below, precision) ==
+                ExecutionTier::BlockShared);
+        REQUIRE(clifft::sampling::hip::selected_tier(at, precision) == ExecutionTier::BlockGlobal);
+
+        // A forced tier is honoured where the plan fits and rejected where it does not.
+        // Thread-per-shot has no width ceiling of its own, so it is always available.
+        REQUIRE(Sampler(at, precision, 1, ExecutionTier::ThreadPerShot).execution_tier() ==
+                ExecutionTier::ThreadPerShot);
+        REQUIRE(Sampler(below, precision, 1, ExecutionTier::BlockGlobal).execution_tier() ==
+                ExecutionTier::BlockGlobal);
+        REQUIRE_THROWS_AS(Sampler(at, precision, 1, ExecutionTier::BlockShared),
+                          std::invalid_argument);
+    }
+}
+
+TEST_CASE("HIP replay matches the CPU on biased branches at both block tiers") {
+    require_hip_device();
+    for (const CoefficientPrecision precision :
+         {CoefficientPrecision::FP64, CoefficientPrecision::FP32}) {
+        const uint32_t boundary = first_block_global_width(precision);
+        REQUIRE(boundary > kThreadPerShotMaxActiveWidth + 1);
+        // These two straddle the boundary. The width is asserted below rather than
+        // assumed, because the planner decides how much of the prefix stays live.
+        for (const auto& [prefix, expected_tier] :
+             {std::pair{boundary - 1, ExecutionTier::BlockShared},
+              std::pair{boundary, ExecutionTier::BlockGlobal}}) {
+            const SamplingPlan plan = plan_from(biased_active_and_dormant(prefix));
+            const HipExecutablePlan hip_executable(plan);
+            const CpuExecutablePlan cpu_executable(plan);
+            REQUIRE(hip_executable.num_visible_records() == 2);
+            REQUIRE(hip_executable.num_records() == 2);
+            CAPTURE(precision, prefix, tier_name(expected_tier), plan.peak_active_width);
+            REQUIRE(plan.peak_active_width == prefix);
+            REQUIRE(clifft::sampling::hip::selected_tier(hip_executable, precision) ==
+                    expected_tier);
+
+            Sampler sampler(hip_executable, precision, 1);
+            for (uint32_t bits = 0; bits < 4U; ++bits) {
+                const std::array<uint8_t, 2> forced{static_cast<uint8_t>((bits >> 1) & 1U),
+                                                    static_cast<uint8_t>(bits & 1U)};
+                clifft::sampling::Executor cpu(cpu_executable);
+                const clifft::sampling::ReplayResult expected = cpu.replay_shot(forced);
+                const clifft::sampling::hip::ReplayResult actual = sampler.replay_shot(forced);
+                CAPTURE(forced[0], forced[1]);
+                REQUIRE(actual.reachable == expected.reachable);
+                if (!expected.reachable) {
+                    continue;
+                }
+                // Probabilities are 3/8, 3/8, 1/8, 1/8, so a uniform result would not pass.
+                const double tolerance = precision == CoefficientPrecision::FP64 ? 1e-12 : 2e-5;
+                REQUIRE_THAT(actual.log_probability,
+                             Catch::Matchers::WithinAbs(expected.log_probability, tolerance));
+                REQUIRE(actual.outputs.measurements ==
+                        std::vector<uint8_t>(forced.begin(), forced.end()));
+                // Both expectation values are read after a collapse, so agreeing here is
+                // the check that collapse produced the same state and not merely the same
+                // record.
+                REQUIRE(actual.outputs.exp_vals.size() == cpu.exp_vals().size());
+                REQUIRE(actual.outputs.exp_vals.size() == 2);
+                for (size_t index = 0; index < actual.outputs.exp_vals.size(); ++index) {
+                    CAPTURE(index);
+                    REQUIRE_THAT(actual.outputs.exp_vals[index],
+                                 Catch::Matchers::WithinAbs(cpu.exp_vals()[index], tolerance));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("HIP survivor sampling and batching agree with the CPU at block tiers") {
+    require_hip_device();
+    constexpr uint32_t kShots = 20000;
+    const CoefficientPrecision precision = CoefficientPrecision::FP64;
+    const uint32_t boundary = first_block_global_width(precision);
+    REQUIRE(boundary > kThreadPerShotMaxActiveWidth + 1);
+
+    for (const auto& [prefix, expected_tier] : {std::pair{boundary - 1, ExecutionTier::BlockShared},
+                                                std::pair{boundary, ExecutionTier::BlockGlobal}}) {
+        const SamplingPlan plan = plan_from(biased_active_and_dormant(prefix));
+        const HipExecutablePlan executable(plan);
+        const CpuExecutablePlan cpu_executable(plan);
+        CAPTURE(prefix, tier_name(expected_tier), plan.peak_active_width);
+        REQUIRE(plan.peak_active_width == prefix);
+        REQUIRE(clifft::sampling::hip::selected_tier(executable, precision) == expected_tier);
+
+        // A batch smaller than the request splits into several launches. The RNG keys off
+        // the global shot index, so splitting must not change a single row.
+        Sampler whole(executable, precision, kShots);
+        Sampler split(executable, precision, 3000);
+        REQUIRE(split.max_batch_shots() <= 3000);
+        const SamplingResult unsplit = whole.sample(kShots, uint64_t{77});
+        const SamplingResult batched = split.sample(kShots, uint64_t{77});
+        require_same_rows(unsplit, batched);
+
+        // The first measurement is biased 3:1, which a uniform result would fail.
+        const auto rate = [&](const std::vector<uint8_t>& values, size_t stride, size_t offset) {
+            uint32_t ones = 0;
+            for (size_t index = offset; index < values.size(); index += stride) {
+                ones += values[index];
+            }
+            return static_cast<double>(ones) / static_cast<double>(values.size() / stride);
+        };
+        const SamplingResult cpu = clifft::sampling::sample(cpu_executable, kShots, uint64_t{77});
+        const double cpu_first = rate(cpu.measurements, 2, 0);
+        const double gpu_first = rate(unsplit.measurements, 2, 0);
+        REQUIRE_THAT(cpu_first, Catch::Matchers::WithinAbs(0.25, 0.02));
+        const double tolerance = 6.0 * standard_error(cpu_first, kShots) + 1e-3;
+        REQUIRE_THAT(gpu_first, Catch::Matchers::WithinAbs(cpu_first, tolerance));
     }
 }
