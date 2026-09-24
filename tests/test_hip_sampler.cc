@@ -35,6 +35,9 @@ using HipExecutablePlan = clifft::sampling::hip::ExecutablePlan;
 
 namespace {
 
+constexpr std::array kExplicitTiers{ExecutionTier::ThreadPerShot, ExecutionTier::BlockShared,
+                                    ExecutionTier::BlockGlobal};
+
 void require_hip_device() {
     if (!clifft::sampling::hip::is_available()) {
         SKIP("requires an AMD GPU visible to the HIP runtime");
@@ -120,7 +123,7 @@ std::string parallel_t_replay(uint32_t width) {
     for (uint32_t qubit = 0; qubit < width; ++qubit) {
         text += "T " + std::to_string(qubit) + "\n";
     }
-    return text + "T 0\nT 0\nT 0\nH 0\nM 0\n";
+    return text + "T 0\nT 0\nT 0\nH 0\nM 0\nEXP_VAL Z0\n";
 }
 
 // The biased scenario from the shared replay corpus, widened. Branch probabilities are
@@ -379,9 +382,10 @@ TEST_CASE("HIP sampler computes expectation values with FP64 accumulation") {
     }
 }
 
-TEST_CASE("HIP replay matches every CPU measurement branch") {
+TEST_CASE("HIP replay matches every CPU measurement branch in every tier") {
     const auto test_case = GENERATE(Catch::Generators::from_range(clifft::test::kGpuReplayCases));
-    CAPTURE(test_case.name);
+    const auto tier = GENERATE(Catch::Generators::from_range(kExplicitTiers));
+    CAPTURE(test_case.name, tier_name(tier));
     const SamplingPlan plan = plan_from(test_case.circuit);
     const HipExecutablePlan executable(plan);
     const CpuExecutablePlan cpu_executable(plan);
@@ -395,7 +399,8 @@ TEST_CASE("HIP replay matches every CPU measurement branch") {
 
     for (const auto& [precision, tolerance] : {std::pair{CoefficientPrecision::FP64, 1e-12},
                                                std::pair{CoefficientPrecision::FP32, 2e-5}}) {
-        Sampler sampler(executable, precision, 1);
+        Sampler sampler(executable, precision, 1, tier);
+        REQUIRE(sampler.execution_tier() == tier);
         for (uint32_t bits = 0; bits < (uint32_t{1} << records); ++bits) {
             std::vector<uint8_t> forced(records);
             for (uint32_t index = 0; index < records; ++index) {
@@ -828,16 +833,7 @@ TEST_CASE("HIP cooperative replay reads the branch symbol before publishing it")
                 // Forcing one is reachable with log probability zero; forcing zero is not
                 // reachable at all. Reading the published symbol selects the opposite
                 // branch, so the two swap and this fails on both values.
-                //
-                // The unreachable branch is only asserted at FP64. Its probability is
-                // mathematically zero, and reachability is decided against a RELATIVE
-                // epsilon of 1e-18, which FP32 cannot resolve: rounding leaves dust many
-                // orders of magnitude above that threshold and the branch reads as
-                // reachable. This is a property of the FP32 path, not of the tier -- the
-                // same circuit at width 3 behaves identically on thread-per-shot.
-                if (expected.reachable || precision == CoefficientPrecision::FP64) {
-                    REQUIRE(actual.reachable == expected.reachable);
-                }
+                REQUIRE(actual.reachable == expected.reachable);
                 if (!expected.reachable) {
                     continue;
                 }
@@ -848,6 +844,7 @@ TEST_CASE("HIP cooperative replay reads the branch symbol before publishing it")
                 // The post-collapse state is what the expectation value is read from, so
                 // agreeing here is the check that collapse used the same branch.
                 REQUIRE(actual.outputs.exp_vals.size() == cpu.exp_vals().size());
+                REQUIRE(actual.outputs.exp_vals.size() == 1);
                 for (size_t index = 0; index < actual.outputs.exp_vals.size(); ++index) {
                     CAPTURE(index);
                     REQUIRE_THAT(actual.outputs.exp_vals[index],
@@ -968,7 +965,7 @@ TEST_CASE("HIP replay matches the CPU on biased branches at both block tiers") {
     }
 }
 
-TEST_CASE("HIP survivor sampling and batching agree with the CPU at block tiers") {
+TEST_CASE("HIP sampling and batching agree with the CPU at block tiers") {
     require_hip_device();
     constexpr uint32_t kShots = 20000;
     const CoefficientPrecision precision = CoefficientPrecision::FP64;
@@ -1007,5 +1004,105 @@ TEST_CASE("HIP survivor sampling and batching agree with the CPU at block tiers"
         REQUIRE_THAT(cpu_first, Catch::Matchers::WithinAbs(0.25, 0.02));
         const double tolerance = 6.0 * standard_error(cpu_first, kShots) + 1e-3;
         REQUIRE_THAT(gpu_first, Catch::Matchers::WithinAbs(cpu_first, tolerance));
+    }
+}
+
+TEST_CASE("HIP block tiers preserve postselected rows across batches") {
+    const auto tier = GENERATE(ExecutionTier::BlockShared, ExecutionTier::BlockGlobal);
+    const auto precision = GENERATE(CoefficientPrecision::FP64, CoefficientPrecision::FP32);
+    CAPTURE(tier_name(tier), precision);
+
+    // Reject before the second measurement so discarded shots leave incomplete rows.
+    // The final readout flip distinguishes the reported record from the measured state.
+    const clifft::HirModule hir = clifft::trace(clifft::parse(parallel_t_observable(8) + R"(
+        CX 0 1
+        H 0
+        M 0
+        DETECTOR rec[-1]
+        EXP_VAL X1*X2
+        H 40
+        M 40
+        READOUT_NOISE(1) rec[-1]
+        OBSERVABLE_INCLUDE(0) rec[-1]
+        EXP_VAL Z40
+    )"));
+    const std::array<uint8_t, 1> postselection{1};
+    clifft::sampling::SamplingPlanOptions plan_options;
+    plan_options.postselection_mask = postselection;
+    const HipExecutablePlan executable(clifft::sampling::plan_sampling(hir, plan_options));
+    const HipExecutablePlan unselected(clifft::sampling::plan_sampling(hir));
+    REQUIRE(executable.peak_active_width() == 8);
+    REQUIRE(executable.has_postselection());
+    REQUIRE(executable.num_visible_records() == 2);
+    REQUIRE(executable.num_detectors() == 1);
+    REQUIRE(executable.num_observables() == 1);
+    REQUIRE(executable.num_exp_vals() == 3);
+    require_hip_device();
+
+    constexpr uint32_t kShots = 4099;
+    constexpr uint64_t kSeed = 77;
+    const SamplingResult rows = clifft::sampling::hip::sample(
+        unselected, kShots, {.seed = kSeed, .coefficient_precision = precision, .tier = tier});
+    REQUIRE(rows.measurements.size() == 2 * kShots);
+    REQUIRE(rows.detectors.size() == kShots);
+    REQUIRE(rows.observables.size() == kShots);
+    REQUIRE(rows.exp_vals.size() == 3 * kShots);
+
+    // Filtering complete rows independently checks both the survival flags and the
+    // compaction order without assuming that CPU and GPU RNG streams coincide.
+    SamplingSurvivorResult expected;
+    expected.total_shots = kShots;
+    expected.observable_ones.resize(1, 0);
+    for (uint32_t shot = 0; shot < kShots; ++shot) {
+        CAPTURE(shot);
+        REQUIRE(rows.detectors[shot] == rows.measurements[2 * shot]);
+        REQUIRE(rows.observables[shot] == rows.measurements[2 * shot + 1]);
+        REQUIRE_THAT(rows.exp_vals[3 * shot + 2],
+                     Catch::Matchers::WithinAbs(2.0 * rows.measurements[2 * shot + 1] - 1.0, 2e-5));
+        if (rows.detectors[shot] != 0) {
+            continue;
+        }
+        ++expected.passed_shots;
+        expected.logical_errors += rows.observables[shot];
+        expected.observable_ones[0] += rows.observables[shot];
+        expected.measurements.insert(expected.measurements.end(),
+                                     rows.measurements.begin() + 2 * shot,
+                                     rows.measurements.begin() + 2 * (shot + 1));
+        expected.detectors.push_back(rows.detectors[shot]);
+        expected.observables.push_back(rows.observables[shot]);
+        expected.exp_vals.insert(expected.exp_vals.end(), rows.exp_vals.begin() + 3 * shot,
+                                 rows.exp_vals.begin() + 3 * (shot + 1));
+    }
+    REQUIRE(expected.passed_shots > 0);
+    REQUIRE(expected.passed_shots < kShots);
+    REQUIRE(expected.logical_errors > 0);
+    REQUIRE(expected.logical_errors < expected.passed_shots);
+
+    for (const uint32_t batch_size : {kShots, uint32_t{127}}) {
+        Sampler sampler(executable, precision, batch_size, tier);
+        REQUIRE(sampler.execution_tier() == tier);
+        REQUIRE(sampler.max_batch_shots() <= batch_size);
+        const size_t allocated_bytes = sampler.allocated_device_bytes();
+        for (const bool keep_records : {false, true}) {
+            CAPTURE(batch_size, keep_records);
+            const SamplingSurvivorResult actual =
+                sampler.sample_survivors(kShots, keep_records, kSeed);
+            REQUIRE(actual.total_shots == expected.total_shots);
+            REQUIRE(actual.passed_shots == expected.passed_shots);
+            REQUIRE(actual.logical_errors == expected.logical_errors);
+            REQUIRE(actual.observable_ones == expected.observable_ones);
+            if (keep_records) {
+                REQUIRE(actual.measurements == expected.measurements);
+                REQUIRE(actual.detectors == expected.detectors);
+                REQUIRE(actual.observables == expected.observables);
+                REQUIRE(actual.exp_vals == expected.exp_vals);
+            } else {
+                REQUIRE(actual.measurements.empty());
+                REQUIRE(actual.detectors.empty());
+                REQUIRE(actual.observables.empty());
+                REQUIRE(actual.exp_vals.empty());
+            }
+            REQUIRE(sampler.allocated_device_bytes() == allocated_bytes);
+        }
     }
 }

@@ -44,15 +44,24 @@ in FP64 and `12 * 2^k` in FP32.
 | `block_shared` | the launch block | shared memory (LDS) | state fits the block's LDS budget: `k <= 11` on a 64 KB device, `k <= 12` on 160 KB, one width more in FP32 |
 | `block_global` | the launch block | global slab owned by the shot | everything wider |
 
-Selection is automatic from the peak active width, the coefficient precision and the
-device's per-block LDS budget. `selected_tier(executable, precision)` reports the choice
-without uploading anything, and `Sampler::execution_tier()` reports what a constructed
-sampler resolved. Forcing a tier is not supported yet; unlike CUDA there is no
-`ExecutionTier::Auto` enumerator, because there is nothing yet to distinguish it from.
+The default `ExecutionTier::Auto` selects from the peak active width, coefficient
+precision, and device's per-block LDS budget. C++ callers can force a tier through
+`SamplingOptions::tier`, the `Sampler` constructor, or `replay_shot`.
+`selected_tier(executable, precision)` reports the automatic choice without uploading
+anything, and `Sampler::execution_tier()` reports the resolved tier.
+
+In Python, pass `tier="auto"`, `"thread_per_shot"`, `"block_shared"`, or `"block_global"`
+to `hip.Sampler(program, tier=...)`. Use `hip.selected_tier(program, precision)` to
+query automatic selection and `sampler.tier` to inspect the resolved tier.
+
+A forced `block_shared` tier is rejected when the coefficient state plus reduction
+scratch exceeds the device's per-block shared-memory budget. The width-four cutoff
+is an automatic selection policy, so a forced `thread_per_shot` tier can also run
+wider plans. Global allocations remain subject to available device memory.
 
 Only the coefficient storage differs between the two block tiers. `thread_per_shot` also
-keeps its coefficients in a global slab; what makes it distinct is that one thread owns
-the whole shot, so the width is bounded by what a single thread can stream.
+keeps its coefficients in a global slab; one thread owns the whole shot and performs
+each dense traversal serially.
 
 #### Block size
 

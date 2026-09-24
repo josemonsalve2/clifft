@@ -436,9 +436,6 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
                     imag, scratch_real, scratch_imag);
                 break;
             case ActionTag::MeasureDormantRandom: {
-                // Same hazard as the active measurement: the correction reads this
-                // action's own branch symbol, so every lane must read it before any lane
-                // publishes.
                 const bool correction = evaluate(program, symbols, action.expression);
                 const bool branch = Replay ? (forced_records[action.index1] != 0) != correction
                                            : rng.next_double() >= 0.5;
@@ -471,9 +468,6 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
                     const double probability = source ? action.value1 : action.value0;
                     const bool flip = probability >= 1.0 ||
                                       (probability > 0.0 && rng.next_double() < probability);
-                    // Every lane draws the flip so the RNG advances identically, but the
-                    // record update is a read-modify-write: applied once per wavefront it
-                    // cancels, and an even lane count silently loses the flip entirely.
                     symbols[action.index0] = static_cast<uint8_t>(flip);
                     records[action.index1] ^= static_cast<uint8_t>(flip);
                 }
@@ -516,8 +510,7 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
 // ---------------------------------------------------------------------------
 // Cooperative tiers: one shot per workgroup.
 //
-// interpret_shots above bounds the active width by what a single thread can hold,
-// because it gives one shot to one thread. Here a whole workgroup owns one shot, so
+// interpret_shots above gives one shot to one thread. Here a whole workgroup owns one shot, so
 // the 2^k coefficient state lives either in LDS (BlockShared) or in a
 // per-workgroup global slab (BlockGlobal), and every dense traversal is split
 // across blockDim.x lanes. Three rules make that correct:
@@ -543,15 +536,13 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
 //     can clobber slot p while another lane still needs to read source(q) == p.
 // ---------------------------------------------------------------------------
 
-// Sum two FP64 accumulators across the workgroup, leaving the totals in every lane.
-// Requires blockDim.x to be a power of two, which the host launcher guarantees.
 // One shot per block means every lane runs the same action stream against ONE copy of
 // that shot's symbols, records and outputs. Two rules follow, and both are easy to
 // violate by writing what looks like ordinary scalar code:
 //
 //   1. A write to shared per-shot state needs a single writer. Lanes agree on the value,
-//      but a read-modify-write such as the readout-noise XOR is applied once per
-//      wavefront otherwise, and an even number of flips cancels.
+//      but concurrent read-modify-writes such as the readout-noise XOR can cancel
+//      depending on the interleaving.
 //   2. If an action reads a location it also writes, every lane must finish reading
 //      before any lane publishes. A barrier after the action is not enough; the hazard is
 //      inside the action.
@@ -563,6 +554,8 @@ struct CooperativeLane {
     __device__ __forceinline__ void sync() const { __syncthreads(); }
 };
 
+// Sum two FP64 accumulators across the workgroup, leaving the totals in every lane.
+// Requires blockDim.x to be a power of two, which the host launcher guarantees.
 __device__ __forceinline__ void reduce_two_sums(double* shared, double& first, double& second) {
     const uint32_t lane = threadIdx.x;
     const uint32_t width = blockDim.x;
