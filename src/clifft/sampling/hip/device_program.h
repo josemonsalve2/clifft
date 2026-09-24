@@ -43,19 +43,12 @@ inline constexpr uint64_t coefficient_elements_per_shot(uint32_t peak_active_wid
            2 * coefficient_scratch_capacity(peak_active_width);
 }
 
-// The block tiers give one shot to one block. The block size is chosen per launch and
-// may be any power of two from one wavefront up to kCooperativeBlockSize, which bounds
-// it because the reduction scratch below is sized at compile time. The power-of-two
-// requirement comes from the reduction itself: it halves the active lane count each step.
-// A block smaller than one wavefront leaves lanes of that wavefront permanently idle,
-// so it is the floor for the block tiers rather than a merely inefficient choice.
 inline constexpr uint32_t kWavefrontSize = 64;
 
+// Upper bound for block size and static reduction storage.
 inline constexpr uint32_t kCooperativeBlockSize = 256;
 
-// Static LDS the cooperative kernel always needs, independent of the coefficient state:
-// two FP64 accumulators per lane for the measurement probability reduction. Reductions
-// stay FP64 at every coefficient precision, so this does not shrink in FP32.
+// Reduction scratch uses FP64 even with FP32 coefficients.
 inline constexpr uint64_t kCooperativeReductionBytes =
     2ULL * kCooperativeBlockSize * sizeof(double);
 

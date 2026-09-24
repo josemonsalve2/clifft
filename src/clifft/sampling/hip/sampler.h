@@ -17,11 +17,7 @@ enum class CoefficientPrecision : uint8_t {
     FP32,
 };
 
-// Asks the backend to size the launch itself. Thread-per-shot packs independent shots
-// into a block and uses 256; the block tiers derive a size from the peak active width,
-// because a block wider than the state has pairs adds idle lanes and extra reduction
-// levels rather than parallelism -- measured 2.2x slower at k = 5..8 on gfx950 when a
-// flat 256 was used instead. Any other value is validated and used exactly as given.
+// Zero selects 256 threads for ThreadPerShot, or 64, 128, or 256 for block tiers.
 inline constexpr uint32_t kAutoBlockSize = 0;
 inline constexpr uint32_t kThreadPerShotBlockSize = 256;
 inline constexpr uint32_t kDefaultBlockSize = kAutoBlockSize;
@@ -30,8 +26,6 @@ inline constexpr uint32_t kDefaultMaxBatchShots = 65536;
 struct SamplingOptions {
     std::optional<uint64_t> seed = std::nullopt;
     CoefficientPrecision coefficient_precision = CoefficientPrecision::FP64;
-    // Auto resolves from the plan and device; an explicit tier is rejected when the plan
-    // does not fit it.
     ExecutionTier tier = ExecutionTier::Auto;
     uint32_t block_size = kDefaultBlockSize;
     uint32_t max_batch_shots = kDefaultMaxBatchShots;
@@ -47,9 +41,7 @@ struct ReplayResult {
 [[nodiscard]] bool is_available() noexcept;
 [[nodiscard]] std::string backend_info();
 
-// Reports the tier this executable would run on for the current device and precision,
-// without uploading anything. Tier choice depends on the device's shared-memory budget,
-// so a test that means to exercise a particular kernel has to ask rather than assume.
+// Reports the automatic tier for the current device without uploading the plan.
 [[nodiscard]] ExecutionTier selected_tier(
     const ExecutablePlan& executable,
     CoefficientPrecision coefficient_precision = CoefficientPrecision::FP64);

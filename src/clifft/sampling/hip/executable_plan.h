@@ -11,28 +11,13 @@
 
 namespace clifft::sampling::hip {
 
-// Execution tiers, selected by peak active width.
-//
-// These are the same three categories the CUDA backend uses, under the same names, so a
-// plan reasons about placement identically on either device. Capacity thresholds and lane
-// counts differ with the hardware; the categories do not.
-//
-// ThreadPerShot assigns a complete shot to one thread. Its coefficients still live in a
-// global slab owned by that shot, so the bound is what one thread can address and stream,
-// not a private-memory budget. The block tiers give a shot to a whole block instead: the
-// coefficients live either in on-chip shared memory, which is fast and capacity-limited,
-// or in a global slab, which is slower and bounded only by device memory.
-//
-// Per-shot coefficient storage is coefficient_elements_per_shot(k) = 3 * 2^k elements,
-// i.e. 24 * 2^k bytes in FP64 and 12 * 2^k bytes in FP32.
-// Auto resolves per plan and device. The explicit values force one tier and are rejected
-// when the plan cannot run on it, which lets a test exercise a specific kernel rather
-// than whichever one the device's capacity happens to select.
+// Auto selects from the active width, precision, and device memory limits.
+// Explicit tiers are rejected if the plan does not fit.
 enum class ExecutionTier : uint8_t {
     Auto,
-    ThreadPerShot,  // one shot per thread, coefficients in a global slab owned by the shot
-    BlockShared,    // one shot per block, coefficients in shared memory (LDS on AMD)
-    BlockGlobal,    // one shot per block, coefficients in a global slab
+    ThreadPerShot,  // one thread per shot, global coefficients
+    BlockShared,    // one block per shot, shared coefficients
+    BlockGlobal,    // one block per shot, global coefficients
 };
 
 [[nodiscard]] constexpr const char* tier_name(ExecutionTier tier) {
@@ -51,27 +36,21 @@ enum class ExecutionTier : uint8_t {
 
 inline constexpr uint32_t kThreadPerShotMaxActiveWidth = 4;
 
-// Widest plan any tier can hold. 2^30 coefficients already exceeds device memory at
-// every precision; the real limit is checked against the device at Sampler construction.
+// Device memory can impose a lower limit.
 inline constexpr uint32_t kMaxSupportedActiveWidth = 30;
 
-// Bytes of coefficient storage one shot needs at a given width and element size.
 [[nodiscard]] constexpr uint64_t coefficient_bytes_per_shot(uint32_t peak_active_width,
                                                             uint64_t element_bytes) {
     return detail::coefficient_elements_per_shot(peak_active_width) * element_bytes;
 }
 
-// Tier for one shot, given the element size and the device's per-workgroup LDS budget.
-// Precision is a property of the Sampler, not of the plan, so this is deliberately not
-// decided during lowering.
 [[nodiscard]] constexpr ExecutionTier select_execution_tier(uint32_t peak_active_width,
                                                             uint64_t element_bytes,
                                                             uint64_t lds_bytes_per_workgroup) {
     if (peak_active_width <= kThreadPerShotMaxActiveWidth) {
         return ExecutionTier::ThreadPerShot;
     }
-    // The reduction scratch is static LDS the cooperative kernel always occupies, so the
-    // coefficient state only gets what is left of the workgroup budget.
+    // Coefficients share LDS with the kernel's static reduction scratch.
     const uint64_t usable = lds_bytes_per_workgroup > detail::kCooperativeReductionBytes
                                 ? lds_bytes_per_workgroup - detail::kCooperativeReductionBytes
                                 : 0;
@@ -81,10 +60,8 @@ inline constexpr uint32_t kMaxSupportedActiveWidth = 30;
     return ExecutionTier::BlockGlobal;
 }
 
-// Whether a plan can run on a tier that was asked for rather than chosen. Thread-per-shot
-// has no width ceiling of its own -- its coefficients live in a global slab like
-// BlockGlobal's, and the automatic cutoff at kThreadPerShotMaxActiveWidth is a
-// performance choice -- so only BlockShared can fail, and only on capacity.
+// The automatic thread-per-shot cutoff does not restrict forced tiers.
+// Only BlockShared requires the state to fit per-block shared memory.
 [[nodiscard]] constexpr bool tier_supports(ExecutionTier tier, uint32_t peak_active_width,
                                            uint64_t element_bytes,
                                            uint64_t lds_bytes_per_workgroup) {

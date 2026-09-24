@@ -322,8 +322,7 @@ __device__ double expectation_value(const Action& action, const Coefficient* rea
     return result;
 }
 
-// is_writer lets the cooperative kernel keep the RNG advancing identically in every lane
-// while a single lane performs the stores. The thread-per-shot kernel passes true.
+// All lanes must advance the RNG together, even though only one writes symbols.
 __device__ __forceinline__ void sample_noise(const ProgramView& program, Xoshiro256PlusPlus& rng,
                                              uint8_t* symbols, bool is_writer) {
     for (uint32_t site_index = 0; site_index < program.noise_site_count; ++site_index) {
@@ -507,55 +506,14 @@ __global__ void interpret_shots(ProgramView program, SeedRoot seed_root, uint64_
     survived[shot] = static_cast<uint8_t>(reachable && !discarded);
 }
 
-// ---------------------------------------------------------------------------
-// Cooperative tiers: one shot per workgroup.
-//
-// interpret_shots above gives one shot to one thread. Here a whole workgroup owns one shot, so
-// the 2^k coefficient state lives either in LDS (BlockShared) or in a
-// per-workgroup global slab (BlockGlobal), and every dense traversal is split
-// across blockDim.x lanes. Three rules make that correct:
-//
-//  1. Scalar bookkeeping -- symbols, records, detectors, observables and the RNG --
-//     runs REDUNDANTLY in every lane. Each lane seeds its own RNG from the global
-//     shot index and consumes it identically, because every branch condition comes
-//     from a workgroup-wide reduction and is therefore uniform. That keeps the
-//     documented "RNG uses the global shot index" invariant with no broadcast, and
-//     keeps the loop's break conditions uniform so __syncthreads is never reached by
-//     a subset of the workgroup. Lanes agree on the values, but they do not write them:
-//     every store to shared per-shot state goes through CooperativeLane::is_writer, and
-//     an action that reads a location it also writes synchronises first. See the type's
-//     comment for why agreement alone is not enough.
-//
-//  2. Probability and expectation reductions accumulate in FP64 whatever the
-//     coefficient precision, matching the backend's stated invariant.
-//
-//  3. Measurement collapse ALWAYS routes through scratch, including the diagonal
-//     case which the serial kernel compacts in place. That in-place gather is
-//     justified by "each selected source is at or above its packed destination" --
-//     true only under serial order. In a workgroup the lane writing destination p
-//     can clobber slot p while another lane still needs to read source(q) == p.
-// ---------------------------------------------------------------------------
-
-// One shot per block means every lane runs the same action stream against ONE copy of
-// that shot's symbols, records and outputs. Two rules follow, and both are easy to
-// violate by writing what looks like ordinary scalar code:
-//
-//   1. A write to shared per-shot state needs a single writer. Lanes agree on the value,
-//      but concurrent read-modify-writes such as the readout-noise XOR can cancel
-//      depending on the interleaving.
-//   2. If an action reads a location it also writes, every lane must finish reading
-//      before any lane publishes. A barrier after the action is not enough; the hazard is
-//      inside the action.
-//
-// The CUDA backend carries the same discipline in its Lane type. The names match so the
-// two backends read alike.
+// All lanes share symbols, records, and outputs. Serialize writes and
+// synchronize before overwriting values that other lanes may still read.
 struct CooperativeLane {
     [[nodiscard]] __device__ __forceinline__ bool is_writer() const { return threadIdx.x == 0; }
     __device__ __forceinline__ void sync() const { __syncthreads(); }
 };
 
-// Sum two FP64 accumulators across the workgroup, leaving the totals in every lane.
-// Requires blockDim.x to be a power of two, which the host launcher guarantees.
+// Every lane receives both sums. blockDim.x must be a power of two.
 __device__ __forceinline__ void reduce_two_sums(double* shared, double& first, double& second) {
     const uint32_t lane = threadIdx.x;
     const uint32_t width = blockDim.x;
@@ -615,9 +573,8 @@ __device__ void apply_rotation_coop(const Action& action, bool sign, Coefficient
     const Coefficient base_phase =
         static_cast<Coefficient>(real_phase ? action.phase_real : action.phase_imag);
     const Coefficient even_left_sine = sine * base_phase;
-    // The serial kernel walks (block, offset) nests whose left indices are exactly the
-    // indices with the pairing bit clear. insert_zero_bit enumerates that same set from a
-    // flat pair id, so lanes can take a strided slice of it.
+    // Each XOR pair has one index with the pairing bit clear. insert_zero_bit
+    // maps consecutive pair IDs to those indices.
     const uint32_t pair_bit =
         static_cast<uint32_t>(__ffsll(static_cast<unsigned long long>(action.pair_stride)) - 1);
     const uint64_t pairs = size >> 1;
@@ -651,7 +608,6 @@ __device__ void apply_promotion_coop(const Action& action, bool sign, Coefficien
     const Coefficient cosine = static_cast<Coefficient>(action.value0);
     const Coefficient sine =
         sign ? -static_cast<Coefficient>(action.value1) : static_cast<Coefficient>(action.value1);
-    // Each lane owns basis and old_size + basis, so the halves never collide.
     for (uint64_t basis = threadIdx.x; basis < old_size; basis += blockDim.x) {
         const Coefficient input_real = real[basis];
         const Coefficient input_imag = imag[basis];
@@ -718,8 +674,6 @@ __device__ bool measure_active_coop(const ProgramView& program, const Action& ac
             probability_one += norm(compact_nondiagonal(action, real, imag, packed, true));
         }
     }
-    // Every lane leaves with the same totals, so the branch below is uniform and the RNG
-    // is consumed identically in all lanes.
     reduce_two_sums(reduction, probability_zero, probability_one);
 
     const double total = probability_zero + probability_one;
@@ -727,12 +681,9 @@ __device__ bool measure_active_coop(const ProgramView& program, const Action& ac
     const CooperativeLane lane;
     bool branch;
     if constexpr (Replay) {
-        // The lowered outcome is the sign correction XOR this action's own branch symbol,
-        // so every lane must read that symbol while it still holds the pre-action value.
-        // Lane 0 publishes it below; without this barrier a lagging lane reads the
-        // published value, cancels it out of the correction and selects the opposite
-        // branch, then disagrees about reachability and strands lanes at different
-        // barriers. Restricting the write to lane 0 alone does not fix this.
+        // The expression includes this action's branch symbol. All lanes must
+        // read its old value before lane 0 writes it, or they may choose
+        // different branches and diverge at a barrier.
         const bool correction = evaluate(program, symbols, action.expression);
         branch = (forced_records[action.index1] != 0) != correction;
         lane.sync();
@@ -754,15 +705,14 @@ __device__ bool measure_active_coop(const ProgramView& program, const Action& ac
     }
     const double selected_probability = branch ? probability_one : probability_zero;
     const double inverse_norm = 1.0 / sqrt(selected_probability);
-    // Single writer, and the record is derived from the symbol this same statement
-    // publishes, so both must come from one lane to stay self-consistent.
     if (lane.is_writer()) {
         symbols[action.index0] = static_cast<uint8_t>(branch);
         records[action.index1] =
             static_cast<uint8_t>(evaluate(program, symbols, action.expression));
     }
 
-    // Collapse into scratch first -- see rule 3 at the top of this section.
+    // In-place compaction can overwrite another lane's unread source.
+    // Gather into scratch before copying back.
     if (action.x == 0) {
         for (uint64_t packed = threadIdx.x; packed < output_size; packed += blockDim.x) {
             const uint64_t without_pivot = insert_zero_bit(packed, action.index2);
@@ -860,6 +810,8 @@ __global__ void interpret_shots_cooperative(ProgramView program, SeedRoot seed_r
     }
     __syncthreads();
 
+    // Each lane uses the same random stream. Branches must agree across the
+    // block so no lane skips a barrier.
     const CooperativeLane lane;
     Xoshiro256PlusPlus rng = shot_rng(seed_root, shot_offset + shot);
     if constexpr (!Replay) {
@@ -963,9 +915,8 @@ __global__ void interpret_shots_cooperative(ProgramView program, SeedRoot seed_r
                 break;
             }
         }
-        // One barrier per action. Consecutive dense actions partition the coefficient
-        // array differently, so a lane may read indices another lane just wrote. The
-        // break conditions below are uniform, so every lane reaches this barrier.
+        // The next action may assign coefficients to different lanes.
+        // Finish all writes before it starts.
         __syncthreads();
         if (!reachable || discarded) {
             break;
@@ -1188,21 +1139,10 @@ struct UploadedProgram {
     }
 };
 
-// The block tiers reduce measurement probabilities across the block, and that tree
-// reduction halves the active lane count, so the block size must be a power of two no
-// larger than the static reduction scratch. A request outside that is rejected rather
-// than quietly replaced, so a caller tuning launch geometry is never lied to.
-// Tier depends on the coefficient element size and the device's per-block shared-memory
-// budget, neither of which is known while lowering. Sampler::Impl and the public
-// selected_tier both route here, so a caller's query can never disagree with the tier the
-// Sampler actually runs.
 ExecutionTier resolve_execution_tier(uint32_t peak_active_width, CoefficientPrecision precision,
                                      ExecutionTier requested = ExecutionTier::Auto) {
     const uint64_t element_bytes =
         precision == CoefficientPrecision::FP32 ? sizeof(float) : sizeof(double);
-    // A failed query used to fall through as a zero shared-memory budget, which silently
-    // reports block_global for every wide plan on a host with no device. Report the
-    // failure instead: an unanswerable question is not the same as an answer.
     int device = 0;
     hipDeviceProp_t properties{};
     check_hip(hipGetDevice(&device), "device query");
@@ -1312,16 +1252,10 @@ class Sampler::Impl {
           host_exp_vals(checked_elements(max_batch, source.num_exp_vals(), "host expectation")),
           host_survived(max_batch) {}
 
-    // The LDS tier holds the coefficient state on chip for the lifetime of a workgroup,
-    // so it needs no global slab -- which is otherwise the dominant allocation.
     static bool needs_global_coefficients(ExecutionTier resolved) {
         return resolved != ExecutionTier::BlockShared;
     }
 
-    // On the global tier the retained workspace is max_batch * 24 * 2^k bytes, which at
-    // k = 20 is 1.5 TB for the default 65536-shot batch. The batch is therefore clamped to
-    // what the device can actually hold; larger requests simply run as more batches, which
-    // does not change seeded rows because the RNG keys off the global shot index.
     static uint32_t effective_max_batch(const ExecutablePlan& source,
                                         CoefficientPrecision selected_precision,
                                         ExecutionTier resolved, uint32_t requested) {
@@ -1330,9 +1264,6 @@ class Sampler::Impl {
         }
         const uint64_t element_bytes =
             selected_precision == CoefficientPrecision::FP32 ? sizeof(float) : sizeof(double);
-        // Every retained buffer scales with the batch, not just the coefficients. Counting
-        // only the coefficients and leaving a fixed allowance for the rest fails whenever
-        // the rest exceed that allowance, which rejects a batch that would have fit.
         const uint64_t per_shot =
             detail::coefficient_elements_per_shot(source.peak_active_width()) * element_bytes +
             source.num_symbols() + source.num_records() + source.num_records() +
@@ -1344,8 +1275,7 @@ class Sampler::Impl {
         size_t free_bytes = 0;
         size_t total_bytes = 0;
         check_hip(hipMemGetInfo(&free_bytes, &total_bytes), "device memory query");
-        // Remaining headroom covers driver allocations and fragmentation, not per-shot
-        // storage, which is now accounted for above.
+        // Leave room for driver allocations and fragmentation.
         const uint64_t budget = static_cast<uint64_t>(static_cast<double>(free_bytes) * 0.6);
         uint64_t affordable = budget / per_shot;
         if (affordable == 0) {
@@ -1370,10 +1300,7 @@ class Sampler::Impl {
     void run_replay(std::span<const uint8_t> input) {
         forced_records.upload(input);
         const detail::SeedRoot empty_root{};
-        // Replay is one shot, so thread-per-shot wants a single thread. The block tiers
-        // split that shot across the block instead, and passing the same literal there
-        // launches one lane: correct, but serialized, and it means a cooperative kernel is
-        // never actually exercised across lanes by replay.
+        // Cooperative replay still needs a full block for its single shot.
         const uint32_t replay_block =
             tier == ExecutionTier::ThreadPerShot ? 1U : kAutoBlockSize;
         if (precision == CoefficientPrecision::FP32) {
@@ -1438,9 +1365,6 @@ class Sampler::Impl {
                                observables.data(), exp_vals.data(), log_probabilities.data(),
                                reachable.data(), survived.data());
         } else {
-            // One block per shot. The block is also the reduction width, so the caller's
-            // request is honoured within the domain the reduction can support rather than
-            // being silently overridden; validate_launch_block_size rejects the rest.
             const uint32_t lanes =
                 cooperative_block_size(block_size, program.view.peak_active_width);
             const bool in_lds = tier == ExecutionTier::BlockShared;
@@ -1460,12 +1384,7 @@ class Sampler::Impl {
         check_hip(hipDeviceSynchronize(), "kernel execution");
     }
 
-    // Power of two (the workgroup reduction halves lanes each step), at least one
-    // wavefront, never more than the pair count a rotation can actually keep busy.
-    // On the block tiers the block size IS the reduction width, so it must be a power of
-    // two the static reduction scratch can hold; validate_launch_block_size has already
-    // rejected anything else. kAutoBlockSize derives a size instead: a block wider than
-    // the state has pairs only adds idle lanes and reduction levels.
+    // Extra lanes add reduction steps without adding coefficient work.
     static uint32_t cooperative_block_size(uint32_t requested, uint32_t peak_active_width) {
         if (requested != kAutoBlockSize) {
             return requested;

@@ -199,11 +199,7 @@ def _tier_name(value: object) -> Tier:
 
 
 def selected_tier(program: Program, precision: Precision = "fp64") -> Tier:
-    """Tier this program would run on for the current device and precision.
-
-    Tier choice depends on the device's shared-memory budget, so a test that means
-    to exercise a particular kernel has to ask rather than assume.
-    """
+    """Return the automatic tier for the current device and precision."""
     native = _require_native()
     return _tier_name(native.selected_tier(program._native, _precision_value(precision)))
 
@@ -244,7 +240,7 @@ class Sampler:
 
     @property
     def tier(self) -> Tier:
-        """The tier this sampler resolved, which "auto" leaves to the device."""
+        """Return the resolved execution tier; never ``"auto"``."""
         return _tier_name(self._native.execution_tier)
 
     @property

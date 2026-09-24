@@ -186,10 +186,6 @@ TEST_CASE("HIP executable flattens shared Pauli preparation") {
 TEST_CASE("HIP executable lowers widths beyond the first device tier") {
     using Catch::Matchers::ContainsSubstring;
 
-    // Lowering is width-independent: the packed action stream is the same whichever tier
-    // runs it, so a width the thread-per-shot tier cannot hold must still lower cleanly.
-    // Tier selection needs the precision and the device LDS budget, so it happens in the
-    // Sampler, not here.
     SamplingPlan wide;
     wide.num_qubits = 5;
     wide.initial_active_width = 5;
@@ -197,7 +193,6 @@ TEST_CASE("HIP executable lowers widths beyond the first device tier") {
     const ExecutablePlan lowered(wide);
     REQUIRE(lowered.peak_active_width() == 5);
 
-    // Only a width no tier could ever hold is rejected during lowering.
     SamplingPlan absurd;
     absurd.num_qubits = kMaxSupportedActiveWidth + 1;
     absurd.initial_active_width = kMaxSupportedActiveWidth + 1;
@@ -215,8 +210,6 @@ TEST_CASE("HIP executable identifies cultivation cooperative width") {
 
     REQUIRE(plan.peak_active_width == 10);
 
-    // k = 10 exceeds the thread-per-shot tier but its state is only 24 KB in FP64, so it
-    // belongs to the LDS tier on any supported device.
     const ExecutablePlan lowered(plan);
     REQUIRE(lowered.peak_active_width() == 10);
     REQUIRE(select_execution_tier(10, sizeof(double), 64u * 1024u) == ExecutionTier::BlockShared);
@@ -229,23 +222,21 @@ TEST_CASE("HIP tier selection follows the coefficient storage budget") {
     REQUIRE(coefficient_bytes_per_shot(12, sizeof(double)) == 96u * 1024u);
 
     constexpr uint64_t kLds64 = 64u * 1024u;    // gfx942
-    constexpr uint64_t kLds160 = 160u * 1024u;  // gfx950, measured
+    constexpr uint64_t kLds160 = 160u * 1024u;  // gfx950
 
     // Narrow plans stay on the thread-per-shot tier regardless of budget.
     REQUIRE(select_execution_tier(4, sizeof(double), kLds64) == ExecutionTier::ThreadPerShot);
     REQUIRE(select_execution_tier(4, sizeof(float), 0) == ExecutionTier::ThreadPerShot);
 
-    // FP64 fits LDS through k = 11 on a 64 KB device, k = 12 on a 160 KB device.
     REQUIRE(select_execution_tier(11, sizeof(double), kLds64) == ExecutionTier::BlockShared);
     REQUIRE(select_execution_tier(12, sizeof(double), kLds64) == ExecutionTier::BlockGlobal);
     REQUIRE(select_execution_tier(12, sizeof(double), kLds160) == ExecutionTier::BlockShared);
     REQUIRE(select_execution_tier(13, sizeof(double), kLds160) == ExecutionTier::BlockGlobal);
 
-    // FP32 halves the state, buying exactly one more width at each budget.
+    // FP32 fits one more active coordinate in the same memory.
     REQUIRE(select_execution_tier(12, sizeof(float), kLds64) == ExecutionTier::BlockShared);
     REQUIRE(select_execution_tier(13, sizeof(float), kLds160) == ExecutionTier::BlockShared);
 
-    // Widths whose coefficient state cannot fit any workgroup budget land on the global tier.
     REQUIRE(select_execution_tier(20, sizeof(double), kLds160) == ExecutionTier::BlockGlobal);
     REQUIRE(select_execution_tier(23, sizeof(double), kLds160) == ExecutionTier::BlockGlobal);
 }
